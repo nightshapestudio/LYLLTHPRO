@@ -2,6 +2,8 @@
 
 LYLLTH is a native macOS audio workstation by NIGHTSHAPE: the larger desktop counterpart to NIGHTSHAPE DRUMKIT, not a stretched iPhone interface.
 
+The current visual language and desktop adaptation rules are documented in `DESIGN_SYSTEM.md`.
+
 ## What this foundation already does
 
 - Builds as a native SwiftUI macOS app.
