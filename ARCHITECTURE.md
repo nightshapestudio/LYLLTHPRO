@@ -16,6 +16,49 @@ The existing `NightshapeAudioEngine` already builds for macOS and supplies the v
 - track and MAIN effects: EQUALIZER, COMPRESSOR, TAPE SATURATION, SONIC DECIMATOR, CHORUS, PLATE REVERB, SIGNAL BLOOM, PUMP, VOID GATE, FRACTURE, FILTER, DELAY, DEADLOCK, SHEAR, STACK, SPLIT FIELD, UNDERTOW, ANVIL, STRIKE, and FINALE
 - offline rendering, output capture, MIDI export, meters, and waveform snapshots
 
+The existing rendered Drum Synth library remains compatible content for phone-originated drum tracks. It is not the architecture for LYLLTH's flagship synthesizer.
+
+## LYLLTH Synth: real-time by design
+
+LYLLTH Synth is a new instrument, not a larger wrapper around `DrumSynthRenderer` or its rendered-preset cache. MIDI and automation events enter the live audio graph at sample-accurate offsets; every active voice generates audio in the render callback. Changing a wavetable position, warp, filter, envelope, macro, or modulation route must be audible continuously without regenerating a WAV.
+
+Pre-rendering is allowed only for explicit workflows such as bounce, freeze, flatten, export, waveform analysis, and optional browser previews. Those files are derivatives of the patch and performance, never the authoritative playable state.
+
+The current `SynthEngine` is useful reference scaffolding: it already has a realtime-safe event queue, eight-voice allocation, two PolyBLEP oscillators, envelopes, a ladder-style filter, LFO, unison, FM, and a source-node render callback. Its fixed voice count, fixed parameter snapshot, limited oscillator models, and single-destination modulation design are not a Serum-grade foundation. LYLLTH Synth therefore gets a separate portable core instead of growing that class indefinitely.
+
+### Product form
+
+The same versioned synth core serves two products:
+
+1. A built-in LYLLTH instrument that participates directly in the document-scoped graph and does not require a plug-in wrapper.
+2. A separately packaged Audio Unit and VST3 instrument so the LYLLTH sound engine can later run in third-party hosts.
+
+The realtime DSP and patch schema must not import SwiftUI, AppKit, AVFoundation, or host-specific plug-in APIs. The LYLLTH host, AU adapter, and VST3 adapter translate their event, parameter, state, and bus models into that core. A C++ DSP boundary is the practical long-term choice for the VST3 target; SwiftUI remains appropriate for the LYLLTH editor and macOS-facing shell.
+
+### Capability target
+
+“Serum-grade” means professional sound quality, modulation depth, visual feedback, and sound-design speed. It does not mean cloning Serum's interface, factory content, names, or implementation. The target includes:
+
+- three stereo-capable oscillator slots with wavetable, sample, multisample, granular, and spectral/resynthesis modes delivered in stages
+- band-limited/mipmapped wavetable playback, smooth frame interpolation, import, drawing, FFT resynthesis, morphing, and nondestructive editing
+- per-oscillator unison, stereo spread, phase/random phase, coarse/fine tuning, FM, phase distortion, ring/amplitude modulation, sync, and dual warp stages
+- sub and noise sources, flexible oscillator-to-filter routing, and dual multimode filters
+- polyphonic modulation with multiple envelopes and LFOs, macros, velocity, key tracking, aftertouch, MPE, note expressions, drag-to-route assignments, a matrix, and clear modulation visualization
+- a fixed-capacity voice/event architecture with configurable polyphony, deterministic voice stealing, sample-accurate automation, denormal protection, and no allocation, locks, logging, or file access in the render callback
+- oversampling only around nonlinear or alias-prone stages, with selectable quality modes and measurable CPU budgets rather than blanket oversampling
+- the existing NIGHTSHAPE effects as live post-synth inserts where their realtime implementations are suitable, followed by a synth-specific effects rack and flexible routing
+- patch compatibility, migration, missing-resource handling, embedded user wavetables/samples, undo, and complete state restoration
+
+### Synth delivery gates
+
+1. **Realtime kernel:** event protocol, fixed voice pool, oscillator interface, patch snapshots, deterministic render harness, silence/NaN/denormal checks, and realtime-safety instrumentation.
+2. **Wavetable instrument:** band-limited tables, morph interpolation, stereo unison, dual filters, envelopes/LFOs/macros, automation, MIDI/MPE, preset save/restore, and a playable editor.
+3. **Sound-design system:** wavetable import/editor, modulation matrix and visualizers, effect routing, undo, asset embedding, performance profiling, and a serious factory bank.
+4. **Hybrid synthesis:** sample/multisample, granular, and spectral modes added without changing the realtime contract.
+5. **Plug-in products:** AU first, then VST3 through the Steinberg SDK, sharing the same DSP/state compatibility tests as the built-in instrument.
+
+Acceptance is based on live playing and automation under load, preset/state recall, deterministic offline/live parity within defined tolerances, aliasing and modulation measurements, stress tests, and listening. A screen that resembles a commercial synth is not completion evidence.
+
 The iPhone SwiftUI layer is not reused wholesale. It contains UIKit-specific gestures, fixed phone geometry, and a focused 16-track instrument workflow. LYLLTH gets macOS-native keyboard, pointer, window, menu, drag-and-drop, document, and accessibility behavior.
 
 ## Required engine evolution
@@ -91,6 +134,13 @@ Backward compatibility rule: when DrumKit opens a song containing Mac-only track
 - MIDI note editor and quantize
 - undo/redo and autosave
 
+### Milestone 2S — realtime LYLLTH Synth
+
+- portable realtime synth kernel and versioned patch format
+- wavetable oscillator path, voice allocation, filters, modulation graph, macros, MIDI/MPE, and automation
+- built-in synth editor, preset browser, asset embedding, and NIGHTSHAPE effects routing
+- live/offline parity, realtime-safety, CPU, aliasing, stress, and listening gates
+
 ### Milestone 3 — mixer and native plug-ins
 
 - dynamic routing, buses, sends, sidechains, pre/post fader points
@@ -100,7 +150,8 @@ Backward compatibility rule: when DrumKit opens a song containing Mac-only track
 
 ### Milestone 4 — VST3 and finishing
 
-- Steinberg SDK host bridge and scanner
+- Steinberg SDK host bridge and scanner for third-party plug-ins
+- LYLLTH Synth VST3 instrument target backed by the same portable synth core
 - VST3 instruments/effects, editor windows, automation, state restore
 - freeze/flatten, stem export, offline bounce, project collection
 - performance profiling, recovery tests, notarization, device-to-Mac transfer testing
