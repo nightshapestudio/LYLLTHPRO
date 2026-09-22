@@ -1,0 +1,53 @@
+name: LYLLTH
+
+options:
+  bundleIdPrefix: net.nightshape
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "14.0"
+
+packages:
+  NightshapeAudioEngine:
+    path: ../nightshape-drumkit-ios/NightshapeAudioEngine
+
+targets:
+  LYLLTH:
+    type: application
+    platform: macOS
+    sources:
+      - path: LYLLTH
+    dependencies:
+      - package: NightshapeAudioEngine
+        product: NightshapeAudioEngine
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.nightshape.lyllth
+        PRODUCT_NAME: LYLLTH
+        INFOPLIST_FILE: LYLLTH/Info.plist
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+
+  LYLLTHTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: LYLLTHTests
+    dependencies:
+      - target: LYLLTH
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.nightshape.lyllth.tests
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+schemes:
+  LYLLTH:
+    build:
+      targets:
+        LYLLTH: all
+        LYLLTHTests: [test]
+    test:
+      targets:
+        - LYLLTHTests

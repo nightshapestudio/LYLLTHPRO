@@ -1,0 +1,491 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0CEC7DBA1215E7248215069A /* LYLLTHTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */; };
+		1F234EB5BBD5FB513736A650 /* NightshapeAudioEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 167D8076867A0FD15A3749D3 /* NightshapeAudioEngine */; };
+		6F3A38A7891F6397397D6048 /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */; };
+		7DF88DF9F126EE98522AAD31 /* AudioUnitCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90BF7073365CA38A142C3FA5 /* AudioUnitCatalog.swift */; };
+		865DADC7F42A9E3484ABCDAD /* LYLLTHApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */; };
+		BEDFD504AE4AD5C9E2F9D00E /* SessionDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */; };
+		C5FC2050CF73E1D9599F3518 /* AudioEngineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC518B98C5E542E07745D166 /* AudioEngineController.swift */; };
+		C619A497E1A0A6EEAEC62A38 /* SessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D2710D240A4FA97144EC0A9 /* SessionModels.swift */; };
+		F3072584030C31119C4860C6 /* LYLLTHSessionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		FDFEA3E4D80AEE38DA1ABCEE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C7C43796E74D4EA3417CDB36 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 26929814AE213AE5513C6D36;
+			remoteInfo = LYLLTH;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		1F14758F6049E1F10613908E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		35CE53FE7A1928E34EFCCC92 /* LYLLTH.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LYLLTH.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5D2710D240A4FA97144EC0A9 /* SessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModels.swift; sourceTree = "<group>"; };
+		90BF7073365CA38A142C3FA5 /* AudioUnitCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitCatalog.swift; sourceTree = "<group>"; };
+		960F211F505A6A045668116C /* LYLLTHTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LYLLTHTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYLLTHApp.swift; sourceTree = "<group>"; };
+		CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDocumentTests.swift; sourceTree = "<group>"; };
+		D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYLLTHSessionDocument.swift; sourceTree = "<group>"; };
+		D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
+		DEAA1E35780E10604349C74F /* NightshapeAudioEngine */ = {isa = PBXFileReference; lastKnownFileType = folder; name = NightshapeAudioEngine; path = "../nightshape-drumkit-ios/NightshapeAudioEngine"; sourceTree = SOURCE_ROOT; };
+		EC518B98C5E542E07745D166 /* AudioEngineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngineController.swift; sourceTree = "<group>"; };
+		F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYLLTHTheme.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		CDE0433D07E39ED6E444AE9D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1F234EB5BBD5FB513736A650 /* NightshapeAudioEngine in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0E7EF4FA1A9AE3442B86B6DD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				35CE53FE7A1928E34EFCCC92 /* LYLLTH.app */,
+				960F211F505A6A045668116C /* LYLLTHTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		316CA0BA6DF09C2F108155C1 = {
+			isa = PBXGroup;
+			children = (
+				E5608A2A3E1F97D7BA44E634 /* LYLLTH */,
+				9385064ED7CD067273BE87BA /* LYLLTHTests */,
+				550C88F7AC5A0D3C95881789 /* Packages */,
+				0E7EF4FA1A9AE3442B86B6DD /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		550C88F7AC5A0D3C95881789 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				DEAA1E35780E10604349C74F /* NightshapeAudioEngine */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		6EABB5D49C503BD1666E4A91 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */,
+				5D2710D240A4FA97144EC0A9 /* SessionModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		9385064ED7CD067273BE87BA /* LYLLTHTests */ = {
+			isa = PBXGroup;
+			children = (
+				CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */,
+			);
+			path = LYLLTHTests;
+			sourceTree = "<group>";
+		};
+		DBBEA465A998CDDEAC4110FA /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		E2D8A290EA9475CB51BA354E /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		E5608A2A3E1F97D7BA44E634 /* LYLLTH */ = {
+			isa = PBXGroup;
+			children = (
+				1F14758F6049E1F10613908E /* Info.plist */,
+				CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */,
+				F69CF9D8A42990C09A6077A6 /* Audio */,
+				6EABB5D49C503BD1666E4A91 /* Models */,
+				E2D8A290EA9475CB51BA354E /* Theme */,
+				DBBEA465A998CDDEAC4110FA /* Views */,
+			);
+			path = LYLLTH;
+			sourceTree = "<group>";
+		};
+		F69CF9D8A42990C09A6077A6 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				EC518B98C5E542E07745D166 /* AudioEngineController.swift */,
+				90BF7073365CA38A142C3FA5 /* AudioUnitCatalog.swift */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0C49A6CE6FF0DFCED6957ED1 /* LYLLTHTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 14DE57CE3ECF42DF53DBD3EC /* Build configuration list for PBXNativeTarget "LYLLTHTests" */;
+			buildPhases = (
+				BA361C9CFDA8F1A5359B5BE6 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				3EFDABAD432E94B0A98F1478 /* PBXTargetDependency */,
+			);
+			name = LYLLTHTests;
+			packageProductDependencies = (
+			);
+			productName = LYLLTHTests;
+			productReference = 960F211F505A6A045668116C /* LYLLTHTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		26929814AE213AE5513C6D36 /* LYLLTH */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B9E4BACCD5B23E91ADEB7BD3 /* Build configuration list for PBXNativeTarget "LYLLTH" */;
+			buildPhases = (
+				F16727897211EF96E117327D /* Sources */,
+				CDE0433D07E39ED6E444AE9D /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LYLLTH;
+			packageProductDependencies = (
+				167D8076867A0FD15A3749D3 /* NightshapeAudioEngine */,
+			);
+			productName = LYLLTH;
+			productReference = 35CE53FE7A1928E34EFCCC92 /* LYLLTH.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C7C43796E74D4EA3417CDB36 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					26929814AE213AE5513C6D36 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 940678BEB84464A91AC6C103 /* Build configuration list for PBXProject "LYLLTH" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 316CA0BA6DF09C2F108155C1;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1F8B1A065E42BD6AAFD02173 /* XCLocalSwiftPackageReference "../nightshape-drumkit-ios/NightshapeAudioEngine" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 0E7EF4FA1A9AE3442B86B6DD /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				26929814AE213AE5513C6D36 /* LYLLTH */,
+				0C49A6CE6FF0DFCED6957ED1 /* LYLLTHTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BA361C9CFDA8F1A5359B5BE6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BEDFD504AE4AD5C9E2F9D00E /* SessionDocumentTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F16727897211EF96E117327D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C5FC2050CF73E1D9599F3518 /* AudioEngineController.swift in Sources */,
+				7DF88DF9F126EE98522AAD31 /* AudioUnitCatalog.swift in Sources */,
+				865DADC7F42A9E3484ABCDAD /* LYLLTHApp.swift in Sources */,
+				F3072584030C31119C4860C6 /* LYLLTHSessionDocument.swift in Sources */,
+				0CEC7DBA1215E7248215069A /* LYLLTHTheme.swift in Sources */,
+				C619A497E1A0A6EEAEC62A38 /* SessionModels.swift in Sources */,
+				6F3A38A7891F6397397D6048 /* WorkspaceView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		3EFDABAD432E94B0A98F1478 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 26929814AE213AE5513C6D36 /* LYLLTH */;
+			targetProxy = FDFEA3E4D80AEE38DA1ABCEE /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		39ADDC7950BC8D43A3FDF1BF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = LYLLTH/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = net.nightshape.lyllth;
+				PRODUCT_NAME = LYLLTH;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		60253A43A3B8BDDA3DD3ABB1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = LYLLTH/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = net.nightshape.lyllth;
+				PRODUCT_NAME = LYLLTH;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		6A5F08B9835C9050F3359636 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = net.nightshape.lyllth.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LYLLTH.app/Contents/MacOS/LYLLTH";
+			};
+			name = Release;
+		};
+		A8753D6BFFFF4CD56C70438D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		F1BBAE5AB3B17C40EF05CF25 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = net.nightshape.lyllth.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LYLLTH.app/Contents/MacOS/LYLLTH";
+			};
+			name = Debug;
+		};
+		FFBD3C1F0DFFB7259D9A35BB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		14DE57CE3ECF42DF53DBD3EC /* Build configuration list for PBXNativeTarget "LYLLTHTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F1BBAE5AB3B17C40EF05CF25 /* Debug */,
+				6A5F08B9835C9050F3359636 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		940678BEB84464A91AC6C103 /* Build configuration list for PBXProject "LYLLTH" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A8753D6BFFFF4CD56C70438D /* Debug */,
+				FFBD3C1F0DFFB7259D9A35BB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B9E4BACCD5B23E91ADEB7BD3 /* Build configuration list for PBXNativeTarget "LYLLTH" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				39ADDC7950BC8D43A3FDF1BF /* Debug */,
+				60253A43A3B8BDDA3DD3ABB1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1F8B1A065E42BD6AAFD02173 /* XCLocalSwiftPackageReference "../nightshape-drumkit-ios/NightshapeAudioEngine" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../nightshape-drumkit-ios/NightshapeAudioEngine";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		167D8076867A0FD15A3749D3 /* NightshapeAudioEngine */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NightshapeAudioEngine;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = C7C43796E74D4EA3417CDB36 /* Project object */;
+}
