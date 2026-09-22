@@ -5,6 +5,10 @@ struct LYLLTHApp: App {
     @StateObject private var audio = AudioEngineController()
     @StateObject private var plugins = AudioUnitCatalog()
 
+    init() {
+        FontRegistrar.registerBundledFonts()
+    }
+
     var body: some Scene {
         DocumentGroup(newDocument: LYLLTHSessionDocument()) { configuration in
             WorkspaceView(document: configuration.$document)

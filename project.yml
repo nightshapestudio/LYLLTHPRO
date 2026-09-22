@@ -16,6 +16,10 @@ targets:
     platform: macOS
     sources:
       - path: LYLLTH
+        excludes:
+          - Resources
+      - path: LYLLTH/Resources
+        buildPhase: resources
     dependencies:
       - package: NightshapeAudioEngine
         product: NightshapeAudioEngine

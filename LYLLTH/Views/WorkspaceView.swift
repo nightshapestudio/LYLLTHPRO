@@ -67,8 +67,9 @@ private struct TransportBar: View {
         HStack(spacing: 18) {
             VStack(alignment: .leading, spacing: 1) {
                 Text("LYLLTH")
-                    .font(.system(size: 21, weight: .bold, design: .monospaced))
-                    .tracking(5)
+                    .font(LYLLTHTheme.wordmark(23))
+                    .tracking(1.1)
+                    .offset(y: LYLLTHTheme.wordmarkOpticalDrop(23))
                     .foregroundStyle(
                         LinearGradient(colors: [LYLLTHTheme.teal, LYLLTHTheme.indigo, LYLLTHTheme.purple], startPoint: .leading, endPoint: .trailing)
                     )

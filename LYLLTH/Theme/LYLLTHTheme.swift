@@ -28,6 +28,16 @@ enum LYLLTHTheme {
     static func value(_ size: CGFloat = 12, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .rounded).monospacedDigit()
     }
+
+    static func wordmark(_ size: CGFloat) -> Font {
+        .custom("NIGHTSHAPE-Bold", size: size)
+    }
+
+    /// NIGHTSHAPE-Bold's cap ink sits high inside its line box. This is the
+    /// same optical correction used by DrumKit for fixed-height branding.
+    static func wordmarkOpticalDrop(_ size: CGFloat) -> CGFloat {
+        size * 0.061
+    }
 }
 
 extension Color {

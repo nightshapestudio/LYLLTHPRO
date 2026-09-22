@@ -12,9 +12,11 @@
 		6F3A38A7891F6397397D6048 /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */; };
 		7DF88DF9F126EE98522AAD31 /* AudioUnitCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90BF7073365CA38A142C3FA5 /* AudioUnitCatalog.swift */; };
 		865DADC7F42A9E3484ABCDAD /* LYLLTHApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */; };
+		A3B2C9A6D7CCF44DEE0683CB /* Nightshape-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6DA38B4ADC0D30D3DE76127B /* Nightshape-Bold.ttf */; };
 		BEDFD504AE4AD5C9E2F9D00E /* SessionDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */; };
 		C5FC2050CF73E1D9599F3518 /* AudioEngineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC518B98C5E542E07745D166 /* AudioEngineController.swift */; };
 		C619A497E1A0A6EEAEC62A38 /* SessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D2710D240A4FA97144EC0A9 /* SessionModels.swift */; };
+		ECA8EDA23F1164FC2719CA0C /* FontRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D80641FB01504BDFF2D6E83 /* FontRegistrar.swift */; };
 		F3072584030C31119C4860C6 /* LYLLTHSessionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */; };
 /* End PBXBuildFile section */
 
@@ -32,6 +34,8 @@
 		1F14758F6049E1F10613908E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		35CE53FE7A1928E34EFCCC92 /* LYLLTH.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LYLLTH.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5D2710D240A4FA97144EC0A9 /* SessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModels.swift; sourceTree = "<group>"; };
+		6DA38B4ADC0D30D3DE76127B /* Nightshape-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Nightshape-Bold.ttf"; sourceTree = "<group>"; };
+		8D80641FB01504BDFF2D6E83 /* FontRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontRegistrar.swift; sourceTree = "<group>"; };
 		90BF7073365CA38A142C3FA5 /* AudioUnitCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitCatalog.swift; sourceTree = "<group>"; };
 		960F211F505A6A045668116C /* LYLLTHTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LYLLTHTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYLLTHApp.swift; sourceTree = "<group>"; };
@@ -91,12 +95,28 @@
 			path = Models;
 			sourceTree = "<group>";
 		};
+		7402BCD1B764205FCAF83860 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				6DA38B4ADC0D30D3DE76127B /* Nightshape-Bold.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
 		9385064ED7CD067273BE87BA /* LYLLTHTests */ = {
 			isa = PBXGroup;
 			children = (
 				CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */,
 			);
 			path = LYLLTHTests;
+			sourceTree = "<group>";
+		};
+		A43D261B3252B9EC7CE2F875 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				7402BCD1B764205FCAF83860 /* Fonts */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		DBBEA465A998CDDEAC4110FA /* Views */ = {
@@ -110,6 +130,7 @@
 		E2D8A290EA9475CB51BA354E /* Theme */ = {
 			isa = PBXGroup;
 			children = (
+				8D80641FB01504BDFF2D6E83 /* FontRegistrar.swift */,
 				F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */,
 			);
 			path = Theme;
@@ -122,6 +143,7 @@
 				CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */,
 				F69CF9D8A42990C09A6077A6 /* Audio */,
 				6EABB5D49C503BD1666E4A91 /* Models */,
+				A43D261B3252B9EC7CE2F875 /* Resources */,
 				E2D8A290EA9475CB51BA354E /* Theme */,
 				DBBEA465A998CDDEAC4110FA /* Views */,
 			);
@@ -163,6 +185,7 @@
 			buildConfigurationList = B9E4BACCD5B23E91ADEB7BD3 /* Build configuration list for PBXNativeTarget "LYLLTH" */;
 			buildPhases = (
 				F16727897211EF96E117327D /* Sources */,
+				B98CE6324B07D2228E4AD739 /* Resources */,
 				CDE0433D07E39ED6E444AE9D /* Frameworks */,
 			);
 			buildRules = (
@@ -214,6 +237,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		B98CE6324B07D2228E4AD739 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A3B2C9A6D7CCF44DEE0683CB /* Nightshape-Bold.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		BA361C9CFDA8F1A5359B5BE6 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -229,6 +263,7 @@
 			files = (
 				C5FC2050CF73E1D9599F3518 /* AudioEngineController.swift in Sources */,
 				7DF88DF9F126EE98522AAD31 /* AudioUnitCatalog.swift in Sources */,
+				ECA8EDA23F1164FC2719CA0C /* FontRegistrar.swift in Sources */,
 				865DADC7F42A9E3484ABCDAD /* LYLLTHApp.swift in Sources */,
 				F3072584030C31119C4860C6 /* LYLLTHSessionDocument.swift in Sources */,
 				0CEC7DBA1215E7248215069A /* LYLLTHTheme.swift in Sources */,
