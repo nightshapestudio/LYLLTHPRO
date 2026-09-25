@@ -117,6 +117,7 @@ struct LYArrangementKeyMonitor: NSViewRepresentable {
 }
 
 private enum LYWorkspaceMenu: Equatable {
+    case export
     case project
     case songKey
     case addTrack
@@ -477,32 +478,113 @@ struct WorkspaceView: View {
     }
 
     /// EXPORT: a real-time bounce of the whole song to WAV.
+    /// EXPORT: DrumKit's export choices in one panel.
     private func presentExport() {
-        let panel = NSSavePanel()
-        panel.title = "EXPORT SONG"
-        panel.prompt = "EXPORT"
-        panel.allowedContentTypes = [.wav]
-        panel.nameFieldStringValue = document.session.name + ".wav"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        presentMenu(.export, from: "stripExport")
+    }
 
-        let beatsPerBar = max(1, Double(document.session.numerator) * 4 / Double(max(document.session.denominator, 1)))
-        let end = document.session.tracks.flatMap(\.clips)
-            .filter(\.isInSong)
-            .map { $0.startBeat + $0.lengthBeats }.max() ?? beatsPerBar
-        let bars = max(1, ceil(end / beatsPerBar - 0.0001))
-        let songSeconds = bars * beatsPerBar * 60 / max(document.session.bpm, 1)
+    private var exportSummary: String {
+        let window = audio.exportWindow(document.session)
+        return "\(window.barCount) BAR\(window.barCount == 1 ? "" : "S")  ·  \(Int(document.session.bpm.rounded())) BPM  ·  \(document.session.numerator)/\(document.session.denominator)"
+    }
+
+    private var exportLoopNote: String? {
+        guard document.session.isLoopActive else { return nil }
+        let window = audio.exportWindow(document.session)
+        return "LOOP · BARS \(window.startBar + 1)–\(window.startBar + window.barCount) · CLEAR THE LOOP TO EXPORT THE WHOLE SONG"
+    }
+
+    private func savePanel(_ title: String, name: String, type: UTType) -> URL? {
+        let panel = NSSavePanel()
+        panel.title = title
+        panel.prompt = "EXPORT"
+        panel.allowedContentTypes = [type]
+        panel.nameFieldStringValue = name
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    private func runExport(_ choice: ExportPanel.Choice) {
+        let name = document.session.name
+        switch choice {
+        case .wav24:
+            guard let url = savePanel("EXPORT · WAV 24-BIT", name: name + ".wav", type: .wav) else { return }
+            bounceSong(.mixdown(.wav), to: url)
+        case .wav32:
+            guard let url = savePanel("EXPORT · WAV 32-BIT FLOAT", name: name + ".wav", type: .wav) else { return }
+            bounceSong(.mixdown(.wavFloat), to: url)
+        case .m4a:
+            guard let url = savePanel("EXPORT · M4A", name: name + ".m4a", type: .mpeg4Audio) else { return }
+            bounceSong(.mixdown(.m4a), to: url)
+        case .stems:
+            guard let url = savePanel("EXPORT · STEMS", name: name + " STEMS.zip", type: .zip) else { return }
+            bounceSong(.stems, to: url)
+        case .midi:
+            guard let url = savePanel("EXPORT · MIDI", name: name + ".mid", type: .midi) else { return }
+            let window = audio.exportWindow(document.session)
+            let data = LYMIDIExport.data(session: document.session, frames: audio.songFrames(document.session, window: window))
+            bounce.report(Result { try data.write(to: url, options: .atomic); return url })
+        case .fkit:
+            saveDrumKitProject()
+        }
+    }
+
+    /// Plays the export range once and records it: the loop when one is on,
+    /// otherwise the whole song from bar 1.
+    private func bounceSong(_ kind: LYBounce.Kind, to url: URL) {
+        let window = audio.exportWindow(document.session)
+        let songSeconds = window.lengthBeats * 60 / max(document.session.bpm, 1)
+        let stems = kind == .stems ? exportStems() : []
         let previousWorkspace = activeWorkspace
-        let previousLoop = document.session.isLoopEnabled
-        bounce.start(url: url, songSeconds: songSeconds, audio: audio, prepare: {
+        bounce.start(kind: kind, url: url, songSeconds: songSeconds, stems: stems, readme: stemReadme(window: window, stems: stems),
+                     audio: audio, prepare: {
             activeWorkspace = "SONG"
-            document.session.isLoopEnabled = false
             audio.setTransportMode(.song, session: document.session, assets: document.audioAssets)
             audio.syncSequencer(document.session)
             audio.syncTimeline(document.session, assets: document.audioAssets)
         }, restore: {
-            document.session.isLoopEnabled = previousLoop
             activeWorkspace = previousWorkspace
         })
+    }
+
+    /// One stem per track that plays (mute and solo respected, as DrumKit),
+    /// buses included, plus the shared reverb's return.
+    private func exportStems() -> [LYBounce.Stem] {
+        let session = document.session
+        let channels = Dictionary(uniqueKeysWithValues: LYChannelMap.channels(in: session).map { ($0.trackID, $0.index) })
+        var used = Set<String>()
+        var stems: [LYBounce.Stem] = []
+        for (position, track) in session.tracks.enumerated() {
+            guard let channel = channels[track.id], LYChannelMap.isAudible(track, in: session) else { continue }
+            var name = String(format: "%02d %@", position + 1, track.name.uppercased())
+                .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            while used.contains(name) { name += " 2" }
+            used.insert(name)
+            stems.append(LYBounce.Stem(source: .track(channel), name: name))
+        }
+        let sends = session.tracks.contains { ($0.fx?.reverbSend ?? 0) > 0.0001 }
+        if sends && !(session.reverb?.isBypassed ?? false) {
+            stems.append(LYBounce.Stem(source: .sharedReverb, name: "\(String(format: "%02d", session.tracks.count + 1)) SHARED REVERB"))
+        }
+        return stems
+    }
+
+    private func stemReadme(window: LYSongWindow, stems: [LYBounce.Stem]) -> String {
+        let session = document.session
+        return """
+        \(session.name.uppercased())  ·  STEMS FROM LYLLTH
+
+        TEMPO: \(String(format: "%.2f", session.bpm)) BPM
+        METER: \(session.numerator)/\(session.denominator)
+        BARS: \(window.startBar + 1)–\(window.startBar + window.barCount) (\(window.barCount) BARS)
+        EACH STEM STARTS AT BAR \(window.startBar + 1) AND RUNS THE FULL LENGTH, WITH A \(Int(LYBounce.tailSeconds)) S TAIL.
+
+        EACH TRACK IS RECORDED AFTER ITS OWN EFFECTS AND FADER. EFFECTS ON MAIN,
+        INCLUDING ITS LIMITER, ARE LEFT OFF SO THE STEMS ADD BACK UP CLEANLY.
+        SENDS TO BUSES ARE ON THE BUS STEMS; THE SHARED REVERB HAS ITS OWN STEM.
+
+        STEMS:
+        \(stems.map { "  " + $0.name }.joined(separator: "\n"))
+        """
     }
 
     // MARK: Recording
@@ -935,6 +1017,17 @@ struct WorkspaceView: View {
                         add: { kind in
                             addTrack(kind: kind)
                             dismissMenu()
+                        },
+                        close: dismissMenu
+                    )
+                case .export:
+                    ExportPanel(
+                        summary: exportSummary,
+                        loopNote: exportLoopNote,
+                        run: { choice in
+                            dismissMenu()
+                            // Let the menu close before a save panel opens.
+                            DispatchQueue.main.async { runExport(choice) }
                         },
                         close: dismissMenu
                     )
@@ -1593,7 +1686,8 @@ struct WorkspaceStrip: View {
                 }
             }
             .buttonStyle(LYChromeButtonStyle(compact: true))
-            .help("Bounce the whole song to a WAV (⌘E)")
+            .lyMenuAnchor("stripExport")
+            .help("Export: WAV, M4A, stems, MIDI or a DrumKit project (⌘E)")
 
             HStack(spacing: 2) {
                 VisibilityButton(icon: "books.vertical", help: "Library", isOn: $showBrowser)
@@ -1679,7 +1773,7 @@ struct ProjectPanel: View {
             VStack(spacing: 6) {
                 row("square.grid.3x3", "OPEN DRUMKIT PROJECT…", "⇧⌘O  ·  .FKIT, OPENS AS A NEW SONG", .openFKit, accent: LYLLTHTheme.purple)
                 row("iphone", "SAVE AS DRUMKIT PROJECT…", "⌥⌘S  ·  .FKIT FOR THE PHONE", .saveFKit, accent: LYLLTHTheme.purple)
-                row("waveform", "EXPORT SONG…", "⌘E  ·  WAV", .export, accent: LYLLTHTheme.indigo)
+                row("waveform", "EXPORT…", "⌘E  ·  WAV · M4A · STEMS · MIDI", .export, accent: LYLLTHTheme.indigo)
             }
             .padding(12)
         }
@@ -3218,9 +3312,9 @@ private struct LYBounceOverlay: View {
         switch bounce.phase {
         case .idle:
             EmptyView()
-        case .running(let elapsed, let total):
+        case .running(let elapsed, let total, let kind):
             panel {
-                Text("EXPORTING").font(LYLLTHTheme.label(11, weight: .bold)).tracking(2).foregroundStyle(LYLLTHTheme.teal)
+                Text("EXPORTING  ·  " + kind).font(LYLLTHTheme.label(11, weight: .bold)).tracking(2).foregroundStyle(LYLLTHTheme.teal)
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Rectangle().fill(LYLLTHTheme.lineStrong).frame(height: 2)
@@ -3231,7 +3325,8 @@ private struct LYBounceOverlay: View {
                 .frame(height: 10)
                 Text(String(format: "%02d:%02d / %02d:%02d", Int(elapsed) / 60, Int(elapsed) % 60, Int(total) / 60, Int(total) % 60))
                     .font(LYLLTHTheme.value(14)).foregroundStyle(LYLLTHTheme.text)
-                Text("RECORDING THE MAIN MIX IN REAL TIME, SO IT SOUNDS EXACTLY AS IT PLAYS")
+                Text(kind.hasPrefix("STEMS") ? "RECORDING EVERY TRACK AT ONCE, IN REAL TIME, SO EACH SOUNDS EXACTLY AS IT PLAYS"
+                                             : "RECORDING THE MAIN MIX IN REAL TIME, SO IT SOUNDS EXACTLY AS IT PLAYS")
                     .font(LYLLTHTheme.label(7, weight: .bold)).tracking(0.9).foregroundStyle(LYLLTHTheme.dim)
                 Button("CANCEL", action: cancel).buttonStyle(LYChromeButtonStyle(compact: true))
             }
@@ -3291,4 +3386,54 @@ private struct LYStepFollower<Content: View>: View {
     @ViewBuilder let content: (Int) -> Content
 
     var body: some View { content(steps.currentStep) }
+}
+
+
+/// DrumKit's export choices, with its wording.
+struct ExportPanel: View {
+    enum Choice { case wav24, wav32, m4a, stems, midi, fkit }
+
+    let summary: String
+    let loopNote: String?
+    let run: (Choice) -> Void
+    let close: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LYNightshapeMenuHeader(eyebrow: "EXPORT", title: summary, accent: LYLLTHTheme.indigo, close: close)
+            if let loopNote {
+                Text(loopNote)
+                    .font(LYLLTHTheme.label(7, weight: .bold))
+                    .tracking(1)
+                    .foregroundStyle(LYLLTHTheme.purple)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 8)
+            }
+            LYNightshapeMenuDivider()
+            VStack(spacing: 6) {
+                row("square.stack.3d.down.right", "STEMS · ZIP", "EACH TRACK ALONE · BAR-1 ALIGNED · README", .stems, LYLLTHTheme.teal)
+                row("pianokeys", "MIDI · SONG", "NOTES ONLY · ONE TRACK PER SOUND · GM DRUM MAP", .midi, LYLLTHTheme.teal)
+            }
+            .padding(12)
+            LYNightshapeMenuDivider()
+            VStack(spacing: 6) {
+                row("waveform", "WAV · 24-BIT", "MIXDOWN · THE USUAL MASTER", .wav24, LYLLTHTheme.indigo)
+                row("waveform.path", "WAV · 32-BIT FLOAT", "MIXDOWN · FULL HEADROOM", .wav32, LYLLTHTheme.indigo)
+                row("envelope", "M4A · AAC", "COMPRESSED · FOR SENDING AROUND", .m4a, LYLLTHTheme.indigo)
+            }
+            .padding(12)
+            LYNightshapeMenuDivider()
+            VStack(spacing: 6) {
+                row("iphone", "PROJECT · FKIT", "EVERYTHING · OPEN AND EDIT IN DRUMKIT", .fkit, LYLLTHTheme.purple)
+            }
+            .padding(12)
+        }
+        .frame(width: 360)
+        .lyNightshapeMenuChrome(accent: LYLLTHTheme.indigo)
+    }
+
+    private func row(_ icon: String, _ title: String, _ detail: String, _ choice: Choice, _ accent: Color) -> some View {
+        LYNightshapeMenuRow(icon: icon, title: title, detail: detail, accent: accent, action: { run(choice) })
+    }
 }

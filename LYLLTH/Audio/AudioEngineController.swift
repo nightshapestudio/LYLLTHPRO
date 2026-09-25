@@ -339,6 +339,31 @@ final class AudioEngineController: ObservableObject {
         }
     }
 
+    // MARK: - Export
+
+    /// The song as the sequencer plays it, one frame per bar of `window`,
+    /// chord tracks compiled: what the MIDI export writes.
+    func songFrames(_ session: LYLLTHSession, window: LYSongWindow) -> [SongPatternFrame] {
+        let meter = transportMeter(numerator: session.numerator, denominator: session.denominator)
+        let key = session.songKey ?? .default
+        return LYSongCompiler.frames(session: session, window: window, stepsPerBar: meter.activeSubdivisionCount) { track, clip in
+            let count = max(clip.steps?.count ?? 16, 1)
+            return self.renderedPattern(
+                track: track,
+                storedSteps: self.normalizedSteps(clip.steps, count: count),
+                locks: self.normalizedLocks(clip.stepParameters, count: count),
+                key: key,
+                meter: meter,
+                rootNote: track.rootNote ?? (track.kind == .drumkit ? 36 : 48)
+            )
+        }
+    }
+
+    func exportWindow(_ session: LYLLTHSession) -> LYSongWindow {
+        let meter = transportMeter(numerator: session.numerator, denominator: session.denominator)
+        return LYSongWindow.resolve(for: session, stepsPerBar: meter.activeSubdivisionCount)
+    }
+
     // MARK: - Drum sounds
 
     private func loadDrum(_ preset: DrumSynthPreset, channel: Int) {

@@ -12,6 +12,7 @@
 		03F2A270049C0F2561F3DDA7 /* ArrangementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0C312174AA965DC7872AAE /* ArrangementView.swift */; };
 		0CEC7DBA1215E7248215069A /* LYLLTHTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */; };
 		1100D2673739C29C697A2403 /* LYScroller.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8138DCA1A91395B53951A82 /* LYScroller.swift */; };
+		154CFDC4030483427D92BCE8 /* ExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B68857B9AC741B4807DC37 /* ExportTests.swift */; };
 		162682C9152C4F5217FC0D04 /* SynthCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2F4736A16F53868A4791F0 /* SynthCoreTests.swift */; };
 		1683416DF75FA415C6AC32B8 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 36CE37E3FF75BBDC0DF875F2 /* Accelerate.framework */; };
 		1EB9AE99B706B7D1C2A6211B /* ReverbModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 543A005C681BF5D44EE192DB /* ReverbModels.swift */; };
@@ -106,6 +107,7 @@
 		2B03D44787926C50EA6A06C6 /* LYSynthFXPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthFXPage.swift; sourceTree = "<group>"; };
 		2B60B660A74B0473F5FCECCF /* CompressorWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompressorWindowView.swift; path = "../nightshape-drumkit-ios/Views/Components/CompressorWindowView.swift"; sourceTree = "<group>"; };
 		3093988C25143E99CB35645D /* LYSynthCore.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = LYSynthCore.cpp; sourceTree = "<group>"; };
+		34B68857B9AC741B4807DC37 /* ExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportTests.swift; sourceTree = "<group>"; };
 		35CE53FE7A1928E34EFCCC92 /* LYLLTH.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LYLLTH.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		36CE37E3FF75BBDC0DF875F2 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
 		3BF85EAD4DB1AAE6788D582A /* TransportDisplayState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportDisplayState.swift; sourceTree = "<group>"; };
@@ -270,6 +272,7 @@
 			isa = PBXGroup;
 			children = (
 				67A45FFE78C9215B9D662390 /* BusRoutingTests.swift */,
+				34B68857B9AC741B4807DC37 /* ExportTests.swift */,
 				6F6FDEB2771DB26C743DA3A2 /* FKitTests.swift */,
 				84AE0F65DFC17746EDC090A3 /* LUNATKTests.swift */,
 				CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */,
@@ -491,6 +494,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4E5DD4763D49716F6035C534 /* BusRoutingTests.swift in Sources */,
+				154CFDC4030483427D92BCE8 /* ExportTests.swift in Sources */,
 				DFCE1678A800ACE606F90D11 /* FKitTests.swift in Sources */,
 				7759F7B9F7F7186B3C840682 /* LUNATKTests.swift in Sources */,
 				BEDFD504AE4AD5C9E2F9D00E /* SessionDocumentTests.swift in Sources */,
