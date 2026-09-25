@@ -126,7 +126,6 @@ enum LYFXBridge {
     static func keySources(in session: LYLLTHSession, excluding target: FXTarget) -> [(id: UUID, name: String)] {
         session.tracks
             .filter { ($0.kind == .drumkit || $0.kind == .instrument) && target != .track($0.id) }
-            .prefix(16)
             .map { (id: $0.id, name: $0.name) }
     }
 
@@ -149,6 +148,7 @@ enum LYFXBridge {
     /// Pushes every effect on every channel. Called when a project opens and
     /// when tracks move, since engine channels follow track order.
     static func pushAll(_ session: LYLLTHSession, engine: NightshapeAudioEngine) {
+        LYChannelMap.ensureChannels(for: session, engine: engine)
         for track in session.tracks {
             guard engineIndex(for: track.id, in: session) != nil else { continue }
             pushRack(target: .track(track.id), session: session, engine: engine)
@@ -374,22 +374,29 @@ extension LYLLTHSession {
 
 /// Which engine channel each track plays on. The sequencer's tracks come
 /// first, in track order, since the song compiler numbers them that way; then
-/// audio tracks, then AUX RETURNs. The sequencer drives the first sixteen;
-/// LYLLTH asks the engine for thirty-two.
+/// audio tracks, then AUX RETURNs. The engine starts with sixteen channels
+/// and builds more as tracks are added, up to `engineChannels`.
 enum LYChannelMap {
-    static let sequencerChannels = 16
-    static let engineChannels = 32
+    static let engineChannels = 256
 
     /// Must run before anything touches `NightshapeAudioEngine.shared`.
     static func configureEngine() {
         TrackChannel.maxTracks = engineChannels
+        TrackChannel.initialTracks = 16
+    }
+
+    /// Builds any engine channels the session needs that do not exist yet.
+    @MainActor
+    static func ensureChannels(for session: LYLLTHSession, engine: NightshapeAudioEngine = .shared) {
+        let needed = channels(in: session).count
+        if needed > engine.trackChannelCount { engine.ensureTrackChannels(needed) }
     }
 
     static func channels(in session: LYLLTHSession) -> [(trackID: UUID, index: Int)] {
-        let musical = session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }.prefix(sequencerChannels)
+        let musical = session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }
         let audio = session.tracks.filter { $0.kind == .audio }
         let buses = session.tracks.filter { $0.kind == .auxiliary }
-        return (Array(musical) + audio + buses).prefix(TrackChannel.maxTracks).enumerated().map { ($0.element.id, $0.offset) }
+        return (musical + audio + buses).prefix(TrackChannel.maxTracks).enumerated().map { ($0.element.id, $0.offset) }
     }
 
     /// The AUX RETURNs a track can send to or play through.

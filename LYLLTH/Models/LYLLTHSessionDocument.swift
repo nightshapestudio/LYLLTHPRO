@@ -25,13 +25,27 @@ struct LYLLTHSessionDocument: FileDocument {
     /// Project-owned originals keyed by their path below `Audio/`.
     /// Edits remain references into these immutable bytes.
     var audioAssets: [String: Data]
-    /// Custom LYLLTH SYNTH wavetables the song uses, raw Float32 frames by
+    /// Custom LUNATK wavetables the song uses, raw Float32 frames by
     /// name, so a song opens with its sounds on any Mac.
     var wavetables: [String: Data] = [:]
 
     init(session: LYLLTHSession = .starter()) {
         self.session = session
         audioAssets = [:]
+    }
+
+    /// Set on a song just made from a .fkit, with what could not come across.
+    /// Neither is saved.
+    var isFromDrumKit = false
+    var importNotes: [String] = []
+
+    /// A DrumKit project as a new, untitled song. It is never saved back
+    /// over the .fkit; SAVE AS DRUMKIT PROJECT writes one on purpose.
+    init(imported: LYFKit.Imported) {
+        self.init(session: imported.session)
+        audioAssets = imported.assets
+        isFromDrumKit = true
+        importNotes = imported.notes
     }
 
     init(configuration: ReadConfiguration) throws {

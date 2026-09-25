@@ -11,7 +11,7 @@ enum LYSynthSourceColor {
         case LY_SRC_ENV1, LY_SRC_LFO1, LY_SRC_MACRO1: return LYLLTHTheme.teal
         case LY_SRC_ENV2, LY_SRC_LFO2, LY_SRC_MACRO2: return LYLLTHTheme.indigo
         case LY_SRC_ENV3, LY_SRC_LFO3, LY_SRC_MACRO3: return LYLLTHTheme.purple
-        case LY_SRC_LFO4, LY_SRC_MACRO4: return LYLLTHTheme.lavender
+        case LY_SRC_ENV4, LY_SRC_LFO4, LY_SRC_MACRO4: return LYLLTHTheme.lavender
         default: return LYLLTHTheme.chromeText
         }
     }
@@ -316,5 +316,147 @@ extension LYSynthPanel where Trailing == EmptyView {
         self.toggle = toggle
         self.trailing = { EmptyView() }
         self.content = content
+    }
+}
+
+// MARK: - Dropdowns
+
+/// A choice list opened from a button, drawn over the whole editor so it is
+/// never clipped or covered. `sections` lets long lists (destinations) group.
+struct LYSynthMenuRequest {
+    struct Option { let value: Int; let label: String }
+    struct Section { var title: String? = nil; let options: [Option] }
+
+    let anchor: String
+    let title: String
+    let sections: [Section]
+    let selected: Int
+    var accent: Color = LYLLTHTheme.teal
+    var columns: Int = 2
+    var width: CGFloat = 260
+    let choose: (Int) -> Void
+
+    /// A flat list from names indexed by value, shown in `order`.
+    init(anchor: String, title: String, names: [String], order: [Int]? = nil, selected: Int,
+         accent: Color = LYLLTHTheme.teal, columns: Int = 2, width: CGFloat = 260, choose: @escaping (Int) -> Void) {
+        self.anchor = anchor
+        self.title = title
+        let values = order ?? Array(names.indices)
+        sections = [Section(options: values.filter { names.indices.contains($0) }.map { Option(value: $0, label: names[$0]) })]
+        self.selected = selected
+        self.accent = accent
+        self.columns = columns
+        self.width = width
+        self.choose = choose
+    }
+
+    init(anchor: String, title: String, sections: [Section], selected: Int, accent: Color = LYLLTHTheme.teal,
+         columns: Int = 2, width: CGFloat = 260, choose: @escaping (Int) -> Void) {
+        self.anchor = anchor
+        self.title = title
+        self.sections = sections
+        self.selected = selected
+        self.accent = accent
+        self.columns = columns
+        self.width = width
+        self.choose = choose
+    }
+}
+
+struct LYSynthMenuView: View {
+    let request: LYSynthMenuRequest
+    let close: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(request.title)
+                    .font(LYLLTHTheme.label(8.5, weight: .bold))
+                    .tracking(1.6)
+                    .foregroundStyle(request.accent)
+                Spacer()
+                Button(action: close) {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(LYLLTHTheme.chromeText)
+                        .frame(width: 20, height: 20).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(request.sections.enumerated()), id: \.offset) { _, section in
+                        if let title = section.title {
+                            Text(title)
+                                .font(LYLLTHTheme.label(7, weight: .bold))
+                                .tracking(1.4)
+                                .foregroundStyle(LYLLTHTheme.dim)
+                        }
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: request.columns), spacing: 4) {
+                            ForEach(section.options, id: \.value) { option in
+                                let isOn = option.value == request.selected
+                                Button { request.choose(option.value); close() } label: {
+                                    Text(option.label)
+                                        .font(LYLLTHTheme.label(8, weight: .bold))
+                                        .tracking(0.8)
+                                        .foregroundStyle(isOn ? request.accent : LYLLTHTheme.text)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.7)
+                                        .frame(maxWidth: .infinity, minHeight: 24)
+                                        .background(request.accent.opacity(isOn ? 0.14 : 0.02))
+                                        .overlay(Rectangle().stroke(isOn ? request.accent : LYLLTHTheme.lineStrong, lineWidth: 1))
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 360)
+            .lyScrollers()
+        }
+        .padding(10)
+        .frame(width: request.width)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Color(hex: 0x07080D).opacity(0.98))
+        .overlay(Rectangle().stroke(request.accent.opacity(0.7), lineWidth: 1))
+        .shadow(color: .black.opacity(0.6), radius: 14, y: 6)
+    }
+}
+
+/// A labelled button that shows a choice and opens its dropdown.
+struct LYSynthChoiceButton: View {
+    let label: String
+    let value: String
+    var accent: Color = LYLLTHTheme.teal
+    var isActive = true
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 5) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(label)
+                        .font(LYLLTHTheme.label(6, weight: .bold))
+                        .tracking(1.1)
+                        .foregroundStyle(accent.opacity(isActive ? 1 : 0.5))
+                    Text(value)
+                        .font(LYLLTHTheme.label(8.5, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(isActive ? LYLLTHTheme.text : LYLLTHTheme.dim)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 6.5, weight: .bold))
+                    .foregroundStyle(LYLLTHTheme.dim)
+            }
+            .padding(.horizontal, 7)
+            .frame(maxWidth: .infinity, minHeight: 28)
+            .background(Color.black.opacity(0.35))
+            .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

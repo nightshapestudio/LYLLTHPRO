@@ -49,6 +49,11 @@ targets:
         group: DrumKitShared
       - path: ../nightshape-drumkit-ios/Views/Components/FilterPanelView.swift
         group: DrumKitShared
+      # DrumKit's .fkit container, for opening and saving DrumKit projects.
+      - path: ../nightshape-drumkit-ios/Services/ZipArchiveReader.swift
+        group: DrumKitShared
+      - path: ../nightshape-drumkit-ios/Services/ZipArchiveWriter.swift
+        group: DrumKitShared
     dependencies:
       - package: NightshapeAudioEngine
         product: NightshapeAudioEngine

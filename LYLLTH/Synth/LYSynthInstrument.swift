@@ -1,7 +1,7 @@
 import AVFoundation
 import NightshapeAudioEngine
 
-/// One LYLLTH SYNTH on one track. Owns the C++ core and the source node the
+/// One LUNATK on one track. Owns the C++ core and the source node the
 /// engine plugs into the track's channel.
 final class LYSynthInstrument: NightshapeTrackInstrument {
     static let sampleRate = 44_100.0

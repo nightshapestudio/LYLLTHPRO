@@ -24,7 +24,9 @@ typedef struct LYSynth LYSynth;
 
 // ---------------------------------------------------------------------------
 // Parameters. Every value is a float; switches and choices are whole numbers.
-// Keep in step with LYSynthParameter in Swift (LYSynthPatch.swift).
+// Keep in step with LYSynthParameters in Swift (LYSynthPatch.swift). Saved
+// patches store names, not these numbers, so the layout may change; the
+// values of choices (warp modes, filter types, …) may only ever be appended.
 // ---------------------------------------------------------------------------
 
 enum {
@@ -44,6 +46,10 @@ enum {
     LY_OSC_RANDPHASE,   // 0…1
     LY_OSC_WARPMODE,    // LY_WARP_*
     LY_OSC_WARPAMT,     // 0…1
+    LY_OSC_WARPMODE2,   // second warp, applied after the first
+    LY_OSC_WARPAMT2,
+    LY_OSC_UNIMODE,     // LY_UNI_*: how detune spreads across the unison voices
+    LY_OSC_STACK,       // LY_STACK_*: octave / fifth stacking of unison voices
     LY_OSC_PARAM_COUNT
 };
 
@@ -53,10 +59,15 @@ enum {
     LY_SUB_ON = 2 * LY_OSC_PARAM_COUNT,
     LY_SUB_LEVEL,
     LY_SUB_OCTAVE,      // 1 or 2 octaves down
-    LY_SUB_SHAPE,       // 0 sine, 1 triangle, 2 square
+    LY_SUB_SHAPE,       // 0 sine, 1 triangle, 2 square, 3 saw
+    LY_SUB_PAN,
     LY_NOISE_ON,
     LY_NOISE_LEVEL,
-    LY_NOISE_COLOR,     // 0 white … 1 dark
+    LY_NOISE_COLOR,     // 0 bright … 1 dark
+    LY_NOISE_TYPE,      // LY_NOISE_*
+    LY_NOISE_PITCH,     // 0…1, rate of the pitched noises
+    LY_NOISE_KEYTRACK,  // 0/1: the pitched noises follow the note
+    LY_NOISE_PAN,
 
     LY_FILTER_ON,
     LY_FILTER_TYPE,     // LY_FILTER_*
@@ -70,68 +81,151 @@ enum {
     LY_FILTER_ROUTE_B,
     LY_FILTER_ROUTE_SUB,
     LY_FILTER_ROUTE_NOISE,
+    LY_FILTER_PAN,      // -1…1, after the filters
 
-    LY_ENV1_A,          // envelope times 0…1 map 0.5 ms…10 s
-    LY_ENV1_D,
-    LY_ENV1_S,          // 0…1 level
-    LY_ENV1_R,
+    // Second filter, after the first (serial) or beside it (parallel).
+    LY_F2_ON,
+    LY_F2_TYPE,
+    LY_F2_CUTOFF,
+    LY_F2_RES,
+    LY_F2_DRIVE,
+    LY_F2_KEYTRACK,
+    LY_F2_ENVAMT,       // ENV 3 to cutoff
+    LY_F2_MIX,
+    LY_FILTER_ROUTING,  // 0 serial, 1 parallel
+
+    // Envelopes: times 0…1 map 0.5 ms…10 s; sustain is a level.
+    LY_ENV1_A, LY_ENV1_D, LY_ENV1_S, LY_ENV1_R,
     LY_ENV2_A, LY_ENV2_D, LY_ENV2_S, LY_ENV2_R,
     LY_ENV3_A, LY_ENV3_D, LY_ENV3_S, LY_ENV3_R,
+    LY_ENV4_A, LY_ENV4_D, LY_ENV4_S, LY_ENV4_R,
+    // Hold after the attack peak, same time scale (0 is none).
+    LY_ENV1_H, LY_ENV2_H, LY_ENV3_H, LY_ENV4_H,
+    // Curves, -1…1: negative starts fast (the analogue feel), positive slow.
+    LY_ENV1_ACURVE, LY_ENV1_DCURVE, LY_ENV1_RCURVE,
+    LY_ENV2_ACURVE, LY_ENV2_DCURVE, LY_ENV2_RCURVE,
+    LY_ENV3_ACURVE, LY_ENV3_DCURVE, LY_ENV3_RCURVE,
+    LY_ENV4_ACURVE, LY_ENV4_DCURVE, LY_ENV4_RCURVE,
 
+    // LFOs: LY_LFO_STRIDE values each, from LY_LFO1_SHAPE.
     LY_LFO1_SHAPE,      // LY_LFO_*
     LY_LFO1_RATE,       // 0…1, 0.02…30 Hz, or a sync division index when synced
     LY_LFO1_SYNC,       // 0 free, 1 tempo
-    LY_LFO1_RETRIG,     // 0 free-running, 1 restarts per note
-    LY_LFO2_SHAPE, LY_LFO2_RATE, LY_LFO2_SYNC, LY_LFO2_RETRIG,
-    LY_LFO3_SHAPE, LY_LFO3_RATE, LY_LFO3_SYNC, LY_LFO3_RETRIG,
-    LY_LFO4_SHAPE, LY_LFO4_RATE, LY_LFO4_SYNC, LY_LFO4_RETRIG,
+    LY_LFO1_RETRIG,     // LY_LFOMODE_*: free-running, restarts per note, or runs once
+    LY_LFO1_SMOOTH,     // drawn shapes: 0 steps, 1 glides
+    LY_LFO1_PHASE,      // 0…1 start phase
+    LY_LFO1_DELAY,      // 0…1, 0…4 s before it starts
+    LY_LFO1_RISE,       // 0…1, 0…4 s fade-in after the delay
+    LY_LFO1_END,
+    LY_LFO_STRIDE = LY_LFO1_END - LY_LFO1_SHAPE,
 
-    LY_MACRO1, LY_MACRO2, LY_MACRO3, LY_MACRO4,
+    LY_MACRO1 = LY_LFO1_SHAPE + 4 * LY_LFO_STRIDE, LY_MACRO2, LY_MACRO3, LY_MACRO4,
     LY_MODWHEEL,
 
     LY_VOICES,          // 1…16; 1 is mono
     LY_GLIDE,           // 0…1 s
     LY_LEGATO,          // 0/1
+    LY_GLIDE_ALWAYS,    // 0 glides only between held notes, 1 every note
     LY_MASTER,          // 0…1
     LY_BPM,             // host tempo
-
-    // Envelope curves, -1…1: negative starts fast (the analogue feel),
-    // positive starts slow, 0 is a straight line.
-    LY_ENV1_ACURVE, LY_ENV1_DCURVE, LY_ENV1_RCURVE,
-    LY_ENV2_ACURVE, LY_ENV2_DCURVE, LY_ENV2_RCURVE,
-    LY_ENV3_ACURVE, LY_ENV3_DCURVE, LY_ENV3_RCURVE,
-
-    // Drawn LFOs: 0 steps between points, 1 glides between them.
-    LY_LFO1_SMOOTH, LY_LFO2_SMOOTH, LY_LFO3_SMOOTH, LY_LFO4_SMOOTH,
-
+    LY_TUNE,            // -100…100 cents
+    LY_VEL_SENS,        // 0…1: how much velocity sets the volume
     LY_MPE,             // 0/1: each note's own channel carries its bend, pressure, timbre
     LY_BEND_RANGE,      // master pitch bend, semitones
 
-    // Modulation matrix: LY_MATRIX_SLOTS × (source, destination, amount).
+    // Arpeggiator.
+    LY_ARP_ON,
+    LY_ARP_MODE,        // LY_ARP_*
+    LY_ARP_RATE,        // sync division index, as the LFOs
+    LY_ARP_OCTAVES,     // 1…4
+    LY_ARP_GATE,        // 0.05…1 of a step
+    LY_ARP_SWING,       // 0…1
+    LY_ARP_LATCH,       // 0/1: keeps playing after the keys are let go
+
+    // Effects rack. LY_FX_SLOTS order values (LY_FX_*), then each effect.
+    LY_FX_ORDER,
+    LY_FX_ORDER_END = LY_FX_ORDER + 10,
+
+    LY_HYPER_ON = LY_FX_ORDER_END, LY_HYPER_RATE, LY_HYPER_DETUNE, LY_HYPER_VOICES, LY_HYPER_MIX,
+    LY_HYPER_DIM_SIZE, LY_HYPER_DIM_MIX,
+    LY_DIST_ON, LY_DIST_MODE, LY_DIST_DRIVE, LY_DIST_TONE, LY_DIST_MIX,
+    LY_FLANGER_ON, LY_FLANGER_RATE, LY_FLANGER_DEPTH, LY_FLANGER_FEEDBACK, LY_FLANGER_MIX,
+    LY_PHASER_ON, LY_PHASER_RATE, LY_PHASER_DEPTH, LY_PHASER_FREQ, LY_PHASER_FEEDBACK, LY_PHASER_MIX,
+    LY_CHORUS_ON, LY_CHORUS_RATE, LY_CHORUS_DELAY, LY_CHORUS_DEPTH, LY_CHORUS_FEEDBACK, LY_CHORUS_TONE, LY_CHORUS_MIX,
+    LY_DELAY_ON, LY_DELAY_TIME, LY_DELAY_FEEDBACK, LY_DELAY_PINGPONG, LY_DELAY_WIDTH,
+    LY_DELAY_LOWCUT, LY_DELAY_HIGHCUT, LY_DELAY_MIX,
+    LY_COMP_ON, LY_COMP_MODE, LY_COMP_THRESHOLD, LY_COMP_RATIO, LY_COMP_ATTACK, LY_COMP_RELEASE,
+    LY_COMP_GAIN, LY_COMP_DEPTH, LY_COMP_MIX,
+    LY_EQ_ON, LY_EQ_LOW_FREQ, LY_EQ_LOW_GAIN, LY_EQ_MID_FREQ, LY_EQ_MID_GAIN, LY_EQ_MID_Q,
+    LY_EQ_HIGH_FREQ, LY_EQ_HIGH_GAIN,
+    LY_FXF_ON, LY_FXF_TYPE, LY_FXF_CUTOFF, LY_FXF_RES, LY_FXF_DRIVE, LY_FXF_MIX,
+    LY_REVERB_ON, LY_REVERB_MODE, LY_REVERB_SIZE, LY_REVERB_DECAY, LY_REVERB_DAMP,
+    LY_REVERB_WIDTH, LY_REVERB_PREDELAY, LY_REVERB_MIX,
+
+    // Modulation matrix: LY_MATRIX_SLOTS × LY_MATRIX_STRIDE.
     LY_MATRIX_BASE,
 };
 
-enum { LY_MATRIX_SLOTS = 16 };
+enum { LY_MATRIX_SLOTS = 32, LY_MATRIX_STRIDE = 6 };
+// Offsets inside one matrix slot.
+enum {
+    LY_MX_SOURCE = 0,
+    LY_MX_DEST,
+    LY_MX_AMOUNT,       // -1…1
+    LY_MX_AUX,          // a second source that scales the first (LY_SRC_NONE for none)
+    LY_MX_CURVE,        // -1…1, bends the source's response
+    LY_MX_BIPOLAR,      // 0/1: a 0…1 source swings -1…1 instead
+};
 enum { LY_LFO_POINTS = 32 };
 /// Drawn LFO shapes: 4 × LY_LFO_POINTS values, -1…1, after the matrix.
-enum { LY_LFO_POINTS_BASE = LY_MATRIX_BASE + LY_MATRIX_SLOTS * 3 };
+enum { LY_LFO_POINTS_BASE = LY_MATRIX_BASE + LY_MATRIX_SLOTS * LY_MATRIX_STRIDE };
 enum { LY_PARAM_COUNT = LY_LFO_POINTS_BASE + 4 * LY_LFO_POINTS };
 
+// Values may be appended, never reordered: patches store them.
 enum {
     LY_WARP_OFF = 0, LY_WARP_SYNC, LY_WARP_BEND_POS, LY_WARP_BEND_NEG,
     LY_WARP_MIRROR, LY_WARP_PWM, LY_WARP_FM, LY_WARP_RM, LY_WARP_QUANTIZE,
+    LY_WARP_ASYM_POS, LY_WARP_ASYM_NEG, LY_WARP_FLIP, LY_WARP_AM, LY_WARP_FOLD,
     LY_WARP_COUNT
+};
+
+enum { LY_UNI_LINEAR = 0, LY_UNI_SUPER, LY_UNI_EXP, LY_UNI_RANDOM, LY_UNI_COUNT };
+enum { LY_STACK_OFF = 0, LY_STACK_OCTAVE, LY_STACK_TWO_OCTAVES, LY_STACK_OCTAVE_FIFTH, LY_STACK_FIFTH, LY_STACK_COUNT };
+
+enum {
+    LY_NOISE_WHITE = 0, LY_NOISE_PINK, LY_NOISE_BROWN, LY_NOISE_CRACKLE, LY_NOISE_VINYL,
+    LY_NOISE_DIGITAL, LY_NOISE_METAL, LY_NOISE_BREATH, LY_NOISE_COUNT
 };
 
 enum {
     LY_FILTER_LP12 = 0, LY_FILTER_LP24, LY_FILTER_HP12, LY_FILTER_HP24,
-    LY_FILTER_BP, LY_FILTER_NOTCH, LY_FILTER_LADDER, LY_FILTER_COUNT
+    LY_FILTER_BP, LY_FILTER_NOTCH, LY_FILTER_LADDER,
+    LY_FILTER_COMB_POS, LY_FILTER_COMB_NEG, LY_FILTER_FORMANT, LY_FILTER_PHASER, LY_FILTER_BP24,
+    LY_FILTER_COUNT
 };
 
 enum {
     LY_LFO_SINE = 0, LY_LFO_TRIANGLE, LY_LFO_SAW_UP, LY_LFO_SAW_DOWN,
     LY_LFO_SQUARE, LY_LFO_SAMPLE_HOLD, LY_LFO_SMOOTH_RANDOM, LY_LFO_CUSTOM, LY_LFO_SHAPE_COUNT
 };
+
+enum { LY_LFOMODE_FREE = 0, LY_LFOMODE_TRIG, LY_LFOMODE_ENV, LY_LFOMODE_COUNT };
+
+enum { LY_ARP_UP = 0, LY_ARP_DOWN, LY_ARP_UPDOWN, LY_ARP_PLAYED, LY_ARP_RANDOM, LY_ARP_CHORD, LY_ARP_COUNT };
+
+enum {
+    LY_FX_HYPER = 0, LY_FX_DIST, LY_FX_FLANGER, LY_FX_PHASER, LY_FX_CHORUS,
+    LY_FX_DELAY, LY_FX_COMP, LY_FX_EQ, LY_FX_FILTER, LY_FX_REVERB, LY_FX_COUNT
+};
+
+enum {
+    LY_DIST_TUBE = 0, LY_DIST_SOFT, LY_DIST_HARD, LY_DIST_DIODE, LY_DIST_LINFOLD, LY_DIST_SINFOLD,
+    LY_DIST_ZEROSQUARE, LY_DIST_DOWNSAMPLE, LY_DIST_BITCRUSH, LY_DIST_RECTIFY, LY_DIST_COUNT
+};
+
+enum { LY_COMP_SINGLE = 0, LY_COMP_MULTIBAND, LY_COMP_MODE_COUNT };
+enum { LY_REVERB_PLATE = 0, LY_REVERB_HALL, LY_REVERB_MODE_COUNT };
+enum { LY_FXF_LP = 0, LY_FXF_HP, LY_FXF_BP, LY_FXF_NOTCH, LY_FXF_LADDER, LY_FXF_COMB, LY_FXF_COUNT };
 
 enum {
     LY_SRC_NONE = 0, LY_SRC_ENV1, LY_SRC_ENV2, LY_SRC_ENV3,
@@ -140,6 +234,7 @@ enum {
     LY_SRC_MACRO1, LY_SRC_MACRO2, LY_SRC_MACRO3, LY_SRC_MACRO4,
     LY_SRC_RANDOM, LY_SRC_STEP_CUTOFF, LY_SRC_STEP_RES,
     LY_SRC_PRESSURE, LY_SRC_TIMBRE, LY_SRC_PITCHBEND,
+    LY_SRC_ENV4,
     LY_SRC_COUNT
 };
 
@@ -151,6 +246,24 @@ enum {
     LY_DST_CUTOFF, LY_DST_RES, LY_DST_DRIVE, LY_DST_FILTER_MIX,
     LY_DST_AMP, LY_DST_PAN, LY_DST_PITCH,
     LY_DST_LFO1_RATE, LY_DST_LFO2_RATE, LY_DST_LFO3_RATE, LY_DST_LFO4_RATE,
+    // Appended; the order above is what older patches saved.
+    LY_DST_A_WARP2, LY_DST_A_WIDTH, LY_DST_A_FINE,
+    LY_DST_B_WARP2, LY_DST_B_WIDTH, LY_DST_B_FINE,
+    LY_DST_SUB_PAN, LY_DST_NOISE_COLOR, LY_DST_NOISE_PITCH, LY_DST_NOISE_PAN,
+    LY_DST_F2_CUTOFF, LY_DST_F2_RES, LY_DST_F2_DRIVE, LY_DST_F2_MIX, LY_DST_FILTER_PAN,
+    LY_DST_ENV1_ATTACK, LY_DST_ENV1_DECAY, LY_DST_ENV1_RELEASE,
+    LY_DST_ENV2_ATTACK, LY_DST_ENV2_DECAY, LY_DST_ENV2_RELEASE,
+    LY_DST_HYPER_MIX, LY_DST_HYPER_DETUNE, LY_DST_DIM_MIX,
+    LY_DST_DIST_DRIVE, LY_DST_DIST_MIX,
+    LY_DST_FLANGER_DEPTH, LY_DST_FLANGER_MIX,
+    LY_DST_PHASER_FREQ, LY_DST_PHASER_MIX,
+    LY_DST_CHORUS_DEPTH, LY_DST_CHORUS_MIX,
+    LY_DST_DELAY_FEEDBACK, LY_DST_DELAY_MIX,
+    LY_DST_COMP_DEPTH, LY_DST_COMP_MIX,
+    LY_DST_EQ_LOW, LY_DST_EQ_MID, LY_DST_EQ_HIGH,
+    LY_DST_FXF_CUTOFF, LY_DST_FXF_RES, LY_DST_FXF_MIX,
+    LY_DST_REVERB_SIZE, LY_DST_REVERB_DECAY, LY_DST_REVERB_MIX,
+    LY_DST_MASTER,
     LY_DST_COUNT
 };
 
@@ -168,10 +281,14 @@ enum {
 typedef struct {
     int activeVoices;
     float wavetablePosition[2];   // modulated, of the newest voice
-    float envelope[3];            // current level of the newest voice
+    float envelope[4];            // current level of the newest voice
     float lfo[4];                 // -1…1
     float lfoPhase[4];            // 0…1
     float cutoffHz;               // modulated, of the newest voice
+    float cutoff2Hz;              // second filter
+    float compGain[3];            // compressor gain change per band, dB (single band uses [1])
+    float fxLevel[LY_FX_COUNT];   // each effect's output peak, 0…1
+    int arpStep;                  // arpeggiator step, -1 when idle
     float modulation[LY_DST_COUNT]; // modulation offset per LY_DST_*, newest voice
 } LYSynthDisplay;
 

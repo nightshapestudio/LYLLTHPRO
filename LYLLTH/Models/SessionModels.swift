@@ -165,6 +165,8 @@ struct LYStepParameters: Codable, Equatable {
     /// Chord choice 0...7, `ChordLaneCompiler.rest`, or nil to carry the
     /// previous chord. Only used by chord tracks.
     var chord: Int? = nil
+    /// A quiet grace hit just ahead of the step, as in DrumKit.
+    var flam: Bool? = nil
 
     static let `default` = LYStepParameters()
 }
@@ -711,6 +713,19 @@ struct LYClip: Codable, Identifiable, Equatable {
     var loopOffsetBeats: Double = 0
     /// Length of the whole original file. `waveformPeaks` spans all of it.
     var sourceFileDurationSeconds: Double?
+    /// Set on a pattern region that plays another clip's pattern: one more
+    /// placement of that pattern in the song. Its own steps are unused, so
+    /// editing the pattern changes every placement.
+    var patternSourceID: UUID? = nil
+    /// A pattern kept for the sequencer but not placed in the song.
+    var isOffTimeline: Bool? = nil
+
+    var isSequenced: Bool { kind == .pattern || kind == .midi }
+    var isPlacement: Bool { isSequenced && patternSourceID != nil }
+    /// Whether this clip sits on the arrangement and sets the song's length.
+    var isInSong: Bool {
+        kind == .audio ? sourceRelativePath != nil : isOffTimeline != true
+    }
 
     /// Resize a sequenced clip without turning newly-created chord space into
     /// an accidental sustain. Chord `nil` means HOLD, so the first appended
@@ -769,6 +784,7 @@ extension LYClip {
         case slipOffsetSeconds, eventGainDB
         case pitchSemitones, fadeInSeconds, fadeOutSeconds, fadeCurve, stretchMode
         case sourceBPM, preservePitch, beatMap, isMuted, isLocked, isLooped, loopOffsetBeats, sourceFileDurationSeconds
+        case patternSourceID, isOffTimeline
     }
 
     init(from decoder: Decoder) throws {
@@ -801,6 +817,8 @@ extension LYClip {
         isLooped = try values.decodeIfPresent(Bool.self, forKey: .isLooped) ?? false
         loopOffsetBeats = try values.decodeIfPresent(Double.self, forKey: .loopOffsetBeats) ?? 0
         sourceFileDurationSeconds = try values.decodeIfPresent(Double.self, forKey: .sourceFileDurationSeconds)
+        patternSourceID = try values.decodeIfPresent(UUID.self, forKey: .patternSourceID)
+        isOffTimeline = try values.decodeIfPresent(Bool.self, forKey: .isOffTimeline)
         normalizeAudioEvent()
     }
 }
@@ -862,7 +880,7 @@ struct LYTrack: Codable, Identifiable, Equatable {
     var inserts: [LYPluginSlot] = []
     /// NIGHTSHAPE effects on this channel. Optional preserves older documents.
     var fx: LYFXRack? = nil
-    /// Set when this track plays LYLLTH SYNTH instead of a DrumKit synth preset.
+    /// Set when this track plays LUNATK instead of a DrumKit synth preset.
     var synth: LYSynthPatch? = nil
     /// A drum track's DrumKit drum-synth preset. nil plays the default chosen
     /// from the track's name.
@@ -871,6 +889,42 @@ struct LYTrack: Codable, Identifiable, Equatable {
     var sends: [LYBusSend]? = nil
     /// The AUX RETURN this track plays through instead of MAIN. nil is MAIN.
     var outputBusID: UUID? = nil
+    /// A drum-synth preset that is not in the built-in library (a DrumKit
+    /// user preset brought in with a .fkit), played when `drumPresetID` names it.
+    var customDrumPreset: DrumSynthPreset? = nil
+    /// A one-shot sample this drum track plays, by its name in the song's
+    /// audio. Takes over from any drum-synth preset.
+    var samplePath: String? = nil
+    /// DrumKit's choke group, 0 or nil for none.
+    var chokeGroup: Int? = nil
+    /// DrumKit's track-shaping ADSR. nil leaves the sound as it is.
+    var envelope: TrackEnvelopeState? = nil
+}
+
+extension LYTrack {
+    /// Clip indices of this track's patterns, in the sequencer's order:
+    /// pattern and MIDI clips that carry their own steps.
+    var patternIndices: [Int] {
+        clips.indices.filter { clips[$0].isSequenced && !clips[$0].isPlacement }
+    }
+
+    var patterns: [LYClip] { patternIndices.map { clips[$0] } }
+
+    /// Pattern regions that play in the song: placed patterns and placements.
+    var songRegions: [LYClip] { clips.filter { $0.isSequenced && $0.isOffTimeline != true } }
+
+    /// The clip whose steps a region plays: its source for a placement.
+    func patternContent(of clip: LYClip) -> LYClip {
+        guard let source = clip.patternSourceID, let found = clips.first(where: { $0.id == source }) else { return clip }
+        return found
+    }
+
+    /// Index of the clip whose steps a region plays.
+    func patternContentIndex(of clipIndex: Int) -> Int {
+        guard let source = clips[clipIndex].patternSourceID,
+              let found = clips.firstIndex(where: { $0.id == source }) else { return clipIndex }
+        return found
+    }
 }
 
 /// One send from a track into an AUX RETURN.
@@ -905,6 +959,8 @@ struct LYLLTHSession: Codable, Equatable {
     /// Four clicks before recording starts. Optional preserves older
     /// documents; on unless turned off.
     var countIn: Bool? = nil
+    /// Sequencer swing, 0.5 straight … 0.75. Optional preserves older documents.
+    var swing: Double? = nil
     /// Optional preserves documents created before desktop pattern editing.
     var activePatternIndex: Int? = nil
     /// Shared with DrumKit's chord system. Optional preserves older documents.
@@ -1012,7 +1068,7 @@ struct LYLLTHSession: Codable, Equatable {
         ]
 
         tracks[0].inserts = Self.nightshapeStarterChain
-        // The melodic starter tracks play LYLLTH SYNTH factory sounds.
+        // The melodic starter tracks play LUNATK factory sounds.
         let starterSounds = [
             "SUB BASS": "SUB PRESSURE", "GLASS ARP": "GLASS ARP", "ANALOG PAD": "NIGHT PAD",
             "SYNC LEAD": "SYNC SCREAM", "VINTAGE KEYS": "NIGHT KEYS", "FX TEXTURE": "SPECTRAL DRIFT"
@@ -1087,7 +1143,7 @@ struct LYLLTHSession: Codable, Equatable {
             }
         }
 
-        // Version 4: songs from before LYLLTH SYNTH give their melodic starter
+        // Version 4: songs from before LUNATK give their melodic starter
         // tracks the factory sounds new songs start with.
         if schemaVersion < 4 {
             let sounds = [

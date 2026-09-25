@@ -356,7 +356,7 @@ struct ChannelStripInspector: View {
             let feeds = session.tracks.filter { $0.outputBusID == track.id || ($0.sends ?? []).contains { $0.busID == track.id } }.count
             return feeds == 0 ? "NO INPUTS" : feeds == 1 ? "1 INPUT" : "\(feeds) INPUTS"
         case .drumkit, .instrument:
-            if let synth = track.synth { return "LYLLTH · " + synth.name }
+            if let synth = track.synth { return "LUNATK · " + synth.name }
             if let drum = LYDrumSounds.preset(id: LYDrumSounds.presetID(for: track)) { return "DRUM · " + drum.name }
             if track.isChordTrack == true { return "CHORD ENGINE" }
             return (track.synthPresetID ?? "SYNTH").uppercased()
@@ -423,7 +423,7 @@ private struct LYChannelStrip: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("Open LYLLTH SYNTH")
+                    .help("Open LUNATK")
                 } else {
                     slot(source, color: LYLLTHTheme.text, dim: false)
                 }

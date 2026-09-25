@@ -17,6 +17,8 @@ struct ArrangementView: View {
     let previewAudioEvent: (LYClip) -> Void
     var openSynth: (UUID) -> Void = { _ in }
     var openDrums: (UUID) -> Void = { _ in }
+    /// Opens a track's pattern (by clip id) in the sequencer.
+    var openPattern: (UUID, UUID) -> Void = { _, _ in }
 
     @EnvironmentObject private var audio: AudioEngineController
 
@@ -139,7 +141,7 @@ struct ArrangementView: View {
 
     private var arrangementSummary: String {
         let end = session.tracks.flatMap(\.clips)
-            .filter { $0.kind != .audio || $0.sourceRelativePath != nil }
+            .filter(\.isInSong)
             .map { $0.startBeat + $0.lengthBeats }.max() ?? 0
         let bars = "\(max(1, Int(ceil(end / beatsPerBar - 0.0001)))) BAR SONG"
         guard session.isLoopActive, let loop = session.loopRange else { return bars + "  ·  LOOP OFF" }
@@ -191,6 +193,54 @@ struct ArrangementView: View {
         return nil
     }
 
+    private var selectedPatternLocation: (track: Int, clip: Int)? {
+        guard let selectedClipID else { return nil }
+        for trackIndex in session.tracks.indices {
+            if let clipIndex = session.tracks[trackIndex].clips.firstIndex(where: { $0.id == selectedClipID && $0.isSequenced }) {
+                return (trackIndex, clipIndex)
+            }
+        }
+        return nil
+    }
+
+    /// Opens the selected region's pattern in the sequencer.
+    private func editSelectedPattern() {
+        guard let location = selectedPatternLocation else { return }
+        let track = session.tracks[location.track]
+        openPattern(track.id, track.patternContent(of: track.clips[location.clip]).id)
+    }
+
+    /// Places the selected region's pattern again, right after it.
+    private func placeSelectedPatternAgain() {
+        guard let location = selectedPatternLocation else { return }
+        let track = session.tracks[location.track]
+        let region = track.clips[location.clip]
+        let content = track.patternContent(of: region)
+        var copy = region
+        copy.id = UUID()
+        copy.patternSourceID = content.id
+        copy.steps = nil
+        copy.stepParameters = nil
+        copy.isOffTimeline = nil
+        copy.name = content.name
+        copy.startBeat = region.startBeat + region.lengthBeats
+        session.tracks[location.track].clips.append(copy)
+        selectedClipID = copy.id
+        editCursorBeat = copy.startBeat
+    }
+
+    /// Takes a region out of the song. A placement goes; a pattern stays in
+    /// the sequencer, just off the arrangement, so no steps are ever lost here.
+    private func removeSelectedPatternFromSong() {
+        guard let location = selectedPatternLocation else { return }
+        if session.tracks[location.track].clips[location.clip].isPlacement {
+            session.tracks[location.track].clips.remove(at: location.clip)
+        } else {
+            session.tracks[location.track].clips[location.clip].isOffTimeline = true
+        }
+        selectedClipID = nil
+    }
+
     private var selectedTrackKind: LYTrackKind? {
         guard let selectedTrackID else { return nil }
         return session.tracks.first(where: { $0.id == selectedTrackID })?.kind
@@ -232,10 +282,27 @@ struct ArrangementView: View {
                 eventActionButton("DELETE", help: "Remove this event (delete key)", action: deleteSelectedAudioEvent)
                 eventActionButton("−", help: "Down a semitone (−). Shift: 4, ⌘: octave") { transposeSelectedAudioEvent(by: -1) }
                 eventActionButton("+", help: "Up a semitone (=). Shift: 4, ⌘: octave") { transposeSelectedAudioEvent(by: 1) }
+            } else if let location = selectedPatternLocation {
+                let track = session.tracks[location.track]
+                let region = track.clips[location.clip]
+                Text(region.isPlacement ? "PLACEMENT" : "PATTERN")
+                    .font(LYLLTHTheme.label(8, weight: .bold))
+                    .tracking(1.5)
+                    .foregroundStyle(LYLLTHTheme.dim)
+                Text(track.patternContent(of: region).name)
+                    .font(LYLLTHTheme.label(9.5, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(LYLLTHTheme.text)
+                    .lineLimit(1)
+                    .frame(maxWidth: 170, alignment: .leading)
+                Spacer(minLength: 8)
+                eventActionButton("EDIT IN SEQUENCER  ↩", help: "Open this pattern in the sequencer (or double-click the region)", action: editSelectedPattern)
+                eventActionButton("PLACE AGAIN  ⌘D", help: "Play this pattern again right after. Editing the pattern changes every place it plays.", action: placeSelectedPatternAgain)
+                eventActionButton("REMOVE", help: "Take it out of the song (delete key). The pattern stays in the sequencer.", action: removeSelectedPatternFromSong)
             } else {
                 Text(selectedTrackKind == .audio
                      ? "DROP AUDIO ON A LANE  ·  DRAG AN EVENT'S RIGHT EDGE TO LOOP IT  ·  DRAG ITS TOP LINE FOR VOLUME"
-                     : "CLICK AN AUDIO EVENT TO EDIT IT  ·  DROP FILES FROM FINDER ONTO ANY LANE")
+                     : "DOUBLE-CLICK A PATTERN TO EDIT IT  ·  CLICK AN AUDIO EVENT TO EDIT IT  ·  DROP FILES FROM FINDER ONTO ANY LANE")
                     .font(LYLLTHTheme.label(8, weight: .bold))
                     .tracking(1.1)
                     .foregroundStyle(LYLLTHTheme.dim)
@@ -539,8 +606,10 @@ struct ArrangementView: View {
                 }
 
                 ForEach($session.tracks[index].clips) { $clip in
+                    if clip.isInSong || clip.kind == .audio {
                     ArrangementClip(
                         clip: $clip,
+                        source: clip.patternSourceID.flatMap { id in track.clips.first { $0.id == id } },
                         accent: accent,
                         isSelected: selectedClipID == clip.id,
                         isTrackSelected: selected,
@@ -564,6 +633,13 @@ struct ArrangementView: View {
                                 editCursorBeat = min(max(0, snapBeat(rawBeat, clip.startBeat)), Double(beats))
                             }
                     )
+                    .simultaneousGesture(
+                        TapGesture(count: 2).onEnded {
+                            guard clip.isSequenced else { return }
+                            openPattern(track.id, track.patternContent(of: clip).id)
+                        }
+                    )
+                    }
                 }
 
                 if isDropTarget {
@@ -677,6 +753,12 @@ struct ArrangementView: View {
             guard copiedAudioEvent != nil else { return false }
             pasteAudioEvent()
             return true
+        }
+        if selectedPatternLocation != nil {
+            if flags.contains(.command), key == "d" { placeSelectedPatternAgain(); return true }
+            if key == "\u{7F}" || key == "\u{8}" { removeSelectedPatternFromSong(); return true }
+            if key == "\r" { editSelectedPattern(); return true }
+            return false
         }
         guard selectedAudioLocation != nil else { return false }
 
@@ -943,7 +1025,7 @@ private struct LYTrackHeader: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(instrumentIcon == "pianokeys" ? "Open LYLLTH SYNTH" : "Choose this track's drum sound")
+                .help(instrumentIcon == "pianokeys" ? "Open LUNATK" : "Choose this track's drum sound")
             }
             LYTrackToggle(title: "M", isOn: $isMuted, tint: LYLLTHTheme.purple)
                 .help("Mute")
@@ -1104,6 +1186,8 @@ private struct BeatGrid: View {
 
 private struct ArrangementClip: View {
     @Binding var clip: LYClip
+    /// The pattern a placement plays, whose steps it draws.
+    var source: LYClip? = nil
     let accent: Color
     let isSelected: Bool
     let isTrackSelected: Bool
@@ -1131,7 +1215,7 @@ private struct ArrangementClip: View {
         if clip.kind == .audio {
             return LYAudioEventTiming.cycleBeats(for: clip, projectBPM: projectBPM)
         }
-        guard let count = clip.steps?.count, count > 0 else { return nil }
+        guard let count = (source ?? clip).steps?.count, count > 0 else { return nil }
         return Double(count) * lyBeatsPerStep
     }
 
@@ -1177,7 +1261,7 @@ private struct ArrangementClip: View {
         .accessibilityIdentifier("arrangement-clip-\(clip.id.uuidString)")
         .help(clip.kind == .audio
               ? "Drag to move. Drag the right edge past the end to loop it. Option-drag slides the audio inside the event. Drag the top line for volume."
-              : "Drag to move. Drag the right edge to repeat the pattern.")
+              : "Double-click to edit in the sequencer. Drag to move. Drag the right edge to repeat the pattern. ⌘D places it again.")
     }
 
     // MARK: Drawing
@@ -1185,7 +1269,7 @@ private struct ArrangementClip: View {
     private var titleRow: some View {
         HStack(spacing: 5) {
             Rectangle().fill(accent).frame(width: 4, height: 4)
-            Text(clip.name)
+            Text(source?.name ?? clip.name)
                 .font(LYLLTHTheme.label(8, weight: .bold))
                 .tracking(0.7)
                 .foregroundStyle(LYLLTHTheme.text)
@@ -1240,7 +1324,7 @@ private struct ArrangementClip: View {
         } else {
             LYPatternCells(
                 steps: patternSteps,
-                velocities: (clip.stepParameters ?? []).map(\.velocity),
+                velocities: ((source ?? clip).stepParameters ?? []).map(\.velocity),
                 accent: accent,
                 beatWidth: beatWidth,
                 lengthBeats: clip.lengthBeats,
@@ -1250,8 +1334,9 @@ private struct ArrangementClip: View {
     }
 
     private var patternSteps: [Bool] {
-        let steps = clip.steps ?? []
-        guard isChordTrack, let locks = clip.stepParameters else { return steps }
+        let pattern = source ?? clip
+        let steps = pattern.steps ?? []
+        guard isChordTrack, let locks = pattern.stepParameters else { return steps }
         return locks.indices.map { index in
             (steps.indices.contains(index) && steps[index]) || (locks[index].chord.map { $0 >= 0 } ?? false)
         }

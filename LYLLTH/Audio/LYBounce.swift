@@ -4,7 +4,7 @@ import NightshapeAudioEngine
 
 /// Bounces the song to a 24-bit WAV by playing it once, from bar 1 to the
 /// end of the last region, and recording the main mix. Real time, so what is
-/// written is exactly what plays: every track, LYLLTH SYNTH, audio events,
+/// written is exactly what plays: every track, LUNATK, audio events,
 /// all FX, MAIN. A tail after the last bar keeps reverbs and releases.
 @MainActor
 final class LYBounce: ObservableObject {

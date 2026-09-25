@@ -54,7 +54,7 @@ struct LYSongWindow: Equatable {
         }
         let end = session.tracks
             .flatMap(\.clips)
-            .filter { $0.kind != .audio || $0.sourceRelativePath != nil }
+            .filter(\.isInSong)
             .map { $0.startBeat + $0.lengthBeats }
             .max() ?? beatsPerBar
         return LYSongWindow(
@@ -75,10 +75,10 @@ enum LYSongCompiler {
         stepsPerBar: Int,
         render: (LYTrack, LYClip) -> (enabled: [Bool], locks: [LYStepParameters])
     ) -> [SongPatternFrame] {
-        let tracks = Array(session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }.prefix(16))
+        let tracks = session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }
         var renderedByClip: [UUID: (enabled: [Bool], locks: [LYStepParameters])] = [:]
         for track in tracks {
-            for clip in track.clips where clip.kind == .pattern || clip.kind == .midi {
+            for clip in track.patterns {
                 renderedByClip[clip.id] = render(track, clip)
             }
         }
@@ -88,19 +88,26 @@ enum LYSongCompiler {
             let songTracks: [SongPatternTrack] = tracks.map { track in
                 var active = Array(repeating: false, count: stepsPerBar)
                 var locks = Array(repeating: LYStepParameters.default, count: stepsPerBar)
-                let regions = track.clips.filter { $0.kind == .pattern || $0.kind == .midi }
+                let regions = track.songRegions
                 for step in 0..<stepsPerBar {
                     let beat = barStart + Double(step) * lyBeatsPerStep
-                    guard let clip = regions.last(where: {
-                        beat >= $0.startBeat - 0.000_1 && beat < $0.startBeat + $0.lengthBeats - 0.000_1
-                    }), let rendered = renderedByClip[clip.id], !rendered.enabled.isEmpty else { continue }
-                    let offset = Int(floor((beat - clip.startBeat + clip.loopOffsetBeats) / lyBeatsPerStep + 0.000_1))
-                    let index = ((offset % rendered.enabled.count) + rendered.enabled.count) % rendered.enabled.count
-                    active[step] = rendered.enabled[index]
-                    if rendered.locks.indices.contains(index) { locks[step] = rendered.locks[index] }
+                    // Regions that overlap (a DrumKit song's lanes) sound
+                    // together; the last one that hits sets the step's values.
+                    var sawRegion = false
+                    for clip in regions where beat >= clip.startBeat - 0.000_1 && beat < clip.startBeat + clip.lengthBeats - 0.000_1 {
+                        guard let rendered = renderedByClip[clip.patternSourceID ?? clip.id], !rendered.enabled.isEmpty else { continue }
+                        let offset = Int(floor((beat - clip.startBeat + clip.loopOffsetBeats) / lyBeatsPerStep + 0.000_1))
+                        let index = ((offset % rendered.enabled.count) + rendered.enabled.count) % rendered.enabled.count
+                        if rendered.enabled[index] || !sawRegion {
+                            if rendered.locks.indices.contains(index) { locks[step] = rendered.locks[index] }
+                        }
+                        active[step] = active[step] || rendered.enabled[index]
+                        sawRegion = true
+                    }
                 }
                 return SongPatternTrack(
                     activeSteps: active,
+                    flamSteps: locks.map { $0.flam == true },
                     velocities: locks.map { min(max($0.velocity, 0), 1) },
                     volumes: locks.map { min(max($0.level, 0), 1) },
                     cutoffs: locks.map { min(max($0.cutoff, 0), 1) },
@@ -171,6 +178,7 @@ final class LYTimelineAudioPlayer {
     // MARK: Model
 
     func update(session: LYLLTHSession, assets: [String: Data], window: LYSongWindow) {
+        LYChannelMap.ensureChannels(for: session, engine: engine)
         let structureChanged = self.window != window || Self.structure(of: session) != Self.structure(of: self.session)
         self.session = session
         self.assets = assets

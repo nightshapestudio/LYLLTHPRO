@@ -102,7 +102,7 @@ struct LYPatternPlaybackVisualizer: View {
     private static let laneHairline = Color.white.opacity(0.03)
 
     private var tracks: [LYTrack] {
-        Array(session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }.prefix(16))
+        session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }
     }
 
     private var stepCount: Int {
@@ -124,7 +124,7 @@ struct LYPatternPlaybackVisualizer: View {
     }
 
     private func activeClip(in track: LYTrack) -> LYClip? {
-        let clips = track.clips.filter { $0.kind == .pattern || $0.kind == .midi }
+        let clips = track.patterns
         guard !clips.isEmpty else { return nil }
         return clips[min(max(patternIndex, 0), clips.count - 1)]
     }

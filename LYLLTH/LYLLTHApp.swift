@@ -20,12 +20,62 @@ struct LYLLTHApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
+            LYProjectCommands()
             CommandGroup(after: .toolbar) {
                 Button(audio.isPlaying ? "Stop" : "Play") {
                     audio.togglePlayback()
                 }
                 .keyboardShortcut(.space, modifiers: [])
             }
+        }
+    }
+}
+
+/// What the front song window can do from the menu bar.
+struct LYWorkspaceActions {
+    var showSequencer: () -> Void
+    var showArrangement: () -> Void
+    var openDrumKitProject: () -> Void
+    var saveDrumKitProject: () -> Void
+    var exportSong: () -> Void
+}
+
+private struct LYWorkspaceActionsKey: FocusedValueKey {
+    typealias Value = LYWorkspaceActions
+}
+
+extension FocusedValues {
+    var lyWorkspace: LYWorkspaceActions? {
+        get { self[LYWorkspaceActionsKey.self] }
+        set { self[LYWorkspaceActionsKey.self] = newValue }
+    }
+}
+
+struct LYProjectCommands: Commands {
+    @FocusedValue(\.lyWorkspace) private var workspace
+
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button("Open DrumKit Project (.fkit)…") { workspace?.openDrumKitProject() }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+                .disabled(workspace == nil)
+        }
+        CommandGroup(after: .saveItem) {
+            Button("Save as DrumKit Project (.fkit)…") { workspace?.saveDrumKitProject() }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+                .disabled(workspace == nil)
+            Button("Export Song (WAV)…") { workspace?.exportSong() }
+                .keyboardShortcut("e", modifiers: .command)
+                .disabled(workspace == nil)
+        }
+        CommandGroup(before: .toolbar) {
+            Button("Sequencer") { workspace?.showSequencer() }
+                .keyboardShortcut("1", modifiers: .command)
+                .disabled(workspace == nil)
+            Button("Arrangement") { workspace?.showArrangement() }
+                .keyboardShortcut("2", modifiers: .command)
+                .disabled(workspace == nil)
+            Divider()
         }
     }
 }

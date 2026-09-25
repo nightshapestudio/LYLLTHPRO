@@ -2,7 +2,7 @@ import CoreMIDI
 import Foundation
 
 /// Listens to every MIDI source on the Mac and hands channel messages to
-/// whichever LYLLTH SYNTH is the target: the selected track's, or the first
+/// whichever LUNATK is the target: the selected track's, or the first
 /// record-armed synth track. Messages keep their host timestamps, so a
 /// hardware keyboard plays with the same timing the sequencer gets.
 @MainActor

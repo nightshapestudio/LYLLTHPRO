@@ -117,6 +117,7 @@ struct LYArrangementKeyMonitor: NSViewRepresentable {
 }
 
 private enum LYWorkspaceMenu: Equatable {
+    case project
     case songKey
     case addTrack
     case arrangementSnap
@@ -159,6 +160,9 @@ struct WorkspaceView: View {
     // only the small views that draw them subscribe.
     @State private var transportDisplay = TransportDisplayState()
     @State private var meters = LYMeterStore()
+    /// A passing message for the status bar: what an open or save left out.
+    @State private var notice: String?
+    @Environment(\.newDocument) private var newDocument
 
     private var selectedTrackBinding: Binding<LYTrack>? {
         guard let selectedTrackID,
@@ -191,7 +195,8 @@ struct WorkspaceView: View {
                     .environmentObject(audio)
 
                     WorkspaceStrip(
-                        activeWorkspace: activeWorkspace,
+                        activeWorkspace: $activeWorkspace,
+                        openProjectMenu: { presentMenu(.project, from: "stripProject") },
                         showBrowser: $showBrowser,
                         showInspector: $showInspector,
                         showMixer: $showMixer,
@@ -268,7 +273,7 @@ struct WorkspaceView: View {
                 .animation(LYLLTHTheme.settle, value: showMixer)
 
                     StatusBar(
-                        error: audioImportError ?? audio.audioEventError ?? audio.startupError,
+                        error: audioImportError ?? audio.audioEventError ?? audio.startupError ?? notice,
                         sampleRate: document.session.sampleRate,
                         bitDepth: document.session.bitDepth,
                         hiddenInspector: false
@@ -304,7 +309,12 @@ struct WorkspaceView: View {
         .coordinateSpace(name: LYDropdownOverlay<EmptyView>.space)
         .onPreferenceChange(LYMenuAnchorKey.self) { menuAnchors = $0 }
         .frame(minWidth: 960, minHeight: 640)
+        .focusedSceneValue(\.lyWorkspace, workspaceActions)
         .onAppear {
+            if document.isFromDrumKit {
+                notice = (["OPENED FROM DRUMKIT  ·  SAVE KEEPS IT AS A LYLLTH SONG"] + document.importNotes.map { $0.uppercased() })
+                    .joined(separator: "  ·  ")
+            }
             // Project wavetables first, so synth tracks find them when they load.
             LYWavetableLibrary.shared.register(projectTables: document.wavetables)
             selectedTrackID = selectedTrackID ?? document.session.tracks.first?.id
@@ -391,6 +401,15 @@ struct WorkspaceView: View {
         }
     }
 
+    /// Shows a track's pattern in the sequencer.
+    private func openPattern(trackID: UUID, clipID: UUID) {
+        guard let track = document.session.tracks.first(where: { $0.id == trackID }),
+              let position = track.patternIndices.firstIndex(where: { track.clips[$0].id == clipID }) else { return }
+        selectedTrackID = trackID
+        document.session.activePatternIndex = position
+        activeWorkspace = "PATTERN"
+    }
+
     private var arrangementPane: some View {
         ArrangementView(
             session: $document.session,
@@ -413,7 +432,8 @@ struct WorkspaceView: View {
                 audio.previewAudioEvent(clip, assetData: data, projectBPM: document.session.bpm)
             },
             openSynth: { openSynth($0) },
-            openDrums: { openDrums($0) }
+            openDrums: { openDrums($0) },
+            openPattern: { openPattern(trackID: $0, clipID: $1) }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -466,7 +486,7 @@ struct WorkspaceView: View {
 
         let beatsPerBar = max(1, Double(document.session.numerator) * 4 / Double(max(document.session.denominator, 1)))
         let end = document.session.tracks.flatMap(\.clips)
-            .filter { $0.kind != .audio || $0.sourceRelativePath != nil }
+            .filter(\.isInSong)
             .map { $0.startBeat + $0.lengthBeats }.max() ?? beatsPerBar
         let bars = max(1, ceil(end / beatsPerBar - 0.0001))
         let songSeconds = bars * beatsPerBar * 60 / max(document.session.bpm, 1)
@@ -549,8 +569,14 @@ struct WorkspaceView: View {
                 var step = 0
                 if inSong {
                     let beat = (songBeat(forTransportBeat: note.onBeat) / lyBeatsPerStep).rounded() * lyBeatsPerStep
-                    clipIndex = document.session.tracks[trackIndex].clips.firstIndex {
-                        ($0.kind == .pattern || $0.kind == .midi) && beat >= $0.startBeat - 0.0001 && beat < $0.startBeat + $0.lengthBeats - 0.0001
+                    let region = document.session.tracks[trackIndex].clips.firstIndex {
+                        $0.isSequenced && $0.isOffTimeline != true && beat >= $0.startBeat - 0.0001 && beat < $0.startBeat + $0.lengthBeats - 0.0001
+                    }
+                    // Notes played over a placement go into the pattern it plays.
+                    if let region {
+                        let clip = document.session.tracks[trackIndex].clips[region]
+                        step = Int(((beat - clip.startBeat + clip.loopOffsetBeats) / lyBeatsPerStep).rounded())
+                        clipIndex = document.session.tracks[trackIndex].patternContentIndex(of: region)
                     }
                     if clipIndex == nil {
                         let barStart = floor(beat / beatsPerBar) * beatsPerBar
@@ -561,15 +587,12 @@ struct WorkspaceView: View {
                             stepParameters: Array(repeating: .default, count: stepsPerBar)))
                         clipIndex = document.session.tracks[trackIndex].clips.count - 1
                     }
-                    if let clipIndex {
+                    if region == nil, let clipIndex {
                         let clip = document.session.tracks[trackIndex].clips[clipIndex]
                         step = Int(((beat - clip.startBeat + clip.loopOffsetBeats) / lyBeatsPerStep).rounded())
                     }
                 } else {
-                    let sequenced = document.session.tracks[trackIndex].clips.indices.filter {
-                        let k = document.session.tracks[trackIndex].clips[$0].kind
-                        return k == .pattern || k == .midi
-                    }
+                    let sequenced = document.session.tracks[trackIndex].patternIndices
                     guard !sequenced.isEmpty else { continue }
                     clipIndex = sequenced[min(max(0, document.session.activePatternIndex ?? 0), sequenced.count - 1)]
                     step = Int((note.onBeat / lyBeatsPerStep).rounded())
@@ -606,13 +629,13 @@ struct WorkspaceView: View {
         }
     }
 
-    /// LYLLTH SYNTH or DRUM SYNTH clicked in the library: open it on the
+    /// LUNATK or DRUM SYNTH clicked in the library: open it on the
     /// selected track if it fits, else on the first track that does, else a
     /// new track.
     private func openSoundFromLibrary(_ name: String) {
         let tracks = document.session.tracks
         switch name {
-        case "LYLLTH SYNTH":
+        case "LUNATK":
             if let track = tracks.first(where: { $0.id == selectedTrackID && $0.kind == .instrument && $0.isChordTrack != true })
                 ?? tracks.first(where: { $0.synth != nil }) {
                 openSynth(track.id)
@@ -667,8 +690,8 @@ struct WorkspaceView: View {
         }
     }
 
-    /// Opens LYLLTH SYNTH for a track. An instrument track still on a DrumKit
-    /// preset is moved onto LYLLTH SYNTH first, starting from INIT.
+    /// Opens LUNATK for a track. An instrument track still on a DrumKit
+    /// preset is moved onto LUNATK first, starting from INIT.
     private func openSynth(_ trackID: UUID) {
         guard let index = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
         if document.session.tracks[index].synth == nil {
@@ -689,7 +712,7 @@ struct WorkspaceView: View {
             GeometryReader { geo in
                 LYFloatingWindow(
                     id: "synth",
-                    title: "LYLLTH SYNTH  ·  " + track.name,
+                    title: "LUNATK  ·  " + track.name,
                     accent: LYLLTHTheme.teal,
                     size: CGSize(width: min(geo.size.width - 32, 1340), height: min(geo.size.height - 56, 800)),
                     close: close
@@ -825,6 +848,65 @@ struct WorkspaceView: View {
         panel.begin(completionHandler: completion)
     }
 
+    // MARK: Project
+
+    private var workspaceActions: LYWorkspaceActions {
+        LYWorkspaceActions(
+            showSequencer: { activeWorkspace = "PATTERN" },
+            showArrangement: { activeWorkspace = "SONG" },
+            openDrumKitProject: openDrumKitProject,
+            saveDrumKitProject: saveDrumKitProject,
+            exportSong: presentExport
+        )
+    }
+
+    private func runProjectAction(_ action: ProjectPanel.Action) {
+        // Document commands go to this window's document through AppKit.
+        switch action {
+        case .new: NSDocumentController.shared.newDocument(nil)
+        case .open: NSDocumentController.shared.openDocument(nil)
+        case .save: NSApp.sendAction(#selector(NSDocument.save(_:)), to: nil, from: nil)
+        case .saveAs: NSApp.sendAction(#selector(NSDocument.saveAs(_:)), to: nil, from: nil)
+        case .openFKit: openDrumKitProject()
+        case .saveFKit: saveDrumKitProject()
+        case .export: presentExport()
+        }
+    }
+
+    /// A DrumKit project opens as a new song in its own window.
+    private func openDrumKitProject() {
+        let panel = NSOpenPanel()
+        panel.title = "OPEN DRUMKIT PROJECT"
+        panel.prompt = "OPEN"
+        panel.allowedContentTypes = [.drumkitProject]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let imported = try LYFKit.importProject(from: Data(contentsOf: url))
+            newDocument(LYLLTHSessionDocument(imported: imported))
+        } catch {
+            audioImportError = "Could not open \(url.lastPathComponent): \(error.localizedDescription)"
+        }
+    }
+
+    private func saveDrumKitProject() {
+        let panel = NSSavePanel()
+        panel.title = "SAVE AS DRUMKIT PROJECT"
+        panel.prompt = "SAVE"
+        panel.allowedContentTypes = [.drumkitProject]
+        panel.nameFieldStringValue = document.session.name + ".fkit"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let exported = try LYFKit.exportProject(document.session, assets: document.audioAssets)
+            try exported.data.write(to: url, options: .atomic)
+            notice = exported.notes.isEmpty
+                ? "SAVED " + url.lastPathComponent.uppercased()
+                : "SAVED " + url.lastPathComponent.uppercased() + "  ·  " + exported.notes.joined(separator: "  ·  ").uppercased()
+        } catch {
+            audioImportError = "Could not save \(url.lastPathComponent): \(error.localizedDescription)"
+        }
+    }
+
     private func presentMenu(_ menu: LYWorkspaceMenu, from anchor: String? = nil) {
         menuAnchorID = anchor
         withAnimation(LYLLTHTheme.snap) { activeMenu = menu }
@@ -852,6 +934,15 @@ struct WorkspaceView: View {
                         add: { kind in
                             addTrack(kind: kind)
                             dismissMenu()
+                        },
+                        close: dismissMenu
+                    )
+                case .project:
+                    ProjectPanel(
+                        name: document.session.name,
+                        run: { action in
+                            dismissMenu()
+                            runProjectAction(action)
                         },
                         close: dismissMenu
                     )
@@ -1439,8 +1530,11 @@ private struct TransportUtility: View {
 
 // MARK: - Workspace chrome
 
-private struct WorkspaceStrip: View {
-    let activeWorkspace: String
+/// The bar right above the tracks: the song and its file actions, the
+/// switch between the sequencer and the arrangement, and the panels.
+struct WorkspaceStrip: View {
+    @Binding var activeWorkspace: String
+    let openProjectMenu: () -> Void
     @Binding var showBrowser: Bool
     @Binding var showInspector: Bool
     @Binding var showMixer: Bool
@@ -1450,23 +1544,42 @@ private struct WorkspaceStrip: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            HStack(spacing: 9) {
-                LYLED(color: LYLLTHTheme.teal, size: 5)
-                mixedNumericLabel(
-                    projectName,
-                    labelFont: LYLLTHTheme.label(10.5, weight: .bold),
-                    numberFont: LYLLTHTheme.value(11)
-                )
-                .tracking(1.5)
-                .foregroundStyle(LYLLTHTheme.text)
+            Button(action: openProjectMenu) {
+                HStack(spacing: 8) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(LYLLTHTheme.teal)
+                    mixedNumericLabel(
+                        projectName,
+                        labelFont: LYLLTHTheme.label(10.5, weight: .bold),
+                        numberFont: LYLLTHTheme.value(11)
+                    )
+                    .tracking(1.5)
+                    .foregroundStyle(LYLLTHTheme.text)
+                    .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7.5, weight: .bold))
+                        .foregroundStyle(LYLLTHTheme.dim)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .lyMenuAnchor("stripProject")
+            .help("Song: new, open, save, DrumKit .fkit, export")
 
-            Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1, height: 14)
+            LYViewSwitch(activeWorkspace: $activeWorkspace)
 
-            Text(activeWorkspace == "PATTERN" ? "PATTERN EDIT  ·  LOOPS THE PATTERN" : "SONG  ·  PLAYS THE ARRANGEMENT")
-                .font(LYLLTHTheme.label(8, weight: .bold))
-                .tracking(1.4)
+            Text(activeWorkspace == "PATTERN"
+                 ? "LOOPS ONE PATTERN  ·  NEW, DUPLICATE, PLACE IN SONG"
+                 : "PLAYS THE SONG  ·  DOUBLE-CLICK A PATTERN TO EDIT IT")
+                .font(LYLLTHTheme.label(7.5, weight: .bold))
+                .tracking(1.3)
                 .foregroundStyle(LYLLTHTheme.dim)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
 
             Spacer()
 
@@ -1479,7 +1592,7 @@ private struct WorkspaceStrip: View {
                 }
             }
             .buttonStyle(LYChromeButtonStyle(compact: true))
-            .help("Bounce the whole song to a WAV")
+            .help("Bounce the whole song to a WAV (⌘E)")
 
             HStack(spacing: 2) {
                 VisibilityButton(icon: "books.vertical", help: "Library", isOn: $showBrowser)
@@ -1497,13 +1610,88 @@ private struct WorkspaceStrip: View {
             .lyMenuAnchor("stripTrack")
         }
         .padding(.horizontal, 16)
-        .frame(height: 38)
+        .frame(height: 44)
         .background(LYLLTHTheme.panel)
         .overlay(alignment: .bottom) { LYHairline() }
     }
 }
 
-private struct VisibilityButton: View {
+/// SEQUENCER | ARRANGE: which view fills the window. The sequencer loops the
+/// pattern being edited; the arrangement plays the song.
+struct LYViewSwitch: View {
+    @Binding var activeWorkspace: String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            tab("square.grid.3x3.fill", "SEQUENCER", key: "PATTERN", color: LYLLTHTheme.purple, shortcut: "⌘1")
+            Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1, height: 28)
+            tab("rectangle.split.3x1", "ARRANGE", key: "SONG", color: LYLLTHTheme.teal, shortcut: "⌘2")
+        }
+        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+        .animation(LYLLTHTheme.snap, value: activeWorkspace)
+    }
+
+    private func tab(_ icon: String, _ title: String, key: String, color: Color, shortcut: String) -> some View {
+        let isOn = activeWorkspace == key
+        return Button { activeWorkspace = key } label: {
+            HStack(spacing: 7) {
+                Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+                Text(title)
+                    .font(LYLLTHTheme.label(9, weight: .bold))
+                    .tracking(1.4)
+            }
+            .foregroundStyle(isOn ? color : LYLLTHTheme.dim)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(color.opacity(isOn ? 0.12 : 0))
+            .overlay(alignment: .bottom) { Rectangle().fill(isOn ? color : .clear).frame(height: 2) }
+            .lyBloom(color, isOn: isOn && color != LYLLTHTheme.teal)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(key == "PATTERN" ? "Sequencer: edit and create patterns (\(shortcut))" : "Arrangement: build the song (\(shortcut))")
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
+/// The song menu under the project name.
+struct ProjectPanel: View {
+    enum Action { case new, open, save, saveAs, openFKit, saveFKit, export }
+
+    let name: String
+    let run: (Action) -> Void
+    let close: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LYNightshapeMenuHeader(eyebrow: "SONG", title: name, accent: LYLLTHTheme.teal, close: close)
+            LYNightshapeMenuDivider()
+            VStack(spacing: 6) {
+                row("doc.badge.plus", "NEW SONG", "⌘N", .new)
+                row("folder", "OPEN…", "⌘O  ·  LYLLTH SONGS", .open)
+                row("square.and.arrow.down", "SAVE", "⌘S", .save)
+                row("square.and.arrow.down.on.square", "SAVE AS…", "⇧⌘S", .saveAs)
+            }
+            .padding(12)
+            LYNightshapeMenuDivider()
+            VStack(spacing: 6) {
+                row("square.grid.3x3", "OPEN DRUMKIT PROJECT…", "⇧⌘O  ·  .FKIT, OPENS AS A NEW SONG", .openFKit, accent: LYLLTHTheme.purple)
+                row("iphone", "SAVE AS DRUMKIT PROJECT…", "⌥⌘S  ·  .FKIT FOR THE PHONE", .saveFKit, accent: LYLLTHTheme.purple)
+                row("waveform", "EXPORT SONG…", "⌘E  ·  WAV", .export, accent: LYLLTHTheme.indigo)
+            }
+            .padding(12)
+        }
+        .frame(width: 330)
+        .lyNightshapeMenuChrome(accent: LYLLTHTheme.teal)
+    }
+
+    private func row(_ icon: String, _ title: String, _ detail: String, _ action: Action, accent: Color = LYLLTHTheme.teal) -> some View {
+        LYNightshapeMenuRow(icon: icon, title: title, detail: detail, accent: accent, action: { run(action) })
+    }
+}
+
+struct VisibilityButton: View {
     let icon: String
     let help: String
     @Binding var isOn: Bool
@@ -1655,10 +1843,10 @@ private struct BrowserPanel: View {
         switch selection {
         case "NIGHTSHAPE":
             section("SOUND")
-            ForEach(filter(["LYLLTH SYNTH", "DRUM SYNTH"]), id: \.self) { name in
-                row(name, detail: soundDetail(name), color: name == "LYLLTH SYNTH" ? LYLLTHTheme.indigo : LYLLTHTheme.teal, symbol: soundSymbol(name))
+            ForEach(filter(["LUNATK", "DRUM SYNTH"]), id: \.self) { name in
+                row(name, detail: soundDetail(name), color: name == "LUNATK" ? LYLLTHTheme.indigo : LYLLTHTheme.teal, symbol: soundSymbol(name))
                     .simultaneousGesture(TapGesture().onEnded { onSound(name) })
-                    .help(name == "LYLLTH SYNTH" ? "Open LYLLTH SYNTH on the selected synth track" : "Browse DrumKit drum sounds for the selected drum track")
+                    .help(name == "LUNATK" ? "Open LUNATK on the selected synth track" : "Browse DrumKit drum sounds for the selected drum track")
             }
             ForEach(categories, id: \.self) { category in
                 let effects = LYNightshapeEffect.all.filter { $0.category == category && matches($0.name) }
@@ -1742,7 +1930,7 @@ private struct BrowserPanel: View {
 
     private func soundDetail(_ name: String) -> String {
         switch name {
-        case "LYLLTH SYNTH": return "WAVETABLE SYNTH · OPEN"
+        case "LUNATK": return "WAVETABLE SYNTH · OPEN"
         case "DRUM SYNTH": return "\(LYDrumSounds.presets.count) DRUMKIT SOUNDS · OPEN"
         case "SOUND ORACLE": return "DESCRIBE A SOUND"
         default: return "KEY-AWARE CHORD LANES"
@@ -1751,7 +1939,7 @@ private struct BrowserPanel: View {
 
     private func soundSymbol(_ name: String) -> String {
         switch name {
-        case "LYLLTH SYNTH": return "pianokeys"
+        case "LUNATK": return "pianokeys"
         case "DRUM SYNTH": return "waveform.path"
         case "SOUND ORACLE": return "wand.and.stars"
         default: return "pianokeys"
@@ -1970,11 +2158,12 @@ private struct SequencerWorkspace: View {
                     Button("\(index + 1)") { selectPattern(index) }
                         .buttonStyle(LYChromeButtonStyle(active: patternIndex == index, compact: true, numeric: true))
                 }
-                Button(action: addPattern) {
-                    Image(systemName: "plus").font(.system(size: 9, weight: .medium))
-                }
-                .buttonStyle(LYChromeButtonStyle(compact: true))
-                .help("Add pattern")
+            }
+
+            HStack(spacing: 3) {
+                patternAction("plus", "NEW", help: "A new empty pattern on every track", action: { addPattern(copying: false) })
+                patternAction("plus.square.on.square", "DUPLICATE", help: "A new pattern that starts as a copy of this one", action: { addPattern(copying: true) })
+                patternAction("text.insert", "PLACE IN SONG", help: "Put this pattern at the end of the song, on every track", action: placeInSong)
             }
 
             Spacer(minLength: 8)
@@ -1997,6 +2186,17 @@ private struct SequencerWorkspace: View {
         .frame(height: 58)
         .background(LYLLTHTheme.panel)
         .overlay(alignment: .bottom) { LYHairline() }
+    }
+
+    private func patternAction(_ icon: String, _ title: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 9, weight: .bold))
+                Text(title)
+            }
+        }
+        .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.teal, compact: true))
+        .help(help)
     }
 
     private func sequenceTool(_ title: String, enabled: Bool = true, tint: Color = LYLLTHTheme.metadata, action: @escaping () -> Void) -> some View {
@@ -2322,10 +2522,7 @@ private struct SequencerWorkspace: View {
     }
 
     private func sequencedClipIndices(trackIndex: Int) -> [Int] {
-        session.tracks[trackIndex].clips.indices.filter {
-            let kind = session.tracks[trackIndex].clips[$0].kind
-            return kind == .pattern || kind == .midi
-        }
+        session.tracks[trackIndex].patternIndices
     }
 
     private func activeClipIndex(trackIndex: Int) -> Int? {
@@ -2340,25 +2537,65 @@ private struct SequencerWorkspace: View {
         syncEngine()
     }
 
-    private func addPattern() {
+    /// A new pattern on every sequenced track, empty or copied from the one
+    /// being edited. It is not in the song until PLACE IN SONG.
+    private func addPattern(copying: Bool) {
         let newIndex = patternCount
         let count = stepCount
         for trackIndex in musicalTrackIndices {
             let track = session.tracks[trackIndex]
             let kind: LYClip.Kind = track.kind == .drumkit ? .pattern : .midi
             let prefix = track.isChordTrack == true ? "CHORD BED" : "PATTERN"
-            session.tracks[trackIndex].clips.append(
-                LYClip(
-                    name: "\(prefix) \(String(format: "%02d", newIndex + 1))",
-                    kind: kind,
-                    startBeat: Double(newIndex * max(count / 4, 1)),
-                    lengthBeats: Double(max(count / 4, 1)),
-                    steps: Array(repeating: false, count: count),
-                    stepParameters: Array(repeating: .default, count: count)
-                )
+            let source = copying ? activeClipIndex(trackIndex: trackIndex).map { track.clips[$0] } : nil
+            var clip = LYClip(
+                name: "\(prefix) \(String(format: "%02d", newIndex + 1))",
+                kind: kind,
+                startBeat: 0,
+                lengthBeats: Double(max(count / 4, 1)),
+                steps: source?.steps ?? Array(repeating: false, count: count),
+                stepParameters: source?.stepParameters ?? Array(repeating: .default, count: count)
             )
+            clip.isOffTimeline = true
+            // A track with fewer patterns gets empty ones up to this index, so
+            // pattern numbers line up across tracks.
+            while session.tracks[trackIndex].patternIndices.count < newIndex {
+                var filler = clip
+                filler.id = UUID()
+                filler.steps = Array(repeating: false, count: count)
+                filler.stepParameters = Array(repeating: .default, count: count)
+                session.tracks[trackIndex].clips.append(filler)
+            }
+            session.tracks[trackIndex].clips.append(clip)
         }
         patternIndex = newIndex
+        syncEngine()
+    }
+
+    /// Places the pattern being edited at the end of the song on every track.
+    private func placeInSong() {
+        let beatsPerBar = max(1, Double(session.numerator) * 4 / Double(max(session.denominator, 1)))
+        let end = session.tracks.flatMap(\.clips).filter(\.isInSong).map { $0.startBeat + $0.lengthBeats }.max() ?? 0
+        let at = ceil(end / beatsPerBar - 0.000_1) * beatsPerBar
+        for trackIndex in musicalTrackIndices {
+            guard let clipIndex = activeClipIndex(trackIndex: trackIndex) else { continue }
+            let pattern = session.tracks[trackIndex].clips[clipIndex]
+            if pattern.isOffTimeline == true,
+               !session.tracks[trackIndex].clips.contains(where: { $0.patternSourceID == pattern.id }) {
+                // First use: the pattern itself goes into the song.
+                session.tracks[trackIndex].clips[clipIndex].isOffTimeline = nil
+                session.tracks[trackIndex].clips[clipIndex].startBeat = at
+            } else {
+                var placement = pattern
+                placement.id = UUID()
+                placement.patternSourceID = pattern.id
+                placement.steps = nil
+                placement.stepParameters = nil
+                placement.isOffTimeline = nil
+                placement.startBeat = at
+                placement.loopOffsetBeats = 0
+                session.tracks[trackIndex].clips.append(placement)
+            }
+        }
         syncEngine()
     }
 

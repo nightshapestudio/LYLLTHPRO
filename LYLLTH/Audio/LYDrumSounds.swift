@@ -36,6 +36,13 @@ enum LYDrumSounds {
         track.drumPresetID ?? defaultPresetID(for: track)
     }
 
+    /// The preset a drum track plays, its own custom one included.
+    static func preset(for track: LYTrack) -> DrumSynthPreset? {
+        let id = presetID(for: track)
+        if let custom = track.customDrumPreset, custom.id == id { return custom }
+        return preset(id: id)
+    }
+
     private static var folder: URL {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let url = base.appendingPathComponent("LYLLTH/DrumSynth", isDirectory: true)

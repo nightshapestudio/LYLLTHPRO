@@ -1,94 +1,69 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Live readout
-
-/// Polls the running synth 30 times a second for what the editor animates:
-/// modulated wavetable positions, envelope levels, LFO phases, cutoff, scope.
+/// What every LUNATK page needs to read and change the sound, and to open
+/// the editor's dropdowns.
 @MainActor
-final class LYSynthLive: ObservableObject {
-    @Published private(set) var display = LYSynthDisplay()
-    @Published private(set) var scope: [Float] = Array(repeating: 0, count: 256)
-    private var timer: Timer?
-    private weak var instrument: LYSynthInstrument?
+struct LYSynthContext {
+    let patch: LYSynthPatch
+    let live: LYSynthLive
+    let set: (Int, Float) -> Void
+    let replace: (LYSynthPatch) -> Void
+    let addRoute: (Int, Int) -> Void
+    let openMenu: (LYSynthMenuRequest) -> Void
 
-    func attach(_ instrument: LYSynthInstrument?) {
-        self.instrument = instrument
-        guard timer == nil else { return }
-        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.poll() }
+    static let space = "LYSynthEditor"
+
+    func value(_ id: Int) -> Float { patch.value(id) }
+    func isOn(_ id: Int) -> Bool { patch.value(id) > 0.5 }
+    func toggle(_ id: Int) { set(id, isOn(id) ? 0 : 1) }
+
+    func knob(_ id: Int, _ destination: Int? = nil, accent: Color, diameter: CGFloat = 28,
+              label: String? = nil, format: ((Float) -> String)? = nil) -> LYSynthKnob {
+        LYSynthKnob(
+            parameter: id,
+            destination: destination,
+            patch: patch,
+            accent: accent,
+            diameter: diameter,
+            label: label,
+            format: format,
+            liveModulation: destination.map { live.modulation($0) } ?? 0,
+            update: set,
+            addRoute: addRoute
+        )
+    }
+
+    /// A dropdown for a stepped parameter.
+    func choice(_ id: Int, label: String, names: [String], order: [Int]? = nil, accent: Color,
+                columns: Int = 2, width: CGFloat = 260, anchor: String) -> some View {
+        let current = Int(value(id).rounded())
+        return LYSynthChoiceButton(label: label, value: names.indices.contains(current) ? names[current] : "—", accent: accent) {
+            openMenu(LYSynthMenuRequest(anchor: anchor, title: label, names: names, order: order, selected: current,
+                                        accent: accent, columns: columns, width: width) { set(id, Float($0)) })
         }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+        .lyMenuAnchor(anchor, in: Self.space)
     }
 
-    func detach() {
-        timer?.invalidate()
-        timer = nil
+    static func time(_ value: Float) -> String {
+        let seconds = 0.0005 * pow(20_000, Double(value))
+        return seconds < 1 ? String(format: "%.0f MS", seconds * 1000) : String(format: "%.2f S", seconds)
     }
 
-    private func poll() {
-        guard let instrument else { return }
-        display = instrument.display()
-        scope = instrument.scope(count: 256)
+    static func pan(_ value: Float) -> String {
+        abs(value) < 0.01 ? "C" : (value < 0 ? "L\(Int(abs(value) * 100))" : "R\(Int(value * 100))")
     }
 
-    func modulation(_ destination: Int) -> Float {
-        withUnsafeBytes(of: display.modulation) { raw in
-            let values = raw.bindMemory(to: Float.self)
-            return destination >= 0 && destination < values.count ? values[destination] : 0
-        }
-    }
-
-    func envelope(_ index: Int) -> Float {
-        [display.envelope.0, display.envelope.1, display.envelope.2][min(max(index, 0), 2)]
-    }
-
-    func lfo(_ index: Int) -> (value: Float, phase: Float) {
-        let values = [display.lfo.0, display.lfo.1, display.lfo.2, display.lfo.3]
-        let phases = [display.lfoPhase.0, display.lfoPhase.1, display.lfoPhase.2, display.lfoPhase.3]
-        let i = min(max(index, 0), 3)
-        return (values[i], phases[i])
-    }
-}
-
-/// Factory wavetable frames, reduced for drawing and kept after first use.
-enum LYWavetableArt {
-    private static var cache: [Int: [[Float]]] = [:]
-
-    /// A library table, reduced the same way. Not cached: the editor can
-    /// re-save a table under the name it already has.
-    @MainActor
-    static func frames(custom name: String) -> [[Float]]? {
-        guard let raw = LYWavetableLibrary.shared.frames(named: name) else { return nil }
-        let size = LYWavetableLibrary.frameSize
-        let count = raw.count / size
-        guard count > 0 else { return nil }
-        let peak = max(raw.map(abs).max() ?? 0, 0.0001)
-        let step = max(1, count / 64)
-        return stride(from: 0, to: count, by: step).map { f in
-            (0..<96).map { i in raw[f * size + i * size / 96] / peak }
-        }
-    }
-
-    static func frames(_ table: Int) -> [[Float]] {
-        if let cached = cache[table] { return cached }
-        var raw = [Float](repeating: 0, count: Int(LY_WT_MAX_FRAMES) * Int(LY_WT_SIZE))
-        let count = Int(raw.withUnsafeMutableBufferPointer { lysynth_factory_table(Int32(table), $0.baseAddress, Int32(LY_WT_MAX_FRAMES)) })
-        let size = Int(LY_WT_SIZE)
-        var peak: Float = 0.0001
-        for i in 0..<(count * size) { peak = max(peak, abs(raw[i])) }
-        let points = 96
-        let result: [[Float]] = (0..<count).map { f in
-            (0..<points).map { i in raw[f * size + i * size / points] / peak }
-        }
-        cache[table] = result
-        return result
+    static func hz(_ value: Float) -> String {
+        let hz = 20 * pow(1000, value)
+        return hz >= 1000 ? String(format: "%.1fK", hz / 1000) : String(format: "%.0f", hz)
     }
 }
 
 // MARK: - Editor
 
+/// LUNATK. OSC, FX, ARP, MATRIX and GLOBAL pages over one header and one
+/// keyboard, in the NIGHTSHAPE language.
 struct LYSynthEditor: View {
     @Binding var patch: LYSynthPatch
     let trackName: String
@@ -96,79 +71,63 @@ struct LYSynthEditor: View {
     /// Copies a custom wavetable into the song so it travels with it.
     var storeTableInProject: (String, [Float]) -> Void = { _, _ in }
     let close: () -> Void
+    /// The page it opens on.
+    var initialPage: Page = .osc
+
+    enum Page: String, CaseIterable { case osc = "OSC", fx = "FX", arp = "ARP", matrix = "MATRIX", global = "GLOBAL" }
 
     @StateObject private var live = LYSynthLive()
     @ObservedObject private var tableLibrary = LYWavetableLibrary.shared
     @ObservedObject private var presetStore = LYSynthPresetStore.shared
+    @State private var chosenPage: Page?
+    private var page: Page { chosenPage ?? initialPage }
     @State private var editingTable: Int?
     @State private var savingPreset = false
     @State private var presetDraft = ""
     @State private var presetError: String?
     @State private var anchors: [String: CGRect] = [:]
-    @State private var modTab = 0          // 0…2 envelopes, 3…6 LFOs
+    @State private var menu: LYSynthMenuRequest?
     @State private var choosingTable: Int?
     @State private var choosingPreset = false
+    @State private var modTab = 0          // 0…3 envelopes, 4…7 LFOs
     @State private var heldKeys: Set<Int> = []
     @State private var keyboardOctave = 4
+
+    private var context: LYSynthContext {
+        LYSynthContext(patch: patch, live: live, set: set, replace: { patch = $0 }, addRoute: addRoute,
+                       openMenu: { request in withAnimation(LYLLTHTheme.snap) { menu = request } })
+    }
 
     var body: some View {
         VStack(spacing: 8) {
             header
-            HStack(alignment: .top, spacing: 8) {
-                oscillatorPanel(0).frame(width: 372)
-                oscillatorPanel(1).frame(width: 372)
-                subNoisePanel.frame(width: 150)
-                filterPanel.frame(maxWidth: .infinity)
-            }
-            .frame(height: 318)
-            HStack(alignment: .top, spacing: 8) {
-                modulationPanel.frame(width: 540)
-                macroPanel.frame(width: 232)
-                voicePanel.frame(width: 172)
-                matrixPanel.frame(maxWidth: .infinity)
-            }
-            .frame(maxHeight: .infinity)
+            pageView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             LYSynthKeyboard(
                 lowestOctave: keyboardOctave,
                 held: heldKeys,
                 press: { note in play(note) },
                 release: { note in stop(note) }
             )
-            .frame(height: 42)
+            .frame(height: 40)
         }
-        .coordinateSpace(name: "LYSynthEditor")
+        .coordinateSpace(name: LYSynthContext.space)
         .onPreferenceChange(LYMenuAnchorKey.self) { anchors = $0 }
-        .overlay(alignment: .topLeading) {
-            if choosingPreset, let frame = anchors["preset"] {
-                LYPresetBrowser(
-                    current: patch.name,
-                    user: presetStore.presets,
-                    choose: { patch = $0; choosingPreset = false },
-                    delete: { presetStore.delete($0) },
-                    close: { choosingPreset = false }
-                )
-                .frame(width: 420, height: 380)
-                .offset(x: min(frame.minX, frame.maxX - 420), y: frame.maxY + 6)
-                .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
-            }
-        }
+        .overlay(alignment: .topLeading) { floatingLayer }
         .padding(12)
-        .background(Color(hex: 0x07080D))
+        .background(Color(hex: 0x06070B))
         .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
-        .overlay(alignment: .top) { Rectangle().fill(LYLLTHTheme.teal.opacity(0.8)).frame(height: 1) }
         .overlay { wavetableEditorOverlay }
         .overlay { presetSaveOverlay }
         .background(LYSynthKeyMonitor(octave: $keyboardOctave, press: play, release: stop,
-                                      close: { if editingTable != nil { editingTable = nil } else { close() } },
+                                      close: { if editingTable != nil { editingTable = nil } else if menu != nil { menu = nil } else { close() } },
                                       isEnabled: editingTable == nil && !savingPreset))
         .onAppear {
             live.attach(instrument)
             #if DEBUG
-            // Screenshot hooks.
             let environment = ProcessInfo.processInfo.environment
+            if let raw = environment["LYLLTH_DEBUG_SYNTHPAGE"], let debugPage = Page(rawValue: raw) { chosenPage = debugPage }
             if let tab = environment["LYLLTH_DEBUG_MODTAB"].flatMap(Int.init) { modTab = tab }
-            if environment["LYLLTH_DEBUG_WTEDIT"] != nil { editingTable = 0 }
-            if environment["LYLLTH_DEBUG_PRESETS"] != nil { choosingPreset = true }
             #endif
         }
         .onDisappear {
@@ -186,28 +145,10 @@ struct LYSynthEditor: View {
         patch = next
     }
 
-    private func toggle(_ id: Int) { set(id, patch.value(id) > 0.5 ? 0 : 1) }
-
     private func addRoute(_ source: Int, _ destination: Int) {
         var next = patch
         next.route(source: source, destination: destination, amount: 0.3)
         patch = next
-    }
-
-    private func knob(_ id: Int, _ destination: Int? = nil, accent: Color, diameter: CGFloat = 34,
-                      label: String? = nil, format: ((Float) -> String)? = nil) -> some View {
-        LYSynthKnob(
-            parameter: id,
-            destination: destination,
-            patch: patch,
-            accent: accent,
-            diameter: diameter,
-            label: label,
-            format: format,
-            liveModulation: destination.map { live.modulation($0) } ?? 0,
-            update: set,
-            addRoute: addRoute
-        )
     }
 
     private func play(_ note: Int) {
@@ -224,53 +165,96 @@ struct LYSynthEditor: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 0) {
-                Text("LYLLTH").font(LYLLTHTheme.wordmark(24))
-                Text(" SYNTH").font(LYLLTHTheme.wordmarkOutline(24))
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                LUNATKMark(size: 22)
+                Text(trackName)
+                    .font(LYLLTHTheme.label(7, weight: .bold))
+                    .tracking(1.6)
+                    .foregroundStyle(LYLLTHTheme.dim)
+                    .lineLimit(1)
             }
-            .tracking(1.4)
             .fixedSize()
-            .hidden()
-            .overlay(
-                LYSynthTieDye().mask(
-                    HStack(spacing: 0) {
-                        Text("LYLLTH").font(LYLLTHTheme.wordmark(24))
-                        Text(" SYNTH").font(LYLLTHTheme.wordmarkOutline(24))
-                    }
-                    .tracking(1.4)
-                    .fixedSize()
-                )
-            )
 
-            Text(trackName)
-                .font(LYLLTHTheme.label(9, weight: .bold))
-                .tracking(1.6)
-                .foregroundStyle(LYLLTHTheme.dim)
+            HStack(spacing: 0) {
+                ForEach(Page.allCases, id: \.self) { item in
+                    let isOn = page == item
+                    Button { withAnimation(LYLLTHTheme.snap) { chosenPage = item; menu = nil } } label: {
+                        Text(item.rawValue)
+                            .font(LYLLTHTheme.label(9.5, weight: .bold))
+                            .tracking(1.8)
+                            .foregroundStyle(isOn ? LYLLTHTheme.text : LYLLTHTheme.dim)
+                            .padding(.horizontal, 14)
+                            .frame(height: 34)
+                            .overlay(alignment: .bottom) {
+                                Rectangle().fill(isOn ? pageAccent(item) : .clear).frame(height: 2)
+                                    .lyBloom(pageAccent(item), isOn: isOn && pageAccent(item) != LYLLTHTheme.teal)
+                            }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .overlay(alignment: .topTrailing) { pageBadge(item) }
+                }
+            }
+            .overlay(alignment: .bottom) { LYHairline() }
 
             Spacer(minLength: 8)
 
             presetBar
 
-            LYSynthScope(live: live)
-                .frame(width: 180, height: 38)
+            LYSynthScope(live: live, accent: LYLLTHTheme.lavender)
+                .frame(width: 150, height: 38)
 
             VStack(spacing: 1) {
                 Text("\(live.display.activeVoices)")
-                    .font(LYLLTHTheme.value(16))
+                    .font(LYLLTHTheme.value(15))
                     .foregroundStyle(LYLLTHTheme.text)
                 Text("VOICES")
                     .font(LYLLTHTheme.label(6.5, weight: .bold))
                     .tracking(1.2)
                     .foregroundStyle(LYLLTHTheme.dim)
             }
-            .frame(width: 44)
+            .frame(width: 42)
 
-            knob(LY_MASTER, accent: LYLLTHTheme.chromeText, diameter: 30, label: "MASTER")
-
-
+            context.knob(LY_MASTER, LY_DST_MASTER, accent: LYLLTHTheme.chromeText, diameter: 28, label: "MASTER")
         }
-        .frame(height: 56)
+        .frame(height: 50)
+    }
+
+    private func pageAccent(_ page: Page) -> Color {
+        switch page {
+        case .osc: return LYLLTHTheme.teal
+        case .fx: return LYLLTHTheme.indigo
+        case .arp: return LYLLTHTheme.purple
+        case .matrix: return LYLLTHTheme.lavender
+        case .global: return LYLLTHTheme.chromeText
+        }
+    }
+
+    /// A small count on FX and MATRIX, a dot on ARP while it is on.
+    @ViewBuilder
+    private func pageBadge(_ page: Page) -> some View {
+        switch page {
+        case .fx:
+            let on = LYSynthFXPage.onIDs.filter { patch.value($0) > 0.5 }.count
+            if on > 0 { badge("\(on)", color: LYLLTHTheme.indigo) }
+        case .matrix:
+            let used = patch.usedMatrixSlots.count
+            if used > 0 { badge("\(used)", color: LYLLTHTheme.lavender) }
+        case .arp:
+            if patch.value(LY_ARP_ON) > 0.5 {
+                Circle().fill(LYLLTHTheme.purple).frame(width: 5, height: 5).lyBloom(LYLLTHTheme.purple).padding(.top, 6).padding(.trailing, 4)
+            }
+        default: EmptyView()
+        }
+    }
+
+    private func badge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(LYLLTHTheme.value(7))
+            .foregroundStyle(color)
+            .padding(.top, 4)
+            .padding(.trailing, 3)
     }
 
     private var presetBar: some View {
@@ -285,7 +269,7 @@ struct LYSynthEditor: View {
                     Text(patch.name).font(LYLLTHTheme.label(11, weight: .bold)).tracking(1.2).foregroundStyle(LYLLTHTheme.text)
                         .lineLimit(1)
                 }
-                .frame(width: 190, height: 38)
+                .frame(width: 200, height: 38)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -306,7 +290,7 @@ struct LYSynthEditor: View {
             .help("Save this sound to your presets")
         }
         .overlay(Rectangle().stroke(choosingPreset ? LYLLTHTheme.teal.opacity(0.7) : LYLLTHTheme.lineStrong, lineWidth: 1))
-        .lyMenuAnchor("preset", in: "LYSynthEditor")
+        .lyMenuAnchor("preset", in: LYSynthContext.space)
     }
 
     private func presetArrow(_ symbol: String, _ action: @escaping () -> Void) -> some View {
@@ -317,61 +301,484 @@ struct LYSynthEditor: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: Pages
+
+    private var pageView: AnyView {
+        switch page {
+        case .osc: return AnyView(oscPage)
+        case .fx: return AnyView(LYSynthFXPage(context: context))
+        case .arp: return AnyView(LYSynthArpPage(context: context))
+        case .matrix: return AnyView(LYSynthMatrixPage(context: context))
+        case .global: return AnyView(LYSynthGlobalPage(context: context))
+        }
+    }
+
+    private var oscPage: some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                AnyView(subNoiseColumn).frame(width: 196)
+                AnyView(oscillatorPanel(0)).frame(width: 342)
+                AnyView(oscillatorPanel(1)).frame(width: 342)
+                AnyView(filterPanel).frame(maxWidth: .infinity)
+            }
+            .frame(height: 336)
+            HStack(alignment: .top, spacing: 8) {
+                AnyView(modulationPanel).frame(maxWidth: .infinity)
+                AnyView(macroPanel).frame(width: 236)
+                AnyView(voicePanel).frame(width: 200)
+            }
+            .frame(maxHeight: .infinity)
+        }
+    }
+
+    // MARK: Floating layer: dropdowns, table and preset browsers
+
     @ViewBuilder
-    private var presetSaveOverlay: some View {
-        if savingPreset {
-            ZStack {
-                Color.black.opacity(0.6).onTapGesture { savingPreset = false }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("SAVE PRESET")
-                        .font(LYLLTHTheme.label(11, weight: .bold)).tracking(2).foregroundStyle(LYLLTHTheme.teal)
-                    TextField("NAME", text: $presetDraft)
-                        .textFieldStyle(.plain)
-                        .font(LYLLTHTheme.label(13, weight: .bold))
-                        .foregroundStyle(LYLLTHTheme.text)
-                        .padding(.horizontal, 10)
-                        .frame(height: 34)
-                        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
-                        .onSubmit(savePreset)
-                    if let presetError {
-                        Text(presetError).font(LYLLTHTheme.label(8, weight: .bold)).foregroundStyle(LYLLTHTheme.record)
-                    }
-                    Text("SAVED TO ~/LIBRARY/APPLICATION SUPPORT/LYLLTH/PRESETS WITH ANY CUSTOM WAVETABLES IT USES")
-                        .font(LYLLTHTheme.label(7, weight: .bold)).tracking(0.8).foregroundStyle(LYLLTHTheme.dim)
-                    HStack {
-                        Spacer()
-                        Button("CANCEL") { savingPreset = false }.buttonStyle(LYChromeButtonStyle(compact: true))
-                        Button("SAVE", action: savePreset).buttonStyle(LYChromeButtonStyle(active: true, compact: true))
-                            .disabled(presetDraft.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                }
-                .padding(18)
-                .frame(width: 420)
-                .background(Color(hex: 0x07080D))
-                .overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.7), lineWidth: 1))
+    private var floatingLayer: some View {
+        ZStack(alignment: .topLeading) {
+            if menu != nil || choosingTable != nil || choosingPreset {
+                Color.black.opacity(0.001)
+                    .contentShape(Rectangle())
+                    .onTapGesture { menu = nil; choosingTable = nil; choosingPreset = false }
+            }
+            if let menu, let frame = anchors[menu.anchor] {
+                LYSynthMenuView(request: menu, close: { self.menu = nil })
+                    .offset(x: max(0, min(frame.minX, frame.maxX - menu.width)), y: frame.maxY + 4)
+                    .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))
+            }
+            if let oscillator = choosingTable, let frame = anchors["table\(oscillator)"] {
+                LYTableBrowser(
+                    accent: oscillator == 0 ? LYLLTHTheme.teal : LYLLTHTheme.indigo,
+                    current: patch.tableName(oscillator),
+                    user: tableLibrary.names,
+                    chooseFactory: { chooseFactoryTable(oscillator, $0); choosingTable = nil },
+                    chooseUser: { chooseCustomTable(oscillator, $0); choosingTable = nil },
+                    importTable: { choosingTable = nil; importTable(oscillator) },
+                    editTable: { choosingTable = nil; editingTable = oscillator },
+                    close: { choosingTable = nil }
+                )
+                .frame(width: frame.width, height: 260)
+                .offset(x: frame.minX, y: frame.minY)
+            }
+            if choosingPreset, let frame = anchors["preset"] {
+                LYPresetBrowser(
+                    current: patch.name,
+                    user: presetStore.presets,
+                    choose: { patch = $0; choosingPreset = false },
+                    delete: { presetStore.delete($0) },
+                    close: { choosingPreset = false }
+                )
+                .frame(width: 440, height: 420)
+                .offset(x: min(frame.minX, frame.maxX - 440), y: frame.maxY + 6)
+                .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
             }
         }
     }
 
-    private func savePreset() {
-        let name = presetDraft.trimmingCharacters(in: .whitespaces).uppercased()
-        guard !name.isEmpty else { return }
-        guard !LYSynthPatch.factory.contains(where: { $0.name == name }) else {
-            presetError = "THAT NAME BELONGS TO A FACTORY SOUND"
-            return
-        }
-        do {
-            try presetStore.save(patch, as: name)
-            var renamed = patch
-            renamed.name = name
-            patch = renamed
-            savingPreset = false
-        } catch {
-            presetError = error.localizedDescription.uppercased()
+    // MARK: Oscillators
+
+    private func oscillatorPanel(_ o: Int) -> some View {
+        let accent = o == 0 ? LYLLTHTheme.teal : LYLLTHTheme.indigo
+        let p = { (local: Int) in LYSynthParameters.oscillator(o, local) }
+        let d = { (aDestination: Int) in o == 0 ? aDestination : aDestination + (LY_DST_B_LEVEL - LY_DST_A_LEVEL) }
+        let d2 = { (aDestination: Int) in o == 0 ? aDestination : aDestination + (LY_DST_B_WARP2 - LY_DST_A_WARP2) }
+        let table = o == 0 ? patch.tableA : patch.tableB
+        let warpNames = o == 0 ? LYSynthNames.warps : LYSynthNames.warpsB
+        let name = o == 0 ? "A" : "B"
+        let c = context
+
+        return LYSynthPanel(title: "OSC \(name)", accent: accent, isOn: c.isOn(p(LY_OSC_ON)), toggle: { c.toggle(p(LY_OSC_ON)) }) {
+            HStack(spacing: 4) {
+                LYSynthStepper(label: "OCT", text: String(format: "%+d", Int(c.value(p(LY_OSC_OCTAVE)))), accent: accent) {
+                    c.set(p(LY_OSC_OCTAVE), c.value(p(LY_OSC_OCTAVE)) + Float($0))
+                }
+                LYSynthStepper(label: "SEMI", text: String(format: "%+d", Int(c.value(p(LY_OSC_SEMI)))), accent: accent) {
+                    c.set(p(LY_OSC_SEMI), c.value(p(LY_OSC_SEMI)) + Float($0))
+                }
+            }
+        } content: {
+            VStack(spacing: 7) {
+                Button { choosingTable = choosingTable == o ? nil : o } label: {
+                    LYWavetableView(table: table, customName: o == 0 ? patch.customTableA : patch.customTableB,
+                                    oscillator: o, basePosition: c.value(p(LY_OSC_WTPOS)),
+                                    accent: accent, live: live)
+                        .overlay(alignment: .topLeading) {
+                            HStack(spacing: 5) {
+                                Text(patch.tableName(o))
+                                    .font(LYLLTHTheme.label(8.5, weight: .bold)).tracking(1.2)
+                                Image(systemName: "chevron.down").font(.system(size: 6.5, weight: .bold))
+                            }
+                            .foregroundStyle(LYLLTHTheme.text)
+                            .padding(6)
+                        }
+                }
+                .buttonStyle(.plain)
+                .help("Choose, import or edit a wavetable")
+                .lyMenuAnchor("table\(o)", in: LYSynthContext.space)
+                .frame(height: 120)
+
+                HStack(spacing: 4) {
+                    c.choice(p(LY_OSC_WARPMODE), label: "WARP", names: warpNames, order: LYSynthNames.warpOrder, accent: accent,
+                             columns: 2, width: 240, anchor: "warp\(o)")
+                    c.choice(p(LY_OSC_WARPMODE2), label: "WARP 2", names: warpNames, order: LYSynthNames.warpOrder, accent: accent,
+                             columns: 2, width: 240, anchor: "warp2\(o)")
+                    c.choice(p(LY_OSC_UNIMODE), label: "UNISON", names: LYSynthNames.unisonModes, accent: accent,
+                             columns: 2, width: 200, anchor: "uni\(o)")
+                    c.choice(p(LY_OSC_STACK), label: "STACK", names: LYSynthNames.stacks, accent: accent,
+                             columns: 1, width: 140, anchor: "stack\(o)")
+                }
+
+                Grid(horizontalSpacing: 0, verticalSpacing: 6) {
+                    GridRow {
+                        c.knob(p(LY_OSC_WTPOS), d(LY_DST_A_WTPOS), accent: accent, diameter: 32, label: "WT POS")
+                        c.knob(p(LY_OSC_WARPAMT), d(LY_DST_A_WARP), accent: accent, label: "WARP")
+                        c.knob(p(LY_OSC_WARPAMT2), d2(LY_DST_A_WARP2), accent: accent, label: "WARP 2")
+                        c.knob(p(LY_OSC_LEVEL), d(LY_DST_A_LEVEL), accent: accent)
+                        c.knob(p(LY_OSC_PAN), d(LY_DST_A_PAN), accent: accent, format: LYSynthContext.pan)
+                        c.knob(p(LY_OSC_FINE), d2(LY_DST_A_FINE), accent: accent, label: "FINE", format: { String(format: "%+.0f¢", $0) })
+                    }
+                    GridRow {
+                        c.knob(p(LY_OSC_UNISON), accent: accent, label: "VOICES")
+                        c.knob(p(LY_OSC_DETUNE), d(LY_DST_A_DETUNE), accent: accent)
+                        c.knob(p(LY_OSC_BLEND), d(LY_DST_A_BLEND), accent: accent)
+                        c.knob(p(LY_OSC_WIDTH), d2(LY_DST_A_WIDTH), accent: accent)
+                        c.knob(p(LY_OSC_PHASE), accent: accent, label: "PHASE", format: { String(format: "%.0f°", $0 * 360) })
+                        c.knob(p(LY_OSC_RANDPHASE), accent: accent, label: "RAND")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
         }
     }
 
-    // MARK: Wavetables
+    // MARK: Sub and noise
+
+    private var subNoiseColumn: some View {
+        let c = context
+        let accent = LYLLTHTheme.purple
+        return VStack(spacing: 8) {
+            LYSynthPanel(title: "SUB", accent: accent, isOn: c.isOn(LY_SUB_ON), toggle: { c.toggle(LY_SUB_ON) }) {
+                VStack(spacing: 8) {
+                    HStack(spacing: 4) {
+                        c.choice(LY_SUB_SHAPE, label: "SHAPE", names: LYSynthNames.subShapes, accent: accent, columns: 2, width: 180, anchor: "subShape")
+                        LYSynthStepper(label: "OCT", text: "−\(Int(c.value(LY_SUB_OCTAVE)))", accent: accent) { step in
+                            c.set(LY_SUB_OCTAVE, c.value(LY_SUB_OCTAVE) + Float(step))
+                        }
+                    }
+                    HStack(spacing: 0) {
+                        c.knob(LY_SUB_LEVEL, LY_DST_SUB_LEVEL, accent: accent, diameter: 30)
+                        c.knob(LY_SUB_PAN, LY_DST_SUB_PAN, accent: accent, diameter: 30, format: LYSynthContext.pan)
+                    }
+                }
+            }
+            .frame(height: 146)
+            LYSynthPanel(title: "NOISE", accent: accent, isOn: c.isOn(LY_NOISE_ON), toggle: { c.toggle(LY_NOISE_ON) }) {
+                LYSynthToggle(title: "KEY", isOn: c.isOn(LY_NOISE_KEYTRACK), accent: accent) { c.toggle(LY_NOISE_KEYTRACK) }
+                    .help("The pitched noises (DIGITAL, METAL, BREATH, CRACKLE) follow the note")
+            } content: {
+                VStack(spacing: 8) {
+                    c.choice(LY_NOISE_TYPE, label: "TYPE", names: LYSynthNames.noiseTypes, accent: accent, columns: 2, width: 190, anchor: "noiseType")
+                    HStack(spacing: 0) {
+                        c.knob(LY_NOISE_LEVEL, LY_DST_NOISE_LEVEL, accent: accent, diameter: 24)
+                        c.knob(LY_NOISE_COLOR, LY_DST_NOISE_COLOR, accent: accent, diameter: 24)
+                        c.knob(LY_NOISE_PITCH, LY_DST_NOISE_PITCH, accent: accent, diameter: 24)
+                        c.knob(LY_NOISE_PAN, LY_DST_NOISE_PAN, accent: accent, diameter: 24, format: LYSynthContext.pan)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Filters
+
+    private var filterPanel: some View {
+        let c = context
+        let accent = LYLLTHTheme.teal
+        return LYSynthPanel(title: "FILTER", accent: accent) {
+            HStack(spacing: 3) {
+                ForEach([("A", LY_FILTER_ROUTE_A), ("B", LY_FILTER_ROUTE_B), ("S", LY_FILTER_ROUTE_SUB), ("N", LY_FILTER_ROUTE_NOISE)], id: \.1) { item in
+                    LYSynthToggle(title: item.0, isOn: c.isOn(item.1), accent: accent) { c.toggle(item.1) }
+                        .help("Send \(item.0 == "S" ? "SUB" : item.0 == "N" ? "NOISE" : "OSC " + item.0) through the filters")
+                }
+            }
+        } content: {
+            VStack(spacing: 6) {
+                LYFilterCurve(patch: patch, live: live)
+                    .frame(height: 92)
+                    .overlay(alignment: .topTrailing) {
+                        HStack(spacing: 3) {
+                            LYSynthToggle(title: "SERIAL", isOn: !c.isOn(LY_FILTER_ROUTING), accent: accent) { c.set(LY_FILTER_ROUTING, 0) }
+                            LYSynthToggle(title: "PARALLEL", isOn: c.isOn(LY_FILTER_ROUTING), accent: accent) { c.set(LY_FILTER_ROUTING, 1) }
+                        }
+                        .padding(5)
+                    }
+                filterRow(number: 1, on: LY_FILTER_ON, type: LY_FILTER_TYPE, cutoff: LY_FILTER_CUTOFF, res: LY_FILTER_RES, drive: LY_FILTER_DRIVE,
+                          env: LY_FILTER_ENVAMT, envLabel: "ENV 2", key: LY_FILTER_KEYTRACK, mix: LY_FILTER_MIX,
+                          destinations: (LY_DST_CUTOFF, LY_DST_RES, LY_DST_DRIVE, LY_DST_FILTER_MIX), accent: accent)
+                filterRow(number: 2, on: LY_F2_ON, type: LY_F2_TYPE, cutoff: LY_F2_CUTOFF, res: LY_F2_RES, drive: LY_F2_DRIVE,
+                          env: LY_F2_ENVAMT, envLabel: "ENV 3", key: LY_F2_KEYTRACK, mix: LY_F2_MIX,
+                          destinations: (LY_DST_F2_CUTOFF, LY_DST_F2_RES, LY_DST_F2_DRIVE, LY_DST_F2_MIX), accent: LYLLTHTheme.indigo)
+            }
+        }
+    }
+
+    private func filterRow(number: Int, on: Int, type: Int, cutoff: Int, res: Int, drive: Int, env: Int, envLabel: String,
+                           key: Int, mix: Int, destinations: (Int, Int, Int, Int), accent: Color) -> some View {
+        let c = context
+        let isOn = c.isOn(on)
+        return HStack(spacing: 6) {
+            VStack(spacing: 4) {
+                Button { c.toggle(on) } label: {
+                    Text("\(number)")
+                        .font(LYLLTHTheme.value(10))
+                        .foregroundStyle(isOn ? accent : LYLLTHTheme.dim)
+                        .frame(width: 22, height: 22)
+                        .background(accent.opacity(isOn ? 0.14 : 0))
+                        .overlay(Rectangle().stroke(isOn ? accent : LYLLTHTheme.lineStrong, lineWidth: 1))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(isOn ? "Turn filter \(number) off" : "Turn filter \(number) on")
+                if number == 1 {
+                    c.knob(LY_FILTER_PAN, LY_DST_FILTER_PAN, accent: LYLLTHTheme.chromeText, diameter: 16, label: "PAN", format: LYSynthContext.pan)
+                }
+            }
+            c.choice(type, label: "FILTER \(number)", names: LYSynthNames.filters, order: LYSynthNames.filterOrder, accent: accent,
+                     columns: 2, width: 220, anchor: "filterType\(number)")
+                .frame(width: 84)
+            HStack(spacing: 0) {
+                c.knob(cutoff, destinations.0, accent: accent, diameter: 28, format: LYSynthContext.hz)
+                c.knob(res, destinations.1, accent: accent, diameter: 24)
+                c.knob(drive, destinations.2, accent: accent, diameter: 24)
+                c.knob(env, accent: LYLLTHTheme.indigo, diameter: 24, label: envLabel)
+                c.knob(key, accent: accent, diameter: 24, label: "KEY")
+                c.knob(mix, destinations.3, accent: accent, diameter: 24)
+            }
+            .opacity(isOn ? 1 : 0.4)
+        }
+    }
+
+    // MARK: Modulation
+
+    private var modulationPanel: some View {
+        let sources = [LY_SRC_ENV1, LY_SRC_ENV2, LY_SRC_ENV3, LY_SRC_ENV4, LY_SRC_LFO1, LY_SRC_LFO2, LY_SRC_LFO3, LY_SRC_LFO4]
+        let names = ["ENV 1", "ENV 2", "ENV 3", "ENV 4", "LFO 1", "LFO 2", "LFO 3", "LFO 4"]
+        return VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                ForEach(0..<8, id: \.self) { index in
+                    let color = LYSynthSourceColor.color(sources[index])
+                    let isOn = modTab == index
+                    let routes = patch.usedMatrixSlots.filter { Int(patch.value(LYSynthParameters.matrix($0, LY_MX_SOURCE))) == sources[index] }.count
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(color)
+                            .help("Drag onto any knob to modulate it")
+                        Text(names[index])
+                            .font(LYLLTHTheme.label(8.5, weight: .bold))
+                            .tracking(1.2)
+                            .foregroundStyle(isOn ? color : LYLLTHTheme.dim)
+                        if routes > 0 {
+                            Text("\(routes)").font(LYLLTHTheme.value(7)).foregroundStyle(color)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 30)
+                    .background(color.opacity(isOn ? 0.1 : 0))
+                    .overlay(alignment: .bottom) { Rectangle().fill(isOn ? color : .clear).frame(height: 2) }
+                    .contentShape(Rectangle())
+                    .onTapGesture { modTab = index }
+                    .draggable("\(LYSynthSourceColor.dragPrefix)\(sources[index])") {
+                        Text(names[index])
+                            .font(LYLLTHTheme.label(10, weight: .bold))
+                            .foregroundStyle(color)
+                            .padding(6)
+                            .background(Color.black)
+                            .overlay(Rectangle().stroke(color, lineWidth: 1))
+                    }
+                }
+            }
+            .background(LYLLTHTheme.deck)
+            .overlay(alignment: .bottom) { LYHairline() }
+
+            Group {
+                if modTab < 4 { envelopeEditor(modTab) } else { lfoEditor(modTab - 4) }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(LYLLTHTheme.panel)
+        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+    }
+
+    private func envelopeEditor(_ e: Int) -> some View {
+        let c = context
+        let color = LYSynthSourceColor.color(e == 3 ? LY_SRC_ENV4 : LY_SRC_ENV1 + e)
+        let base = LY_ENV1_A + e * 4
+        let hold = LY_ENV1_H + e
+        let note = ["SHAPES THE VOLUME", "FILTER 1 · ROUTE ANYWHERE", "FILTER 2 · ROUTE ANYWHERE", "ROUTE ANYWHERE"][e]
+        return VStack(spacing: 8) {
+            LYEnvelopeGraph(
+                attack: c.value(base), hold: c.value(hold), decay: c.value(base + 1),
+                sustain: c.value(base + 2), release: c.value(base + 3),
+                curves: (0..<3).map { c.value(LY_ENV1_ACURVE + e * 3 + $0) },
+                color: color, level: live.envelope(e),
+                set: { index, value in c.set(base + index, value) },
+                setHold: { c.set(hold, $0) },
+                setCurve: { index, value in c.set(LY_ENV1_ACURVE + e * 3 + index, value) }
+            )
+            HStack(alignment: .bottom, spacing: 0) {
+                c.knob(base, e == 0 ? LY_DST_ENV1_ATTACK : e == 1 ? LY_DST_ENV2_ATTACK : nil, accent: color, label: "ATTACK", format: LYSynthContext.time)
+                Spacer(minLength: 0)
+                c.knob(hold, accent: color, label: "HOLD", format: { $0 < 0.001 ? "—" : LYSynthContext.time($0) })
+                Spacer(minLength: 0)
+                c.knob(base + 1, e == 0 ? LY_DST_ENV1_DECAY : e == 1 ? LY_DST_ENV2_DECAY : nil, accent: color, label: "DECAY", format: LYSynthContext.time)
+                Spacer(minLength: 0)
+                c.knob(base + 2, accent: color, label: "SUSTAIN")
+                Spacer(minLength: 0)
+                c.knob(base + 3, e == 0 ? LY_DST_ENV1_RELEASE : e == 1 ? LY_DST_ENV2_RELEASE : nil, accent: color, label: "RELEASE", format: LYSynthContext.time)
+                Spacer(minLength: 0)
+                Text(note + "\n◆ DRAG TO CURVE")
+                    .font(LYLLTHTheme.label(6.5, weight: .bold))
+                    .tracking(1)
+                    .lineSpacing(3)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(LYLLTHTheme.dim)
+                    .padding(.bottom, 4)
+            }
+        }
+    }
+
+    private func lfoEditor(_ l: Int) -> some View {
+        let c = context
+        let color = LYSynthSourceColor.color(LY_SRC_LFO1 + l)
+        let f = { (field: Int) in LYSynthParameters.lfo(l, field) }
+        let synced = c.isOn(f(LY_LFO1_SYNC))
+        let pointsBase = LY_LFO_POINTS_BASE + l * Int(LY_LFO_POINTS)
+        let shape = Int(c.value(f(LY_LFO1_SHAPE)))
+        let rateText = { (value: Float) -> String in
+            if synced {
+                let index = Int((value * Float(LYSynthNames.syncDivisions.count - 1)).rounded())
+                return LYSynthNames.syncDivisions[min(max(index, 0), LYSynthNames.syncDivisions.count - 1)]
+            }
+            let hz = 0.02 * pow(1500, Double(value))
+            return hz < 1 ? String(format: "%.2f HZ", hz) : String(format: "%.1f HZ", hz)
+        }
+        return VStack(spacing: 8) {
+            LYLFOGraph(
+                shape: shape,
+                points: (0..<Int(LY_LFO_POINTS)).map { c.value(pointsBase + $0) },
+                smooth: c.isOn(f(LY_LFO1_SMOOTH)),
+                phaseOffset: c.value(f(LY_LFO1_PHASE)),
+                delay: c.value(f(LY_LFO1_DELAY)),
+                rise: c.value(f(LY_LFO1_RISE)),
+                oneShot: Int(c.value(f(LY_LFO1_RETRIG))) == LY_LFOMODE_ENV,
+                color: color, live: live, index: l,
+                paint: { i, value in c.set(pointsBase + i, value) }
+            )
+            HStack(alignment: .center, spacing: 6) {
+                LYSynthChoiceButton(label: "SHAPE", value: LYSynthNames.lfoShapes[min(max(shape, 0), LYSynthNames.lfoShapes.count - 1)], accent: color) {
+                    c.openMenu(LYSynthMenuRequest(anchor: "lfoShape", title: "LFO \(l + 1) SHAPE", names: LYSynthNames.lfoShapes, selected: shape,
+                                                  accent: color, columns: 2, width: 200) { new in
+                        var next = patch
+                        // Entering DRAW starts from the shape you were on.
+                        if new == LY_LFO_CUSTOM && shape != LY_LFO_CUSTOM {
+                            for i in 0..<Int(LY_LFO_POINTS) {
+                                let p = Double(i) / Double(LY_LFO_POINTS)
+                                next.set(pointsBase + i, Float(LYLFOGraph.value(shape: shape, at: p, points: [], smooth: true)))
+                            }
+                        }
+                        next.set(f(LY_LFO1_SHAPE), Float(new))
+                        patch = next
+                    })
+                }
+                .lyMenuAnchor("lfoShape", in: LYSynthContext.space)
+                .frame(width: 96)
+                c.choice(f(LY_LFO1_RETRIG), label: "MODE", names: LYSynthNames.lfoModes, accent: color, columns: 3, width: 210, anchor: "lfoMode")
+                    .frame(width: 76)
+                    .help("FREE runs on its own; TRIG restarts with each note; ENV runs once per note, like an envelope")
+                c.knob(f(LY_LFO1_RATE), LY_DST_LFO1_RATE + l, accent: color, label: "RATE", format: rateText)
+                LYSynthToggle(title: "SYNC", isOn: synced, accent: color) { c.toggle(f(LY_LFO1_SYNC)) }
+                c.knob(f(LY_LFO1_PHASE), accent: color, label: "PHASE", format: { String(format: "%.0f°", $0 * 360) })
+                c.knob(f(LY_LFO1_DELAY), accent: color, label: "DELAY", format: { String(format: "%.2f S", $0 * 4) })
+                c.knob(f(LY_LFO1_RISE), accent: color, label: "RISE", format: { String(format: "%.2f S", $0 * 4) })
+                if shape == LY_LFO_CUSTOM {
+                    LYSynthToggle(title: "SMOOTH", isOn: c.isOn(f(LY_LFO1_SMOOTH)), accent: color) { c.toggle(f(LY_LFO1_SMOOTH)) }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    // MARK: Macros and voice
+
+    private var macroPanel: some View {
+        let c = context
+        return LYSynthPanel(title: "MACROS", accent: LYLLTHTheme.chromeText) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                ForEach(0..<4, id: \.self) { m in
+                    let source = LY_SRC_MACRO1 + m
+                    let color = LYSynthSourceColor.color(source)
+                    let routes = patch.usedMatrixSlots.filter { Int(patch.value(LYSynthParameters.matrix($0, LY_MX_SOURCE))) == source }.count
+                    c.knob(LY_MACRO1 + m, accent: color, diameter: 42, label: routes > 0 ? "MACRO \(m + 1) · \(routes)" : "MACRO \(m + 1)")
+                        .overlay(alignment: .topTrailing) { dragHandle(source, color: color, help: "Drag onto a knob to put it on MACRO \(m + 1)") }
+                }
+            }
+            .frame(maxHeight: .infinity)
+        }
+    }
+
+    private var voicePanel: some View {
+        let c = context
+        let accent = LYLLTHTheme.indigo
+        let sources: [(Int, String)] = [(LY_SRC_VELOCITY, "VELO"), (LY_SRC_NOTE, "NOTE"), (LY_SRC_RANDOM, "RAND"),
+                                        (LY_SRC_MODWHEEL, "MOD"), (LY_SRC_PRESSURE, "AFTER"), (LY_SRC_PITCHBEND, "BEND")]
+        return LYSynthPanel(title: "VOICE", accent: accent) {
+            VStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    LYSynthStepper(label: "VOICES", text: Int(c.value(LY_VOICES)) == 1 ? "MONO" : "\(Int(c.value(LY_VOICES)))", accent: accent) { step in
+                        c.set(LY_VOICES, c.value(LY_VOICES) + Float(step))
+                    }
+                    LYSynthToggle(title: "LEGATO", isOn: c.isOn(LY_LEGATO), accent: accent) { c.toggle(LY_LEGATO) }
+                }
+                HStack(spacing: 0) {
+                    c.knob(LY_GLIDE, accent: accent, diameter: 26, format: { String(format: "%.0f MS", $0 * 1000) })
+                    c.knob(LY_MODWHEEL, accent: LYLLTHTheme.chromeText, diameter: 26, label: "MOD WHEEL")
+                }
+                Text("SOURCES · DRAG ONTO A KNOB")
+                    .font(LYLLTHTheme.label(6, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(LYLLTHTheme.dim)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), spacing: 3) {
+                    ForEach(sources, id: \.0) { source in
+                        Text(source.1)
+                            .font(LYLLTHTheme.label(7, weight: .bold))
+                            .tracking(0.8)
+                            .foregroundStyle(LYLLTHTheme.text)
+                            .frame(maxWidth: .infinity, minHeight: 20)
+                            .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+                            .contentShape(Rectangle())
+                            .draggable("\(LYSynthSourceColor.dragPrefix)\(source.0)") {
+                                Text(LYSynthNames.sources[source.0]).font(LYLLTHTheme.label(10, weight: .bold)).padding(6).background(Color.black)
+                            }
+                            .help("Drag onto any knob to modulate it with \(LYSynthNames.sources[source.0])")
+                    }
+                }
+            }
+        }
+    }
+
+    private func dragHandle(_ source: Int, color: Color, help: String) -> some View {
+        Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+            .font(.system(size: 7, weight: .bold))
+            .foregroundStyle(color)
+            .frame(width: 14, height: 14)
+            .contentShape(Rectangle())
+            .draggable("\(LYSynthSourceColor.dragPrefix)\(source)")
+            .help(help)
+    }
+
+    // MARK: Wavetables and presets
 
     private func chooseFactoryTable(_ oscillator: Int, _ index: Int) {
         var next = patch
@@ -433,1124 +840,57 @@ struct LYSynthEditor: View {
         }
     }
 
-    // MARK: Oscillators
-    // MARK: Oscillators
-
-    private func oscillatorPanel(_ o: Int) -> some View {
-        let accent = o == 0 ? LYLLTHTheme.teal : LYLLTHTheme.indigo
-        let p = { (local: Int) in LYSynthParameters.oscillator(o, local) }
-        let d = { (aDestination: Int) in o == 0 ? aDestination : aDestination + (LY_DST_B_LEVEL - LY_DST_A_LEVEL) }
-        let table = o == 0 ? patch.tableA : patch.tableB
-        let warpNames = o == 0 ? LYSynthNames.warps : LYSynthNames.warpsB
-        let warpMode = Int(patch.value(p(LY_OSC_WARPMODE)))
-
-        return LYSynthPanel(title: o == 0 ? "OSC A" : "OSC B", accent: accent, isOn: patch.value(p(LY_OSC_ON)) > 0.5,
-                            toggle: { toggle(p(LY_OSC_ON)) }) {
-            HStack(spacing: 4) {
-                LYSynthStepper(label: "OCT", text: String(format: "%+d", Int(patch.value(p(LY_OSC_OCTAVE)))), accent: accent) {
-                    set(p(LY_OSC_OCTAVE), patch.value(p(LY_OSC_OCTAVE)) + Float($0))
-                }
-                LYSynthStepper(label: "SEMI", text: String(format: "%+d", Int(patch.value(p(LY_OSC_SEMI)))), accent: accent) {
-                    set(p(LY_OSC_SEMI), patch.value(p(LY_OSC_SEMI)) + Float($0))
-                }
-            }
-        } content: {
-            VStack(spacing: 8) {
-                ZStack(alignment: .top) {
-                    Button { choosingTable = choosingTable == o ? nil : o } label: {
-                        LYWavetableView(table: table, customName: o == 0 ? patch.customTableA : patch.customTableB,
-                                        oscillator: o, basePosition: patch.value(p(LY_OSC_WTPOS)),
-                                        accent: accent, live: live)
-                            .overlay(alignment: .topLeading) {
-                                HStack(spacing: 5) {
-                                    Text(patch.tableName(o))
-                                        .font(LYLLTHTheme.label(8.5, weight: .bold)).tracking(1.2)
-                                    Image(systemName: "chevron.down").font(.system(size: 6.5, weight: .bold))
-                                }
-                                .foregroundStyle(LYLLTHTheme.text)
-                                .padding(6)
-                            }
-                    }
-                    .buttonStyle(.plain)
-                    .help("Choose a wavetable")
-                    if choosingTable == o {
-                        LYTableBrowser(
-                            accent: accent,
-                            current: patch.tableName(o),
-                            user: tableLibrary.names,
-                            chooseFactory: { chooseFactoryTable(o, $0) },
-                            chooseUser: { chooseCustomTable(o, $0) },
-                            importTable: { choosingTable = nil; importTable(o) },
-                            editTable: { choosingTable = nil; editingTable = o },
-                            close: { choosingTable = nil }
-                        )
-                    }
-                }
-                .frame(height: 138)
-
-                HStack(alignment: .top, spacing: 0) {
-                    group("TABLE") {
-                        HStack(alignment: .top, spacing: 6) {
-                            knob(p(LY_OSC_WTPOS), d(LY_DST_A_WTPOS), accent: accent, diameter: 44, label: "WT POS")
-                            VStack(spacing: 6) {
-                                LYSynthStepper(label: "WARP", text: warpNames[min(max(warpMode, 0), warpNames.count - 1)], accent: accent) { step in
-                                    let count = Float(LY_WARP_COUNT)
-                                    set(p(LY_OSC_WARPMODE), (patch.value(p(LY_OSC_WARPMODE)) + Float(step) + count).truncatingRemainder(dividingBy: count))
-                                }
-                                .frame(width: 92)
-                                HStack(spacing: 0) {
-                                    knob(p(LY_OSC_WARPAMT), d(LY_DST_A_WARP), accent: accent, diameter: 24, label: "AMOUNT")
-                                    knob(p(LY_OSC_RANDPHASE), accent: accent, diameter: 24, label: "RAND")
-                                }
-                            }
-                        }
-                    }
-                    groupDivider
-                    group("UNISON") {
-                        VStack(spacing: 4) {
-                            HStack(spacing: 2) {
-                                knob(p(LY_OSC_UNISON), accent: accent, diameter: 26, label: "VOICES")
-                                knob(p(LY_OSC_DETUNE), d(LY_DST_A_DETUNE), accent: accent, diameter: 26)
-                            }
-                            HStack(spacing: 2) {
-                                knob(p(LY_OSC_BLEND), d(LY_DST_A_BLEND), accent: accent, diameter: 26)
-                                knob(p(LY_OSC_WIDTH), accent: accent, diameter: 26)
-                            }
-                        }
-                    }
-                    groupDivider
-                    group("OUTPUT") {
-                        VStack(spacing: 4) {
-                            HStack(spacing: 2) {
-                                knob(p(LY_OSC_LEVEL), d(LY_DST_A_LEVEL), accent: accent, diameter: 26)
-                                knob(p(LY_OSC_PAN), d(LY_DST_A_PAN), accent: accent, diameter: 26, format: panText)
-                            }
-                            HStack(spacing: 2) {
-                                knob(p(LY_OSC_FINE), accent: accent, diameter: 26, label: "FINE", format: { String(format: "%+.0f¢", $0) })
-                                knob(p(LY_OSC_PHASE), accent: accent, diameter: 26, label: "PHASE", format: { String(format: "%.0f°", $0 * 360) })
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .zIndex(choosingTable == o ? 10 : 0)
-    }
-
-    // MARK: Sub and noise
-
-    private var subNoisePanel: some View {
-        VStack(spacing: 8) {
-            LYSynthPanel(title: "SUB", accent: LYLLTHTheme.purple, isOn: patch.value(LY_SUB_ON) > 0.5, toggle: { toggle(LY_SUB_ON) }) {
-                VStack(spacing: 8) {
-                    LYSynthStepper(label: "SHAPE", text: LYSynthNames.subShapes[min(max(Int(patch.value(LY_SUB_SHAPE)), 0), 2)], accent: LYLLTHTheme.purple) { step in
-                        set(LY_SUB_SHAPE, Float((Int(patch.value(LY_SUB_SHAPE)) + step + 3) % 3))
-                    }
-                    HStack(spacing: 6) {
-                        LYSynthStepper(label: "OCT", text: "−\(Int(patch.value(LY_SUB_OCTAVE)))", accent: LYLLTHTheme.purple) { step in
-                            set(LY_SUB_OCTAVE, patch.value(LY_SUB_OCTAVE) + Float(step))
-                        }
-                    }
-                    knob(LY_SUB_LEVEL, LY_DST_SUB_LEVEL, accent: LYLLTHTheme.purple)
-                }
-            }
-            LYSynthPanel(title: "NOISE", accent: LYLLTHTheme.purple, isOn: patch.value(LY_NOISE_ON) > 0.5, toggle: { toggle(LY_NOISE_ON) }) {
-                HStack(spacing: 4) {
-                    knob(LY_NOISE_COLOR, accent: LYLLTHTheme.purple, diameter: 30)
-                    knob(LY_NOISE_LEVEL, LY_DST_NOISE_LEVEL, accent: LYLLTHTheme.purple, diameter: 30)
-                }
-            }
-        }
-    }
-
-    // MARK: Filter
-
-    private var filterPanel: some View {
-        let accent = LYLLTHTheme.teal
-        return LYSynthPanel(title: "FILTER", accent: accent, isOn: patch.value(LY_FILTER_ON) > 0.5, toggle: { toggle(LY_FILTER_ON) }) {
-            HStack(spacing: 3) {
-                ForEach([("A", LY_FILTER_ROUTE_A), ("B", LY_FILTER_ROUTE_B), ("S", LY_FILTER_ROUTE_SUB), ("N", LY_FILTER_ROUTE_NOISE)], id: \.1) { item in
-                    LYSynthToggle(title: item.0, isOn: patch.value(item.1) > 0.5, accent: accent) { toggle(item.1) }
-                        .help("Send \(item.0 == "S" ? "SUB" : item.0 == "N" ? "NOISE" : "OSC " + item.0) through the filter")
-                }
-            }
-        } content: {
-            VStack(spacing: 8) {
-                FXSegmentedRow(options: LYSynthNames.filters, selected: Int(patch.value(LY_FILTER_TYPE)), accent: accent, height: 22) { index in
-                    set(LY_FILTER_TYPE, Float(index))
-                }
-                LYFilterCurve(patch: patch, live: live, accent: accent)
-                    .frame(height: 118)
-                HStack(spacing: 0) {
-                    knob(LY_FILTER_CUTOFF, LY_DST_CUTOFF, accent: accent, diameter: 46, format: { value in
-                        let hz = 20 * pow(1000, value)
-                        return hz >= 1000 ? String(format: "%.1fK", hz / 1000) : String(format: "%.0f", hz)
-                    })
-                    Spacer(minLength: 0)
-                    knob(LY_FILTER_RES, LY_DST_RES, accent: accent, diameter: 40)
-                    Spacer(minLength: 0)
-                    knob(LY_FILTER_DRIVE, LY_DST_DRIVE, accent: accent)
-                    Spacer(minLength: 0)
-                    knob(LY_FILTER_ENVAMT, accent: LYLLTHTheme.indigo, label: "ENV 2")
-                    Spacer(minLength: 0)
-                    knob(LY_FILTER_KEYTRACK, accent: accent, label: "KEY")
-                    Spacer(minLength: 0)
-                    knob(LY_FILTER_MIX, LY_DST_FILTER_MIX, accent: accent)
-                }
-            }
-        }
-    }
-
-    // MARK: Modulation
-
-    private var modulationPanel: some View {
-        let sources = [LY_SRC_ENV1, LY_SRC_ENV2, LY_SRC_ENV3, LY_SRC_LFO1, LY_SRC_LFO2, LY_SRC_LFO3, LY_SRC_LFO4]
-        let names = ["ENV 1", "ENV 2", "ENV 3", "LFO 1", "LFO 2", "LFO 3", "LFO 4"]
-        return VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(0..<7, id: \.self) { index in
-                    let color = LYSynthSourceColor.color(sources[index])
-                    let isOn = modTab == index
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                            .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(color)
-                            .help("Drag onto any knob to modulate it")
-                        Text(names[index])
-                            .font(LYLLTHTheme.label(8.5, weight: .bold))
-                            .tracking(1.2)
-                            .foregroundStyle(isOn ? color : LYLLTHTheme.dim)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 32)
-                    .background(color.opacity(isOn ? 0.1 : 0))
-                    .overlay(alignment: .bottom) { Rectangle().fill(isOn ? color : .clear).frame(height: 2) }
-                    .contentShape(Rectangle())
-                    .onTapGesture { modTab = index }
-                    .draggable("\(LYSynthSourceColor.dragPrefix)\(sources[index])") {
-                        Text(names[index])
-                            .font(LYLLTHTheme.label(10, weight: .bold))
-                            .foregroundStyle(color)
-                            .padding(6)
-                            .background(Color.black)
-                            .overlay(Rectangle().stroke(color, lineWidth: 1))
-                    }
-                }
-            }
-            .background(LYLLTHTheme.deck)
-            .overlay(alignment: .bottom) { LYHairline() }
-
-            Group {
-                if modTab < 3 {
-                    envelopeEditor(modTab)
-                } else {
-                    lfoEditor(modTab - 3)
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(LYLLTHTheme.panel)
-        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
-    }
-
-    private func envelopeEditor(_ e: Int) -> some View {
-        let color = LYSynthSourceColor.color(LY_SRC_ENV1 + e)
-        let base = LY_ENV1_A + e * 4
-        let time = { (value: Float) -> String in
-            let seconds = 0.0005 * pow(20_000, Double(value))
-            return seconds < 1 ? String(format: "%.0f MS", seconds * 1000) : String(format: "%.2f S", seconds)
-        }
-        return VStack(spacing: 8) {
-            LYEnvelopeGraph(
-                attack: patch.value(base), decay: patch.value(base + 1),
-                sustain: patch.value(base + 2), release: patch.value(base + 3),
-                curves: (0..<3).map { patch.value(LY_ENV1_ACURVE + e * 3 + $0) },
-                color: color, level: live.envelope(e),
-                set: { index, value in set(base + index, value) },
-                setCurve: { index, value in set(LY_ENV1_ACURVE + e * 3 + index, value) }
-            )
-            HStack(alignment: .bottom, spacing: 0) {
-                knob(base, accent: color, diameter: 30, label: "ATTACK", format: time)
-                Spacer(minLength: 0)
-                knob(base + 1, accent: color, diameter: 30, label: "DECAY", format: time)
-                Spacer(minLength: 0)
-                knob(base + 2, accent: color, diameter: 30, label: "SUSTAIN")
-                Spacer(minLength: 0)
-                knob(base + 3, accent: color, diameter: 30, label: "RELEASE", format: time)
-                Spacer(minLength: 0)
-                Text(e == 0 ? "SHAPES THE VOLUME" : (e == 1 ? "ALSO FILTER ENV" : "ROUTE ANYWHERE") + "\n◆ DRAG TO CURVE")
-                    .font(LYLLTHTheme.label(6.5, weight: .bold))
-                    .tracking(1)
-                    .lineSpacing(3)
-                    .multilineTextAlignment(.trailing)
-                    .foregroundStyle(LYLLTHTheme.dim)
-                    .padding(.bottom, 4)
-            }
-        }
-    }
-
-    private func lfoEditor(_ l: Int) -> some View {
-        let color = LYSynthSourceColor.color(LY_SRC_LFO1 + l)
-        let base = LY_LFO1_SHAPE + l * 4
-        let synced = patch.value(base + 2) > 0.5
-        let pointsBase = LY_LFO_POINTS_BASE + l * Int(LY_LFO_POINTS)
-        return VStack(spacing: 8) {
-            LYLFOGraph(
-                shape: Int(patch.value(base)),
-                points: (0..<Int(LY_LFO_POINTS)).map { patch.value(pointsBase + $0) },
-                smooth: patch.value(LY_LFO1_SMOOTH + l) > 0.5,
-                color: color, live: live, index: l,
-                paint: { i, value in set(pointsBase + i, value) }
-            )
-            HStack(alignment: .center, spacing: 10) {
-                LYSynthStepper(label: "SHAPE", text: LYSynthNames.lfoShapes[min(max(Int(patch.value(base)), 0), LYSynthNames.lfoShapes.count - 1)], accent: color) { step in
-                    let count = LYSynthNames.lfoShapes.count
-                    let old = Int(patch.value(base))
-                    let new = (old + step + count) % count
-                    var next = patch
-                    // Entering DRAW starts from the shape you were on.
-                    if new == LY_LFO_CUSTOM && old != LY_LFO_CUSTOM {
-                        for i in 0..<Int(LY_LFO_POINTS) {
-                            let p = Double(i) / Double(LY_LFO_POINTS)
-                            next.set(pointsBase + i, Float(LYLFOGraph.value(shape: old, at: p, points: [], smooth: true)))
-                        }
-                    }
-                    next.set(base, Float(new))
-                    patch = next
-                }
-                .frame(width: 110)
-                knob(base + 1, LY_DST_LFO1_RATE + l, accent: color, diameter: 30, label: "RATE", format: { value in
-                    if synced {
-                        let index = Int((value * Float(LYSynthNames.syncDivisions.count - 1)).rounded())
-                        return LYSynthNames.syncDivisions[min(max(index, 0), LYSynthNames.syncDivisions.count - 1)]
-                    }
-                    let hz = 0.02 * pow(1500, Double(value))
-                    return hz < 1 ? String(format: "%.2f HZ", hz) : String(format: "%.1f HZ", hz)
-                })
-                Spacer(minLength: 0)
-                LYSynthToggle(title: "SYNC", isOn: synced, accent: color) { toggle(base + 2) }
-                LYSynthToggle(title: "RETRIG", isOn: patch.value(base + 3) > 0.5, accent: color) { toggle(base + 3) }
-                if Int(patch.value(base)) == LY_LFO_CUSTOM {
-                    LYSynthToggle(title: "SMOOTH", isOn: patch.value(LY_LFO1_SMOOTH + l) > 0.5, accent: color) { toggle(LY_LFO1_SMOOTH + l) }
-                }
-            }
-        }
-    }
-
-    // MARK: Macros and voice
-
-    private var macroPanel: some View {
-        LYSynthPanel(title: "MACROS", accent: LYLLTHTheme.chromeText) {
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                ForEach(0..<4, id: \.self) { m in
-                    let source = LY_SRC_MACRO1 + m
-                    let color = LYSynthSourceColor.color(source)
-                    knob(LY_MACRO1 + m, accent: color, diameter: 44, label: "MACRO \(m + 1)")
-                        .overlay(alignment: .topTrailing) { dragHandle(source, color: color, help: "Drag onto a knob to put it on MACRO \(m + 1)") }
-                }
-            }
-            .frame(maxHeight: .infinity)
-        }
-    }
-
-    private var voicePanel: some View {
-        LYSynthPanel(title: "VOICE", accent: LYLLTHTheme.indigo) {
-            VStack(spacing: 8) {
-                LYSynthStepper(label: "VOICES", text: Int(patch.value(LY_VOICES)) == 1 ? "MONO" : "\(Int(patch.value(LY_VOICES)))", accent: LYLLTHTheme.indigo) { step in
-                    set(LY_VOICES, patch.value(LY_VOICES) + Float(step))
-                }
-                .frame(maxWidth: .infinity)
-                LYSynthStepper(label: "BEND", text: "±\(Int(patch.value(LY_BEND_RANGE)))", accent: LYLLTHTheme.indigo) { step in
-                    set(LY_BEND_RANGE, patch.value(LY_BEND_RANGE) + Float(step))
-                }
-                .frame(maxWidth: .infinity)
-                HStack(spacing: 4) {
-                    LYSynthToggle(title: "LEGATO", isOn: patch.value(LY_LEGATO) > 0.5, accent: LYLLTHTheme.indigo) { toggle(LY_LEGATO) }
-                    LYSynthToggle(title: "MPE", isOn: patch.value(LY_MPE) > 0.5, accent: LYLLTHTheme.indigo) { toggle(LY_MPE) }
-                        .help("MPE: each note's own channel carries its pitch bend (±48), pressure and timbre (CC 74). Route PRESSURE and TIMBRE in the matrix.")
-                }
-                HStack(spacing: 2) {
-                    knob(LY_GLIDE, accent: LYLLTHTheme.indigo, diameter: 28, format: { String(format: "%.0f MS", $0 * 1000) })
-                    knob(LY_MODWHEEL, accent: LYLLTHTheme.chromeText, diameter: 28, label: "MOD")
-                        .overlay(alignment: .topTrailing) { dragHandle(LY_SRC_MODWHEEL, color: LYLLTHTheme.chromeText, help: "Drag onto a knob to put it on the mod wheel") }
-                }
-            }
-        }
-    }
-
-    private func dragHandle(_ source: Int, color: Color, help: String) -> some View {
-        Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-            .font(.system(size: 7, weight: .bold))
-            .foregroundStyle(color)
-            .frame(width: 14, height: 14)
-            .contentShape(Rectangle())
-            .draggable("\(LYSynthSourceColor.dragPrefix)\(source)")
-            .help(help)
-    }
-
-    // MARK: Matrix
-
-    private var matrixPanel: some View {
-        let used = (0..<Int(LY_MATRIX_SLOTS)).filter { slot in
-            let base = LY_MATRIX_BASE + slot * 3
-            return Int(patch.value(base)) != LY_SRC_NONE || Int(patch.value(base + 1)) != LY_DST_NONE
-        }
-        return LYSynthPanel(title: "MATRIX", accent: LYLLTHTheme.indigo) {
-            Text("\(used.count) / \(LY_MATRIX_SLOTS)")
-                .font(LYLLTHTheme.value(9))
-                .foregroundStyle(LYLLTHTheme.dim)
-        } content: {
-            ScrollView {
-                VStack(spacing: 4) {
-                    if used.isEmpty {
-                        Text("DRAG AN ENV, LFO OR MACRO ONTO ANY KNOB\nOR ADD A ROUTE HERE")
-                            .font(LYLLTHTheme.label(7.5, weight: .bold))
-                            .tracking(1.1)
-                            .lineSpacing(4)
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(LYLLTHTheme.dim)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                    }
-                    ForEach(used, id: \.self) { slot in
-                        LYMatrixRow(slot: slot, patch: patch, update: set, clear: {
-                            let base = LY_MATRIX_BASE + slot * 3
-                            var next = patch
-                            next.set(base, 0); next.set(base + 1, 0); next.set(base + 2, 0)
-                            patch = next
-                        })
-                    }
-                    Button {
-                        addRoute(LY_SRC_LFO1, LY_DST_CUTOFF)
-                    } label: {
-                        Text("+ ADD ROUTE")
-                            .font(LYLLTHTheme.label(8, weight: .bold))
-                            .tracking(1.2)
-                            .foregroundStyle(LYLLTHTheme.chromeText)
-                            .frame(maxWidth: .infinity, minHeight: 24)
-                            .overlay(Rectangle().stroke(LYLLTHTheme.line, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(used.count >= Int(LY_MATRIX_SLOTS))
-                }
-            }
-            .lyScrollers()
-        }
-    }
-
-    /// A labelled cluster of controls inside a panel.
-    private func group<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(spacing: 4) {
-            Text(title)
-                .font(LYLLTHTheme.label(6.5, weight: .bold))
-                .tracking(1.6)
-                .foregroundStyle(LYLLTHTheme.dim)
-            content()
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var groupDivider: some View {
-        Rectangle().fill(LYLLTHTheme.line).frame(width: 1).padding(.vertical, 4)
-    }
-
-    private func panText(_ value: Float) -> String {
-        abs(value) < 0.01 ? "C" : (value < 0 ? "L\(Int(abs(value) * 100))" : "R\(Int(value * 100))")
-    }
-}
-
-// MARK: - Displays
-
-private struct LYSynthTieDye: View {
-    var body: some View {
-        GeometryReader { geo in
-            let r = max(geo.size.width, geo.size.height) * 0.6
+    @ViewBuilder
+    private var presetSaveOverlay: some View {
+        if savingPreset {
             ZStack {
-                LYLLTHTheme.indigo
-                ForEach(Array([(0.06, 0.40, LYLLTHTheme.teal), (0.28, 0.85, LYLLTHTheme.purple), (0.48, 0.12, LYLLTHTheme.indigo),
-                               (0.70, 0.68, LYLLTHTheme.teal), (0.90, 0.28, LYLLTHTheme.purple)].enumerated()), id: \.offset) { _, spot in
-                    RadialGradient(colors: [spot.2, spot.2.opacity(0)], center: UnitPoint(x: spot.0, y: spot.1), startRadius: 0, endRadius: r)
-                }
-            }
-            .drawingGroup()
-        }
-    }
-}
-
-/// The wavetable as a stack of frames receding in depth, the frame being
-/// played lit in the oscillator's colour and following modulation live.
-struct LYWavetableView: View {
-    let table: Int
-    var customName: String? = nil
-    let oscillator: Int
-    let basePosition: Float
-    let accent: Color
-    @ObservedObject var live: LYSynthLive
-
-    var body: some View {
-        Canvas { context, size in
-            let frames = customName.flatMap { LYWavetableArt.frames(custom: $0) } ?? LYWavetableArt.frames(table)
-            guard !frames.isEmpty else { return }
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.5)))
-            let livePosition: Float = {
-                let modulated = oscillator == 0 ? live.display.wavetablePosition.0 : live.display.wavetablePosition.1
-                return live.display.activeVoices > 0 ? modulated : basePosition
-            }()
-            let layers = min(frames.count, 28)
-            let depthX = size.width * 0.18, depthY = size.height * 0.36
-            let plotW = size.width - depthX - 16, plotH = size.height * 0.34
-            let current = Int((livePosition * Float(frames.count - 1)).rounded())
-            for layer in stride(from: layers - 1, through: 0, by: -1) {
-                let fraction = layers > 1 ? Double(layer) / Double(layers - 1) : 0
-                let frameIndex = Int((fraction * Double(frames.count - 1)).rounded())
-                let ox = 8 + depthX * (1 - fraction), oy = size.height - 10 - plotH / 2 - depthY * (1 - fraction)
-                var path = Path()
-                for (i, sample) in frames[frameIndex].enumerated() {
-                    let point = CGPoint(x: ox + plotW * CGFloat(i) / CGFloat(frames[frameIndex].count - 1), y: oy - CGFloat(sample) * plotH / 2)
-                    if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
-                }
-                let near = abs(frameIndex - current) <= max(1, frames.count / layers / 2)
-                context.stroke(path, with: .color(near ? accent.opacity(0.35) : Color.white.opacity(0.07 + 0.08 * fraction)), lineWidth: near ? 1.2 : 0.8)
-            }
-            // The frame actually playing, drawn in front.
-            let frame = frames[min(max(current, 0), frames.count - 1)]
-            let t = Double(livePosition)
-            let ox = 8 + depthX * (1 - t), oy = size.height - 10 - plotH / 2 - depthY * (1 - t)
-            var path = Path()
-            var fill = Path()
-            fill.move(to: CGPoint(x: ox, y: oy))
-            for (i, sample) in frame.enumerated() {
-                let point = CGPoint(x: ox + plotW * CGFloat(i) / CGFloat(frame.count - 1), y: oy - CGFloat(sample) * plotH / 2)
-                if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
-                fill.addLine(to: point)
-            }
-            fill.addLine(to: CGPoint(x: ox + plotW, y: oy))
-            fill.closeSubpath()
-            context.fill(fill, with: .color(accent.opacity(0.12)))
-            var glow = context
-            glow.addFilter(.shadow(color: accent.opacity(0.8), radius: 4))
-            glow.stroke(path, with: .color(accent), lineWidth: 1.8)
-            context.draw(Text(String(format: "%d / %d", current + 1, frames.count)).font(LYLLTHTheme.value(8)).foregroundColor(LYLLTHTheme.dim),
-                         at: CGPoint(x: size.width - 26, y: 12))
-        }
-        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
-    }
-}
-
-/// The filter's response, drawn from the same analogue prototypes the core
-/// discretises, at the live modulated cutoff.
-struct LYFilterCurve: View {
-    let patch: LYSynthPatch
-    @ObservedObject var live: LYSynthLive
-    let accent: Color
-
-    var body: some View {
-        Canvas { context, size in
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.5)))
-            for decade in [100.0, 1_000.0, 10_000.0] {
-                let x = size.width * CGFloat(log10(decade / 20) / 3)
-                context.fill(Path(CGRect(x: x, y: 0, width: 1, height: size.height)), with: .color(Color.white.opacity(0.05)))
-            }
-            let type = Int(patch.value(LY_FILTER_TYPE))
-            let res = Double(patch.value(LY_FILTER_RES))
-            let base = 20 * pow(1000, Double(patch.value(LY_FILTER_CUTOFF)))
-            let cutoff = live.display.activeVoices > 0 && live.display.cutoffHz > 0 ? Double(live.display.cutoffHz) : base
-            let k = 2 - 1.97 * res
-            let k2 = 2 - 1.2 * res
-            func magnitude(_ hz: Double) -> Double {
-                let w = hz / cutoff
-                let w2 = w * w
-                func den(_ kk: Double) -> Double { sqrt(pow(1 - w2, 2) + pow(w * kk, 2)) }
-                switch type {
-                case LY_FILTER_LP12: return 1 / den(k)
-                case LY_FILTER_LP24: return (1 / den(k)) * (1 / den(k2))
-                case LY_FILTER_HP12: return w2 / den(k)
-                case LY_FILTER_HP24: return (w2 / den(k)) * (w2 / den(k2))
-                case LY_FILTER_BP: return (w * k) / den(k)
-                case LY_FILTER_NOTCH: return abs(1 - w2) / den(k)
-                default:
-                    // Ladder: four poles, resonance peaking at cutoff.
-                    return (1 / den(2 - 1.95 * res)) * (1 / den(2))
-                }
-            }
-            var path = Path()
-            var fill = Path()
-            fill.move(to: CGPoint(x: 0, y: size.height))
-            let steps = Int(size.width)
-            for x in 0...steps {
-                let hz = 20 * pow(1000, Double(x) / Double(steps))
-                let dB = 20 * log10(max(magnitude(hz), 0.00001))
-                let y = size.height * 0.45 - CGFloat(dB / 30) * size.height * 0.45
-                let point = CGPoint(x: CGFloat(x), y: min(max(y, 2), size.height))
-                if x == 0 { path.move(to: point) } else { path.addLine(to: point) }
-                fill.addLine(to: point)
-            }
-            fill.addLine(to: CGPoint(x: size.width, y: size.height))
-            fill.closeSubpath()
-            context.fill(fill, with: .color(accent.opacity(0.1)))
-            context.stroke(path, with: .color(accent), lineWidth: 1.5)
-            let cx = size.width * CGFloat(log10(cutoff / 20) / 3)
-            context.fill(Path(CGRect(x: cx, y: 0, width: 1, height: size.height)), with: .color(accent.opacity(0.3)))
-        }
-        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
-        .opacity(patch.value(LY_FILTER_ON) > 0.5 ? 1 : 0.4)
-    }
-}
-
-/// ADSR you can drag directly: attack and decay by their corners, sustain by
-/// its height, release by its end, and each stage's curve by the handle at
-/// its middle. A line tracks the level while notes play.
-struct LYEnvelopeGraph: View {
-    let attack: Float, decay: Float, sustain: Float, release: Float
-    let curves: [Float]            // attack, decay, release
-    let color: Color
-    let level: Float
-    let set: (Int, Float) -> Void
-    let setCurve: (Int, Float) -> Void
-    @State private var curveOrigin: Float?
-
-    private func shape(_ p: Double, _ curve: Float) -> Double {
-        if abs(curve) < 0.01 { return p }
-        let k = Double(curve) * 5
-        return (exp(k * p) - 1) / (exp(k) - 1)
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            let size = geo.size
-            let slot = size.width / 4
-            let top: CGFloat = 8, bottom = size.height - 8
-            let height = bottom - top
-            let a = CGPoint(x: slot * CGFloat(0.1 + 0.9 * attack), y: top)
-            let d = CGPoint(x: a.x + slot * CGFloat(0.1 + 0.9 * decay), y: bottom - height * CGFloat(sustain))
-            let s = CGPoint(x: d.x + slot * 0.8, y: d.y)
-            let r = CGPoint(x: s.x + slot * CGFloat(0.1 + 0.9 * release), y: bottom)
-            let attackMid = CGPoint(x: a.x / 2, y: bottom - height * CGFloat(shape(0.5, curves[0])))
-            let decayMid = CGPoint(x: (a.x + d.x) / 2, y: bottom - height * CGFloat(Double(sustain) + (1 - Double(sustain)) * (1 - shape(0.5, curves[1]))))
-            let releaseMid = CGPoint(x: (s.x + r.x) / 2, y: bottom - height * CGFloat(Double(sustain) * (1 - shape(0.5, curves[2]))))
-            ZStack {
-                Canvas { context, _ in
-                    context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.5)))
-                    var path = Path()
-                    path.move(to: CGPoint(x: 0, y: bottom))
-                    for i in 1...24 {
-                        let p = Double(i) / 24
-                        path.addLine(to: CGPoint(x: a.x * CGFloat(p), y: bottom - height * CGFloat(shape(p, curves[0]))))
-                    }
-                    for i in 1...24 {
-                        let p = Double(i) / 24
-                        let v = Double(sustain) + (1 - Double(sustain)) * (1 - shape(p, curves[1]))
-                        path.addLine(to: CGPoint(x: a.x + (d.x - a.x) * CGFloat(p), y: bottom - height * CGFloat(v)))
-                    }
-                    path.addLine(to: s)
-                    for i in 1...24 {
-                        let p = Double(i) / 24
-                        let v = Double(sustain) * (1 - shape(p, curves[2]))
-                        path.addLine(to: CGPoint(x: s.x + (r.x - s.x) * CGFloat(p), y: bottom - height * CGFloat(v)))
-                    }
-                    var fill = path
-                    fill.addLine(to: CGPoint(x: 0, y: bottom))
-                    fill.closeSubpath()
-                    context.fill(fill, with: .color(color.opacity(0.12)))
-                    context.stroke(path, with: .color(color), lineWidth: 1.6)
-                    if level > 0.001 {
-                        let y = bottom - height * CGFloat(level)
-                        context.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(color.opacity(0.35)))
-                    }
-                }
-                ForEach(Array([a, d, r].enumerated()), id: \.offset) { index, point in
-                    Circle()
-                        .fill(Color.black)
-                        .overlay(Circle().stroke(color, lineWidth: 1.5))
-                        .frame(width: 10, height: 10)
-                        .position(point)
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { drag in
-                                    switch index {
-                                    case 0: set(0, clamp(Float((drag.location.x / slot - 0.1) / 0.9)))
-                                    case 1:
-                                        set(1, clamp(Float(((drag.location.x - a.x) / slot - 0.1) / 0.9)))
-                                        set(2, clamp(Float((bottom - drag.location.y) / height)))
-                                    default: set(3, clamp(Float(((drag.location.x - s.x) / slot - 0.1) / 0.9)))
-                                    }
-                                }
-                        )
-                }
-                ForEach(Array([attackMid, decayMid, releaseMid].enumerated()), id: \.offset) { index, point in
-                    Rectangle()
-                        .fill(color.opacity(0.9))
-                        .frame(width: 7, height: 7)
-                        .rotationEffect(.degrees(45))
-                        .position(point)
-                        .contentShape(Rectangle().inset(by: -6))
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { drag in
-                                    let origin = curveOrigin ?? curves[index]
-                                    if curveOrigin == nil { curveOrigin = origin }
-                                    // Dragging up bows the stage upward whichever way it runs.
-                                    let direction: Float = index == 0 ? -1 : 1
-                                    setCurve(index, min(max(origin + direction * Float(drag.translation.height / 60), -1), 1))
-                                }
-                                .onEnded { _ in curveOrigin = nil }
-                        )
-                        .onTapGesture(count: 2) { setCurve(index, index == 0 ? 0 : -0.55) }
-                        .help("Drag to bend this stage. Double-click to reset.")
-                }
-            }
-        }
-        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
-    }
-
-    private func clamp(_ value: Float) -> Float { min(max(value, 0), 1) }
-}
-
-/// The LFO's shape with a playhead. In DRAW the shape is 32 points you paint
-/// with the pointer.
-struct LYLFOGraph: View {
-    let shape: Int
-    let points: [Float]
-    let smooth: Bool
-    let color: Color
-    @ObservedObject var live: LYSynthLive
-    let index: Int
-    let paint: (Int, Float) -> Void
-
-    static func value(shape: Int, at p: Double, points: [Float], smooth: Bool) -> Double {
-        switch shape {
-        case LY_LFO_SINE: return sin(p * 2 * .pi)
-        case LY_LFO_TRIANGLE: return 1 - 4 * abs(p - 0.5)
-        case LY_LFO_SAW_UP: return 2 * p - 1
-        case LY_LFO_SAW_DOWN: return 1 - 2 * p
-        case LY_LFO_SQUARE: return p < 0.5 ? 1 : -1
-        case LY_LFO_SAMPLE_HOLD: return [0.6, -0.3, 0.9, -0.8, 0.2, -0.5, 0.7, -0.1][min(7, Int(p * 8))]
-        case LY_LFO_CUSTOM:
-            guard !points.isEmpty else { return 0 }
-            let position = p * Double(points.count)
-            let i = min(Int(position), points.count - 1)
-            if !smooth { return Double(points[i]) }
-            let t = position - Double(i)
-            let eased = 0.5 - 0.5 * cos(.pi * t)
-            return Double(points[i]) + Double(points[(i + 1) % points.count] - points[i]) * eased
-        default: return sin(p * 2 * .pi * 1.5) * 0.7 + sin(p * 2 * .pi * 0.5) * 0.3
-        }
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            Canvas { context, size in
-                context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.5)))
-                let mid = size.height / 2
-                context.fill(Path(CGRect(x: 0, y: mid, width: size.width, height: 1)), with: .color(Color.white.opacity(0.06)))
-                if shape == LY_LFO_CUSTOM {
-                    for i in 0..<points.count {
-                        let x = size.width * CGFloat(i) / CGFloat(points.count)
-                        context.fill(Path(CGRect(x: x, y: 0, width: 1, height: size.height)), with: .color(Color.white.opacity(0.04)))
-                    }
-                }
-                var path = Path()
-                let steps = Int(size.width)
-                for x in 0...steps {
-                    let p = min(Double(x) / Double(steps), 0.9999)
-                    let point = CGPoint(x: CGFloat(x), y: mid - CGFloat(Self.value(shape: shape, at: p, points: points, smooth: smooth)) * (mid - 8))
-                    if x == 0 { path.move(to: point) } else { path.addLine(to: point) }
-                }
-                context.stroke(path, with: .color(color), lineWidth: 1.6)
-                let state = live.lfo(index)
-                let x = CGFloat(state.phase) * size.width
-                let y = mid - CGFloat(state.value) * (mid - 8)
-                context.fill(Path(CGRect(x: x, y: 0, width: 1, height: size.height)), with: .color(color.opacity(0.25)))
-                context.fill(Path(ellipseIn: CGRect(x: x - 4, y: y - 4, width: 8, height: 8)), with: .color(LYLLTHTheme.text))
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { drag in
-                        guard shape == LY_LFO_CUSTOM, !points.isEmpty else { return }
-                        let i = min(max(Int(drag.location.x / geo.size.width * CGFloat(points.count)), 0), points.count - 1)
-                        let mid = geo.size.height / 2
-                        paint(i, Float(min(max((mid - drag.location.y) / (mid - 8), -1), 1)))
-                    }
-            )
-            .overlay(alignment: .topLeading) {
-                if shape == LY_LFO_CUSTOM {
-                    Text("DRAW").font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.4).foregroundStyle(color).padding(6)
-                }
-            }
-        }
-        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
-    }
-}
-
-struct LYSynthScope: View {
-    @ObservedObject var live: LYSynthLive
-
-    var body: some View {
-        Canvas { context, size in
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.6)))
-            let samples = live.scope
-            guard samples.count > 1 else { return }
-            var path = Path()
-            for (i, sample) in samples.enumerated() {
-                let point = CGPoint(x: size.width * CGFloat(i) / CGFloat(samples.count - 1),
-                                    y: size.height / 2 - CGFloat(max(-1, min(1, sample))) * size.height * 0.45)
-                if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
-            }
-            context.stroke(path, with: .color(LYLLTHTheme.teal), lineWidth: 1.2)
-        }
-        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
-    }
-}
-
-private struct LYMatrixRow: View {
-    let slot: Int
-    let patch: LYSynthPatch
-    let update: (Int, Float) -> Void
-    let clear: () -> Void
-    @State private var origin: Float?
-
-    var body: some View {
-        let base = LY_MATRIX_BASE + slot * 3
-        let source = Int(patch.value(base))
-        let destination = Int(patch.value(base + 1))
-        let amount = patch.value(base + 2)
-        let color = LYSynthSourceColor.color(source)
-        return HStack(spacing: 6) {
-            cycler(LYSynthNames.sources[min(max(source, 0), LYSynthNames.sources.count - 1)], color: color) { step in
-                let count = LYSynthNames.sources.count
-                update(base, Float((source + step + count) % count))
-            }
-            .frame(width: 104)
-            Image(systemName: "arrow.right").font(.system(size: 7, weight: .bold)).foregroundStyle(LYLLTHTheme.dim)
-            cycler(LYSynthNames.destinations[min(max(destination, 0), LYSynthNames.destinations.count - 1)], color: LYLLTHTheme.text) { step in
-                let count = LYSynthNames.destinations.count
-                update(base + 1, Float((destination + step + count) % count))
-            }
-            .frame(width: 112)
-            GeometryReader { geo in
-                let mid = geo.size.width / 2
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(LYLLTHTheme.lineStrong).frame(height: 2)
-                    Rectangle().fill(LYLLTHTheme.dim).frame(width: 1, height: 10).offset(x: mid)
-                    Rectangle().fill(color)
-                        .frame(width: abs(CGFloat(amount)) * mid, height: 3)
-                        .offset(x: amount >= 0 ? mid : mid - abs(CGFloat(amount)) * mid)
-                }
-                .frame(maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
-                    update(base + 2, Float(min(max((drag.location.x - mid) / mid, -1), 1)))
-                })
-                .onTapGesture(count: 2) { update(base + 2, 0) }
-            }
-            .frame(height: 24)
-            Text(String(format: "%+.0f", amount * 100))
-                .font(LYLLTHTheme.value(9))
-                .foregroundStyle(LYLLTHTheme.text)
-                .frame(width: 32, alignment: .trailing)
-            Button(action: clear) {
-                Image(systemName: "xmark").font(.system(size: 7, weight: .bold)).foregroundStyle(LYLLTHTheme.dim)
-                    .frame(width: 16, height: 20).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Remove this route")
-        }
-        .padding(.horizontal, 6)
-        .frame(height: 30)
-        .background(color.opacity(0.05))
-        .overlay(Rectangle().stroke(LYLLTHTheme.line, lineWidth: 1))
-    }
-
-    private func cycler(_ text: String, color: Color, step: @escaping (Int) -> Void) -> some View {
-        HStack(spacing: 0) {
-            Button { step(-1) } label: {
-                Image(systemName: "chevron.left").font(.system(size: 6, weight: .bold)).foregroundStyle(LYLLTHTheme.dim)
-                    .frame(width: 12, height: 22).contentShape(Rectangle())
-            }.buttonStyle(.plain)
-            Text(text).font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(0.6).foregroundStyle(color)
-                .lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
-            Button { step(1) } label: {
-                Image(systemName: "chevron.right").font(.system(size: 6, weight: .bold)).foregroundStyle(LYLLTHTheme.dim)
-                    .frame(width: 12, height: 22).contentShape(Rectangle())
-            }.buttonStyle(.plain)
-        }
-    }
-}
-
-// MARK: - Keyboard
-
-struct LYSynthKeyboard: View {
-    let lowestOctave: Int
-    let held: Set<Int>
-    let press: (Int) -> Void
-    let release: (Int) -> Void
-    @State private var dragNote: Int?
-
-    private let whiteSteps = [0, 2, 4, 5, 7, 9, 11]
-    private let blackSteps: [(Int, CGFloat)] = [(1, 0.7), (3, 1.7), (6, 3.7), (8, 4.7), (10, 5.7)]
-
-    var body: some View {
-        GeometryReader { geo in
-            let octaves = 4
-            let whiteWidth = geo.size.width / CGFloat(octaves * 7)
-            let base = (lowestOctave + 1) * 12
-            ZStack(alignment: .topLeading) {
-                ForEach(0..<(octaves * 7), id: \.self) { i in
-                    let note = base + (i / 7) * 12 + whiteSteps[i % 7]
-                    Rectangle()
-                        // DrumKit's piano-roll white keys: the control chrome.
-                        .fill(held.contains(note) ? LYLLTHTheme.teal : LYLLTHTheme.chromeText)
-                        .overlay(Rectangle().stroke(Color.black, lineWidth: 1))
-                        .overlay(alignment: .bottom) {
-                            if note % 12 == 0 {
-                                Text("C\(note / 12 - 1)").font(LYLLTHTheme.value(7.5)).foregroundStyle(Color.black.opacity(0.6)).padding(.bottom, 3)
-                            }
-                        }
-                        .frame(width: whiteWidth, height: geo.size.height)
-                        .offset(x: CGFloat(i) * whiteWidth)
-                }
-                ForEach(0..<(octaves * 5), id: \.self) { i in
-                    let step = blackSteps[i % 5]
-                    let note = base + (i / 5) * 12 + step.0
-                    Rectangle()
-                        .fill(held.contains(note) ? LYLLTHTheme.indigo : Color(hex: 0x0B0C10))
+                Color.black.opacity(0.6).onTapGesture { savingPreset = false }
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("SAVE PRESET")
+                        .font(LYLLTHTheme.label(11, weight: .bold)).tracking(2).foregroundStyle(LYLLTHTheme.teal)
+                    TextField("NAME", text: $presetDraft)
+                        .textFieldStyle(.plain)
+                        .font(LYLLTHTheme.label(13, weight: .bold))
+                        .foregroundStyle(LYLLTHTheme.text)
+                        .padding(.horizontal, 10)
+                        .frame(height: 34)
                         .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
-                        .frame(width: whiteWidth * 0.62, height: geo.size.height * 0.6)
-                        .offset(x: (CGFloat(i / 5) * 7 + step.1) * whiteWidth)
-                }
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { drag in
-                        let note = noteAt(drag.location, size: geo.size, whiteWidth: whiteWidth, base: base)
-                        if note != dragNote {
-                            if let dragNote { release(dragNote) }
-                            if let note { press(note) }
-                            dragNote = note
-                        }
+                        .onSubmit(savePreset)
+                    if let presetError {
+                        Text(presetError).font(LYLLTHTheme.label(8, weight: .bold)).foregroundStyle(LYLLTHTheme.record)
                     }
-                    .onEnded { _ in
-                        if let dragNote { release(dragNote) }
-                        dragNote = nil
-                    }
-            )
-        }
-        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
-        .help("Click or drag to play. Computer keys A–K play too; Z and X shift the octave.")
-    }
-
-    private func noteAt(_ point: CGPoint, size: CGSize, whiteWidth: CGFloat, base: Int) -> Int? {
-        guard point.x >= 0, point.x < size.width, point.y >= 0, point.y <= size.height else { return nil }
-        if point.y < size.height * 0.6 {
-            for i in 0..<20 {
-                let step = blackSteps[i % 5]
-                let x = (CGFloat(i / 5) * 7 + step.1) * whiteWidth
-                if point.x >= x && point.x <= x + whiteWidth * 0.62 { return base + (i / 5) * 12 + step.0 }
-            }
-        }
-        let i = Int(point.x / whiteWidth)
-        return base + (i / 7) * 12 + whiteSteps[i % 7]
-    }
-}
-
-/// Computer-keyboard playing while the editor is open, the Logic layout:
-/// A W S E D F T G Y H U J K, Z / X for octave, Esc closes.
-private struct LYSynthKeyMonitor: NSViewRepresentable {
-    @Binding var octave: Int
-    let press: (Int) -> Void
-    let release: (Int) -> Void
-    let close: () -> Void
-    var isEnabled = true
-
-    func makeNSView(context: Context) -> MonitorView {
-        let view = MonitorView()
-        view.handler = handle
-        return view
-    }
-
-    func updateNSView(_ view: MonitorView, context: Context) {
-        view.handler = handle
-    }
-
-    private static let map: [String: Int] = ["a": 0, "w": 1, "s": 2, "e": 3, "d": 4, "f": 5, "t": 6, "g": 7, "y": 8, "h": 9, "u": 10, "j": 11, "k": 12]
-
-    private func handle(_ event: NSEvent) -> Bool {
-        if event.window?.firstResponder is NSTextView { return false }
-        guard isEnabled else { return false }
-        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
-        if event.type == .keyDown && event.keyCode == 53 { close(); return true }
-        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        if event.type == .keyDown && !event.isARepeat {
-            if key == "z" { octave = max(0, octave - 1); return true }
-            if key == "x" { octave = min(7, octave + 1); return true }
-        }
-        guard let offset = Self.map[key] else { return false }
-        let note = (octave + 1) * 12 + offset
-        if event.type == .keyDown {
-            if !event.isARepeat { press(note) }
-        } else {
-            release(note)
-        }
-        return true
-    }
-
-    final class MonitorView: NSView {
-        var handler: (NSEvent) -> Bool = { _ in false }
-        private var monitor: Any?
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if let monitor { NSEvent.removeMonitor(monitor) }
-            monitor = nil
-            guard window != nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-                guard let self, event.window === self.window else { return event }
-                return self.handler(event) ? nil : event
-            }
-        }
-
-        deinit {
-            if let monitor { NSEvent.removeMonitor(monitor) }
-        }
-    }
-}
-
-
-// MARK: - Browsers
-
-/// FACTORY and USER sounds side by side. User sounds can be deleted here.
-struct LYPresetBrowser: View {
-    let current: String
-    let user: [LYSynthPatch]
-    let choose: (LYSynthPatch) -> Void
-    let delete: (String) -> Void
-    let close: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("SOUNDS").font(LYLLTHTheme.label(9, weight: .bold)).tracking(1.8).foregroundStyle(LYLLTHTheme.teal)
-                Spacer()
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(LYLLTHTheme.chromeText)
-                        .frame(width: 20, height: 20).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-            }
-            HStack(alignment: .top, spacing: 10) {
-                column("FACTORY", LYSynthPatch.factory, deletable: false)
-                column("USER", user, deletable: true)
-            }
-        }
-        .padding(10)
-        .background(Color(hex: 0x07080D).opacity(0.98))
-        .overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.6), lineWidth: 1))
-    }
-
-    private func column(_ title: String, _ patches: [LYSynthPatch], deletable: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.6).foregroundStyle(LYLLTHTheme.dim)
-            ScrollView {
-                VStack(spacing: 3) {
-                    if patches.isEmpty {
-                        Text("SAVE A SOUND TO SEE IT HERE")
-                            .font(LYLLTHTheme.label(7, weight: .bold)).tracking(1).foregroundStyle(LYLLTHTheme.dim)
-                            .frame(maxWidth: .infinity).padding(.top, 20)
-                    }
-                    ForEach(patches, id: \.name) { item in
-                        HStack(spacing: 0) {
-                            Button { choose(item) } label: {
-                                Text(item.name)
-                                    .font(LYLLTHTheme.label(8.5, weight: .bold)).tracking(0.8)
-                                    .foregroundStyle(item.name == current ? LYLLTHTheme.teal : LYLLTHTheme.text)
-                                    .lineLimit(1)
-                                    .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-                                    .padding(.leading, 8)
-                                    .contentShape(Rectangle())
-                            }.buttonStyle(.plain)
-                            if deletable {
-                                Button { delete(item.name) } label: {
-                                    Image(systemName: "xmark").font(.system(size: 7, weight: .bold)).foregroundStyle(LYLLTHTheme.dim)
-                                        .frame(width: 22, height: 24).contentShape(Rectangle())
-                                }.buttonStyle(.plain).help("Delete this preset")
-                            }
-                        }
-                        .background(LYLLTHTheme.teal.opacity(item.name == current ? 0.1 : 0))
-                        .overlay(Rectangle().stroke(item.name == current ? LYLLTHTheme.teal : LYLLTHTheme.lineStrong, lineWidth: 1))
+                    Text("SAVED TO ~/LIBRARY/APPLICATION SUPPORT/LYLLTH/PRESETS WITH ANY CUSTOM WAVETABLES IT USES")
+                        .font(LYLLTHTheme.label(7, weight: .bold)).tracking(0.8).foregroundStyle(LYLLTHTheme.dim)
+                    HStack {
+                        Spacer()
+                        Button("CANCEL") { savingPreset = false }.buttonStyle(LYChromeButtonStyle(compact: true))
+                        Button("SAVE", action: savePreset).buttonStyle(LYChromeButtonStyle(active: true, compact: true))
+                            .disabled(presetDraft.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
+                .padding(18)
+                .frame(width: 420)
+                .background(Color(hex: 0x07080D))
+                .overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.7), lineWidth: 1))
             }
-            .lyScrollers()
         }
-        .frame(maxWidth: .infinity)
     }
-}
 
-/// Factory tables, the user's own tables, and IMPORT / EDIT.
-struct LYTableBrowser: View {
-    let accent: Color
-    let current: String
-    let user: [String]
-    let chooseFactory: (Int) -> Void
-    let chooseUser: (String) -> Void
-    let importTable: () -> Void
-    let editTable: () -> Void
-    let close: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text("WAVETABLE").font(LYLLTHTheme.label(8.5, weight: .bold)).tracking(1.6).foregroundStyle(accent)
-                Spacer()
-                action("IMPORT…", importTable)
-                action("EDIT…", editTable)
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(LYLLTHTheme.chromeText)
-                        .frame(width: 20, height: 20).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-            }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    grid(LYSynthNames.tables) { index, _ in chooseFactory(index) }
-                    if !user.isEmpty {
-                        Text("YOUR TABLES").font(LYLLTHTheme.label(7, weight: .bold)).tracking(1.4).foregroundStyle(LYLLTHTheme.dim).padding(.top, 4)
-                        grid(user) { _, name in chooseUser(name) }
-                    }
-                }
-            }
-            .lyScrollers()
+    private func savePreset() {
+        let name = presetDraft.trimmingCharacters(in: .whitespaces).uppercased()
+        guard !name.isEmpty else { return }
+        guard !LYSynthPatch.factory.contains(where: { $0.name == name }) else {
+            presetError = "THAT NAME BELONGS TO A FACTORY SOUND"
+            return
         }
-        .padding(8)
-        .background(Color(hex: 0x07080D).opacity(0.97))
-        .overlay(Rectangle().stroke(accent.opacity(0.6), lineWidth: 1))
-    }
-
-    private func action(_ title: String, _ run: @escaping () -> Void) -> some View {
-        Button(action: run) {
-            Text(title).font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1).foregroundStyle(accent)
-                .padding(.horizontal, 7).frame(height: 20)
-                .overlay(Rectangle().stroke(accent.opacity(0.7), lineWidth: 1))
-                .contentShape(Rectangle())
-        }.buttonStyle(.plain)
-    }
-
-    private func grid(_ names: [String], choose: @escaping (Int, String) -> Void) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)], spacing: 4) {
-            ForEach(Array(names.enumerated()), id: \.offset) { index, name in
-                Button { choose(index, name) } label: {
-                    Text(name)
-                        .font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(0.7)
-                        .foregroundStyle(name == current ? accent : LYLLTHTheme.text)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                        .frame(maxWidth: .infinity, minHeight: 22)
-                        .background(accent.opacity(name == current ? 0.12 : 0.02))
-                        .overlay(Rectangle().stroke(name == current ? accent : LYLLTHTheme.lineStrong, lineWidth: 1))
-                        .contentShape(Rectangle())
-                }.buttonStyle(.plain)
-            }
+        do {
+            try presetStore.save(patch, as: name)
+            var renamed = patch
+            renamed.name = name
+            patch = renamed
+            savingPreset = false
+        } catch {
+            presetError = error.localizedDescription.uppercased()
         }
     }
 }
