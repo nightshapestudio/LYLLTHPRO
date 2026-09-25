@@ -41,7 +41,7 @@ struct LYFXWindowHost: View {
                     close: close
                 ) {
                     window(request)
-                        .environment(\.fxWindowWide, request.kind != .decim)
+                        .environment(\.fxWindowWide, true)
                 }
                 .transition(.scale(scale: 0.96).combined(with: .opacity))
             }
@@ -61,17 +61,14 @@ struct LYFXWindowHost: View {
         min(1.25, max(1, (size.height - 40) / 660), max(1, (size.width - 40) / 380))
     }
 
-    /// Wide windows: the display takes the left, a 356-point control column
-    /// the right. The decimator keeps its tall XY field.
+    /// Desktop windows: wide and short, the display across the top and the
+    /// controls in columns below; the decimator's field square on the left.
     static func windowSize(for kind: FXKind, in workspace: CGSize) -> (content: CGSize, scale: CGFloat) {
-        if kind == .decim {
-            // Its full height, shrunk to fit a short workspace.
-            let scale = min(1.1, max(0.8, (workspace.height - 70) / 772))
-            return (CGSize(width: 440, height: 750), scale)
-        }
-        let scale = min(1.15, max(1, (workspace.width - 40) / 900))
-        let height = min(max(470, (workspace.height - 60) / scale), 560)
-        return (CGSize(width: min(900, (workspace.width - 40) / scale), height: height), scale)
+        let target = kind == .decim ? CGSize(width: 900, height: 560) : CGSize(width: 1060, height: 640)
+        // Grow type a little on big screens; shrink to fit small ones.
+        let fit = min((workspace.width - 40) / target.width, (workspace.height - 60) / (target.height + 22))
+        let scale = min(1.12, max(0.75, fit))
+        return (target, scale)
     }
 
     // MARK: Sonic Decimator
