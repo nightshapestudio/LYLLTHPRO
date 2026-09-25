@@ -28,7 +28,7 @@ struct LYSynthContext {
             diameter: diameter,
             label: label,
             format: format,
-            liveModulation: destination.map { live.modulation($0) } ?? 0,
+            live: live,
             update: set,
             addRoute: addRoute
         )
@@ -76,7 +76,9 @@ struct LYSynthEditor: View {
 
     enum Page: String, CaseIterable { case osc = "OSC", fx = "FX", arp = "ARP", matrix = "MATRIX", global = "GLOBAL" }
 
-    @StateObject private var live = LYSynthLive()
+    // Held, not observed: the editor must not redraw every frame. The views
+    // that show live values (displays, dots, meters) each watch it.
+    @State private var live = LYSynthLive()
     @ObservedObject private var tableLibrary = LYWavetableLibrary.shared
     @ObservedObject private var presetStore = LYSynthPresetStore.shared
     @State private var chosenPage: Page?
@@ -206,9 +208,7 @@ struct LYSynthEditor: View {
                 .frame(width: 150, height: 38)
 
             VStack(spacing: 1) {
-                Text("\(live.display.activeVoices)")
-                    .font(LYLLTHTheme.value(15))
-                    .foregroundStyle(LYLLTHTheme.text)
+                LYVoiceCount(live: live)
                 Text("VOICES")
                     .font(LYLLTHTheme.label(6.5, weight: .bold))
                     .tracking(1.2)
@@ -622,7 +622,7 @@ struct LYSynthEditor: View {
                 attack: c.value(base), hold: c.value(hold), decay: c.value(base + 1),
                 sustain: c.value(base + 2), release: c.value(base + 3),
                 curves: (0..<3).map { c.value(LY_ENV1_ACURVE + e * 3 + $0) },
-                color: color, level: live.envelope(e),
+                color: color, live: live, envelopeIndex: e,
                 set: { index, value in c.set(base + index, value) },
                 setHold: { c.set(hold, $0) },
                 setCurve: { index, value in c.set(LY_ENV1_ACURVE + e * 3 + index, value) }

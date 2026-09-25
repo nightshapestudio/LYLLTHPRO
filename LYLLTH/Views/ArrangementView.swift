@@ -713,7 +713,7 @@ struct ArrangementView: View {
                     .offset(x: headerWidth + CGFloat(editCursorBeat) * beatWidth - 3.5, y: rulerHeight - 22)
 
                 if isPlaying && audio.transportMode == .song {
-                    TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { _ in
+                    TimelineView(.animation) { _ in
                         if let beat = audio.currentSongBeat() {
                             let x = headerWidth + CGFloat(beat) * beatWidth
                             ZStack(alignment: .topLeading) {

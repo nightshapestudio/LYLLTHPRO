@@ -72,7 +72,6 @@ struct LYSynthFXPage: View {
         let on = context.isOn(Self.onIDs[fx])
         let accent = Self.accent(fx)
         let isSelected = selected == fx
-        let level = CGFloat(min(max(context.live.fxLevel(fx), 0), 1))
         return HStack(spacing: 7) {
             Text(String(format: "%02d", position + 1))
                 .font(LYLLTHTheme.value(8))
@@ -94,13 +93,8 @@ struct LYSynthFXPage: View {
                     .font(LYLLTHTheme.label(8.5, weight: .bold))
                     .tracking(1.1)
                     .foregroundStyle(on ? LYLLTHTheme.text : LYLLTHTheme.dim)
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Rectangle().fill(Color.white.opacity(0.05))
-                        Rectangle().fill(accent.opacity(on ? 0.85 : 0.2)).frame(width: geo.size.width * level)
-                    }
-                }
-                .frame(height: 2)
+                LYFXLevelBar(live: context.live, fx: fx, accent: accent, isOn: on)
+                    .frame(height: 2)
             }
             Spacer(minLength: 0)
             VStack(spacing: 0) {
@@ -292,7 +286,7 @@ struct LYFXVisual: View {
     let set: (Int, Float) -> Void
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !animated)) { timeline in
+        TimelineView(.animation(paused: !animated)) { timeline in
             GeometryReader { geo in
                 let t = timeline.date.timeIntervalSinceReferenceDate
                 ZStack {

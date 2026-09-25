@@ -77,7 +77,11 @@ final class AudioEngineController: ObservableObject {
     @Published private(set) var songWindow = LYSongWindow(startBar: 0, barCount: 4, beatsPerBar: 4)
 
     @Published private(set) var isPlaying = false
-    @Published private(set) var currentStep = 0
+    /// The playing step. Not published here: every view watching this
+    /// controller would rebuild on each step. Views that follow the step
+    /// watch `stepDisplay` instead.
+    private(set) var currentStep = 0
+    let stepDisplay = TransportDisplayState()
     @Published private(set) var timecode = "00:00:00"
     @Published private(set) var startupError: String?
     @Published private(set) var isMetronomeEnabled = false
@@ -91,7 +95,11 @@ final class AudioEngineController: ObservableObject {
             .assign(to: &$isPlaying)
         engine.state.$currentStep
             .removeDuplicates()
-            .assign(to: &$currentStep)
+            .sink { [weak self] step in
+                self?.currentStep = step
+                self?.stepDisplay.update(step: step)
+            }
+            .store(in: &cancellables)
         engine.state.$timecodeText
             .removeDuplicates()
             .assign(to: &$timecode)
@@ -152,6 +160,7 @@ final class AudioEngineController: ObservableObject {
             do {
                 try engine.start()
                 engine.setTrackMeteringEnabled(true)
+                engine.setVisualRefreshRate(60)
                 startupError = nil
             } catch {
                 startupError = error.localizedDescription

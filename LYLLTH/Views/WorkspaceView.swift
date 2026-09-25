@@ -158,7 +158,7 @@ struct WorkspaceView: View {
     // Held with @State, not @StateObject: the workspace must not observe
     // these. Meters publish 20 times a second and the transport every step;
     // only the small views that draw them subscribe.
-    @State private var transportDisplay = TransportDisplayState()
+    private var transportDisplay: TransportDisplayState { audio.stepDisplay }
     @State private var meters = LYMeterStore()
     /// A passing message for the status bar: what an open or save left out.
     @State private var notice: String?
@@ -238,15 +238,17 @@ struct WorkspaceView: View {
 
                     VStack(spacing: 0) {
                         if activeWorkspace == "PATTERN" {
+                            LYStepFollower(steps: audio.stepDisplay) { step in
                             SequencerWorkspace(
                                 session: $document.session,
                                 selectedTrackID: $selectedTrackID,
                                 patternIndex: patternIndex,
-                                currentStep: audio.currentStep,
+                                currentStep: step,
                                 isPlaying: audio.isPlaying,
                                 waveformState: audio.engine.state.outputWaveformState,
                                 syncEngine: { audio.syncSequencer(document.session) }
                             )
+                            }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
                             arrangementPane
@@ -353,7 +355,6 @@ struct WorkspaceView: View {
                 NSApp.keyWindow?.makeFirstResponder(nil)
             }
         }
-        .onChange(of: audio.currentStep) { _, step in transportDisplay.update(step: step) }
         .onChange(of: audio.isPlaying) { _, playing in
             // Stop or space while recording ends the take.
             if !playing && recorder.phase == .recording { finishRecording() }
@@ -2865,7 +2866,8 @@ private struct ArrangementSnapPanel: View {
 private struct MixerView: View {
     @Binding var session: LYLLTHSession
     @Binding var selectedTrackID: UUID?
-    @ObservedObject var meters: LYMeterStore
+    /// Not observed here: only the meters inside the channels watch it.
+    let meters: LYMeterStore
     let isMainSelected: Bool
     let selectMain: () -> Void
     let close: () -> Void
@@ -2880,15 +2882,13 @@ private struct MixerView: View {
                                 track: $session.tracks[index],
                                 number: index + 1,
                                 accent: LYLLTHTheme.trackAccent(position: index),
-                                reading: meters.reading(for: session.tracks[index].id),
-                                resetClip: { meters.reset(session.tracks[index].id) },
+                                meters: meters, meterKey: session.tracks[index].id,
                                 isSelected: !isMainSelected && selectedTrackID == session.tracks[index].id
                             )
                             .onTapGesture { selectedTrackID = session.tracks[index].id }
                         }
                         MainChannel(
-                            reading: meters.reading(for: LYMeterStore.mainKey),
-                            resetClip: { meters.reset(LYMeterStore.mainKey) },
+                            meters: meters, meterKey: LYMeterStore.mainKey,
                             isSelected: isMainSelected
                         )
                         .onTapGesture(perform: selectMain)
@@ -2907,8 +2907,8 @@ private struct MixerChannel: View {
     @Binding var track: LYTrack
     let number: Int
     let accent: Color
-    let reading: LYMeterStore.Reading?
-    let resetClip: () -> Void
+    let meters: LYMeterStore
+    let meterKey: UUID
     let isSelected: Bool
 
     var body: some View {
@@ -2935,9 +2935,9 @@ private struct MixerChannel: View {
 
             HStack(alignment: .bottom, spacing: 10) {
                 VStack(spacing: 4) {
-                    LYClipIndicator(reading: reading, reset: resetClip)
+                    LYLiveClipIndicator(store: meters, key: meterKey)
                         .frame(width: 34)
-                    LYStripMeter(reading: reading, tint: accent)
+                    LYLiveStripMeter(store: meters, key: meterKey, tint: accent)
                         .frame(width: 8)
                 }
                 .frame(width: 34)
@@ -2972,8 +2972,8 @@ private struct MixerChannel: View {
 }
 
 private struct MainChannel: View {
-    let reading: LYMeterStore.Reading?
-    let resetClip: () -> Void
+    let meters: LYMeterStore
+    let meterKey: UUID
     let isSelected: Bool
 
     var body: some View {
@@ -2988,9 +2988,9 @@ private struct MainChannel: View {
                     .tracking(1.2)
                     .foregroundStyle(LYLLTHTheme.dim)
             }
-            LYClipIndicator(reading: reading, reset: resetClip)
+            LYLiveClipIndicator(store: meters, key: meterKey)
                 .frame(width: 60)
-            LYStripMeter(reading: reading, tint: LYLLTHTheme.teal)
+            LYLiveStripMeter(store: meters, key: meterKey, tint: LYLLTHTheme.teal)
                 .frame(width: 16)
                 .frame(maxHeight: .infinity)
         }
@@ -3282,4 +3282,13 @@ final class LYCoalescedSync {
             work?()
         }
     }
+}
+
+/// Rebuilds only its content on each sequencer step, so the rest of the
+/// workspace stays put while the song plays.
+private struct LYStepFollower<Content: View>: View {
+    @ObservedObject var steps: TransportDisplayState
+    @ViewBuilder let content: (Int) -> Content
+
+    var body: some View { content(steps.currentStep) }
 }

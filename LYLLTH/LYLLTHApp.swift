@@ -8,6 +8,9 @@ struct LYLLTHApp: App {
 
     init() {
         LYChannelMap.configureEngine()
+        // A Mac has frames to spare: meters, visualizers and FX windows
+        // move at display rate instead of the phone's battery-saving rates.
+        FXAnimation.frameInterval = 1.0 / 120.0
         FontRegistrar.registerBundledFonts()
     }
 

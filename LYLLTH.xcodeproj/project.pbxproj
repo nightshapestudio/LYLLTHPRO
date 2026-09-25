@@ -59,6 +59,7 @@
 		C619A497E1A0A6EEAEC62A38 /* SessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D2710D240A4FA97144EC0A9 /* SessionModels.swift */; };
 		C9669E21D8851AEC280A6749 /* DrumSoundBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24183797B508D69982E65468 /* DrumSoundBrowser.swift */; };
 		CE3B4B50242937A2DCF7A2C6 /* TransportDisplayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF85EAD4DB1AAE6788D582A /* TransportDisplayState.swift */; };
+		CF07DD883201B31B3568B800 /* LYFrameClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FF19AFA5BCCFB78BBACFE5 /* LYFrameClock.swift */; };
 		DA3AB96313DF53330ACB9F02 /* ZipArchiveWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60D7E4EBAA99B89AB4C6C272 /* ZipArchiveWriter.swift */; };
 		DF259391AE2D20D1A6B9B323 /* Adam-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFAB0361C23B88BFF6CA3B3F /* Adam-Medium.ttf */; };
 		DFCE1678A800ACE606F90D11 /* FKitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F6FDEB2771DB26C743DA3A2 /* FKitTests.swift */; };
@@ -132,6 +133,7 @@
 		8D80641FB01504BDFF2D6E83 /* FontRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontRegistrar.swift; sourceTree = "<group>"; };
 		8E8249E5B5CE85685DDD1A42 /* LYSynthEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthEditor.swift; sourceTree = "<group>"; };
 		90BF7073365CA38A142C3FA5 /* AudioUnitCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitCatalog.swift; sourceTree = "<group>"; };
+		94FF19AFA5BCCFB78BBACFE5 /* LYFrameClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYFrameClock.swift; sourceTree = "<group>"; };
 		95DE102CFAEFE0774BDF2B06 /* SonicDecimatorEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SonicDecimatorEditorView.swift; path = "../nightshape-drumkit-ios/Views/Components/SonicDecimatorEditorView.swift"; sourceTree = "<group>"; };
 		960F211F505A6A045668116C /* LYLLTHTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LYLLTHTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1957573B0E550787521E811 /* LYLLTH.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LYLLTH.entitlements; sourceTree = "<group>"; };
@@ -338,6 +340,7 @@
 			isa = PBXGroup;
 			children = (
 				8D80641FB01504BDFF2D6E83 /* FontRegistrar.swift */,
+				94FF19AFA5BCCFB78BBACFE5 /* LYFrameClock.swift */,
 				F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */,
 				F8138DCA1A91395B53951A82 /* LYScroller.swift */,
 			);
@@ -521,6 +524,7 @@
 				F5073A5322475A1DCD36C06D /* LYBounce.swift in Sources */,
 				7D1C76365E9E32FC85F2E8CD /* LYDrumSounds.swift in Sources */,
 				443C769B4ED7E689BF291AFA /* LYFKit.swift in Sources */,
+				CF07DD883201B31B3568B800 /* LYFrameClock.swift in Sources */,
 				865DADC7F42A9E3484ABCDAD /* LYLLTHApp.swift in Sources */,
 				F3072584030C31119C4860C6 /* LYLLTHSessionDocument.swift in Sources */,
 				0CEC7DBA1215E7248215069A /* LYLLTHTheme.swift in Sources */,

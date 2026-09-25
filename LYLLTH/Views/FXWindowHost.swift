@@ -419,7 +419,7 @@ private struct LYDecimatorMotionFollower: View {
     let isActive: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !(isPlaying && isActive))) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !(isPlaying && isActive))) { context in
             Color.clear.onChange(of: context.date) { _, _ in
                 let engine = NightshapeAudioEngine.shared
                 let point = trackIndex.flatMap { engine.decimatorMotionPosition(trackIndex: $0) } ?? (trackIndex == nil ? engine.mainDecimatorMotionPosition() : nil)

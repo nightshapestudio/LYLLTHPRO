@@ -191,7 +191,6 @@ struct LYMatrixRow: View {
         let aux = Int(c.value(id(LY_MX_AUX)))
         let curve = c.value(id(LY_MX_CURVE))
         let color = LYSynthSourceColor.color(source)
-        let liveValue = c.live.modulation(destination)
         return HStack(spacing: 8) {
             LYSynthChoiceButton(label: "SOURCE", value: LYSynthNames.sources[min(max(source, 0), LYSynthNames.sources.count - 1)], accent: color) {
                 c.openMenu(LYSynthMenuRequest(anchor: "mxSrc\(slot)", title: "SOURCE", names: LYSynthNames.sources, order: LYSynthNames.sourceOrder,
@@ -200,7 +199,7 @@ struct LYMatrixRow: View {
             .lyMenuAnchor("mxSrc\(slot)", in: LYSynthContext.space)
             .frame(width: 130)
 
-            LYAmountBar(amount: amount, live: liveValue, color: color) { c.set(id(LY_MX_AMOUNT), $0) }
+            LYAmountBar(amount: amount, live: c.live, destination: destination, color: color) { c.set(id(LY_MX_AMOUNT), $0) }
                 .frame(maxWidth: .infinity)
 
             LYSynthChoiceButton(label: "DESTINATION", value: LYSynthNames.destinations[min(max(destination, 0), LYSynthNames.destinations.count - 1)],
@@ -253,7 +252,8 @@ struct LYMatrixRow: View {
 /// route is doing right now.
 struct LYAmountBar: View {
     let amount: Float
-    let live: Float
+    @ObservedObject var live: LYSynthLive
+    let destination: Int
     let color: Color
     let set: (Float) -> Void
 
@@ -267,9 +267,10 @@ struct LYAmountBar: View {
                     .frame(width: abs(CGFloat(amount)) * mid, height: 4)
                     .offset(x: amount >= 0 ? mid : mid - abs(CGFloat(amount)) * mid)
                     .lyBloom(color, isOn: color != LYLLTHTheme.teal, strength: 0.5)
+                let now = live.modulation(destination)
                 Circle().fill(LYLLTHTheme.text).frame(width: 5, height: 5)
-                    .offset(x: mid + CGFloat(min(max(live, -1), 1)) * mid - 2.5)
-                    .opacity(abs(live) > 0.001 ? 1 : 0)
+                    .offset(x: mid + CGFloat(min(max(now, -1), 1)) * mid - 2.5)
+                    .opacity(abs(now) > 0.001 ? 1 : 0)
                 Text(String(format: "%+.0f", amount * 100))
                     .font(LYLLTHTheme.value(9))
                     .foregroundStyle(LYLLTHTheme.text)

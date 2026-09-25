@@ -3,28 +3,24 @@ import AppKit
 
 // MARK: - Live readout
 
-/// Polls the running synth 30 times a second for what the editor animates:
+/// Polls the running synth once per display frame for what the editor animates:
 /// modulated wavetable positions, envelope levels, LFO phases, cutoff, scope.
 @MainActor
 final class LYSynthLive: ObservableObject {
     @Published private(set) var display = LYSynthDisplay()
     @Published private(set) var scope: [Float] = Array(repeating: 0, count: 256)
-    private var timer: Timer?
+    private var ticks: LYFrameToken?
     private weak var instrument: LYSynthInstrument?
 
     func attach(_ instrument: LYSynthInstrument?) {
         self.instrument = instrument
-        guard timer == nil else { return }
-        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.poll() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+        guard ticks == nil else { return }
+        ticks = LYFrameClock.shared.add { [weak self] in self?.poll() }
     }
 
     func detach() {
-        timer?.invalidate()
-        timer = nil
+        ticks?.cancel()
+        ticks = nil
     }
 
     private func poll() {
@@ -291,7 +287,9 @@ struct LYEnvelopeGraph: View {
     let attack: Float, hold: Float, decay: Float, sustain: Float, release: Float
     let curves: [Float]            // attack, decay, release
     let color: Color
-    let level: Float
+    @ObservedObject var live: LYSynthLive
+    let envelopeIndex: Int
+    private var level: Float { live.envelope(envelopeIndex) }
     /// Parameter offsets from the envelope's attack: 0 A, 1 D, 2 S, 3 R; `setHold` for hold.
     let set: (Int, Float) -> Void
     let setHold: (Float) -> Void

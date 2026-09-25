@@ -33,7 +33,9 @@ struct LYSynthKnob: View {
     var diameter: CGFloat = 36
     var label: String? = nil
     var format: ((Float) -> String)? = nil
-    var liveModulation: Float = 0
+    /// The running synth, for the live modulation dot. Only that dot watches
+    /// it, so the knob itself does not redraw every frame.
+    var live: LYSynthLive? = nil
     let update: (Int, Float) -> Void
     var addRoute: ((Int, Int) -> Void)? = nil
 
@@ -140,13 +142,8 @@ struct LYSynthKnob: View {
                     .rotationEffect(.degrees(135))
                     .padding(-2 - CGFloat(index) * 3.5)
             }
-            if !routes.isEmpty {
-                let live = min(max(Double(fraction) + Double(liveModulation), 0), 1)
-                Circle()
-                    .fill(LYLLTHTheme.text)
-                    .frame(width: 4, height: 4)
-                    .offset(y: -(diameter / 2 + 2))
-                    .rotationEffect(.degrees(-135 + live * 270))
+            if !routes.isEmpty, let live {
+                LYKnobLiveDot(live: live, destination: destination, fraction: Double(fraction), diameter: diameter)
             }
         }
     }
@@ -458,5 +455,51 @@ struct LYSynthChoiceButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Where modulation has taken a knob right now: a dot on its ring.
+struct LYKnobLiveDot: View {
+    @ObservedObject var live: LYSynthLive
+    let destination: Int
+    let fraction: Double
+    let diameter: CGFloat
+
+    var body: some View {
+        let value = min(max(fraction + Double(live.modulation(destination)), 0), 1)
+        Circle()
+            .fill(LYLLTHTheme.text)
+            .frame(width: 4, height: 4)
+            .offset(y: -(diameter / 2 + 2))
+            .rotationEffect(.degrees(-135 + value * 270))
+    }
+}
+
+/// How many voices are sounding.
+struct LYVoiceCount: View {
+    @ObservedObject var live: LYSynthLive
+
+    var body: some View {
+        Text("\(live.display.activeVoices)")
+            .font(LYLLTHTheme.value(15))
+            .foregroundStyle(LYLLTHTheme.text)
+    }
+}
+
+/// One effect's output level, for the rack.
+struct LYFXLevelBar: View {
+    @ObservedObject var live: LYSynthLive
+    let fx: Int
+    let accent: Color
+    let isOn: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Rectangle().fill(Color.white.opacity(0.05))
+                Rectangle().fill(accent.opacity(isOn ? 0.85 : 0.2))
+                    .frame(width: geo.size.width * CGFloat(min(max(live.fxLevel(fx), 0), 1)))
+            }
+        }
     }
 }

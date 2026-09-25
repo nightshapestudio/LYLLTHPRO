@@ -3,8 +3,8 @@ import NightshapeAudioEngine
 
 // MARK: - Meters and clip indicators
 
-/// One place that reads the engine's meters, twenty times a second, for every
-/// strip on screen. Peaks latch until clicked, the way Logic's do, and a
+/// One place that reads the engine's meters, once per display frame, for
+/// every strip on screen. Peaks latch until clicked, the way Logic's do, and a
 /// channel that reaches 0 dBFS latches its clip indicator.
 @MainActor
 final class LYMeterStore: ObservableObject {
@@ -20,7 +20,7 @@ final class LYMeterStore: ObservableObject {
 
     @Published private(set) var readings: [UUID: Reading] = [:]
     private var channels: [UUID: Int] = [:]
-    private var timer: Timer?
+    private var ticks: LYFrameToken?
 
     func track(_ session: LYLLTHSession) {
         var next: [UUID: Int] = [:]
@@ -28,12 +28,8 @@ final class LYMeterStore: ObservableObject {
             if let index = LYFXBridge.engineIndex(for: track.id, in: session) { next[track.id] = index }
         }
         channels = next
-        guard timer == nil else { return }
-        let timer = Timer(timeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.poll() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+        guard ticks == nil else { return }
+        ticks = LYFrameClock.shared.add { [weak self] in self?.poll() }
     }
 
     func reading(for id: UUID) -> Reading? { readings[id] }
@@ -94,6 +90,28 @@ struct LYClipIndicator: View {
     }
 }
 
+/// A meter bound to one channel in the store. Only these small views watch
+/// the store, so a meter tick redraws the meters, not the mixer around them.
+struct LYLiveClipIndicator: View {
+    @ObservedObject var store: LYMeterStore
+    let key: UUID
+
+    var body: some View {
+        LYClipIndicator(reading: store.reading(for: key), reset: { store.reset(key) })
+    }
+}
+
+struct LYLiveStripMeter: View {
+    @ObservedObject var store: LYMeterStore
+    let key: UUID
+    var tint = LYLLTHTheme.teal
+    var isActive = true
+
+    var body: some View {
+        LYStripMeter(reading: isActive ? store.reading(for: key) : nil, tint: tint)
+    }
+}
+
 /// Thin two-rail meter with a clip lamp at the top.
 struct LYStripMeter: View {
     let reading: LYMeterStore.Reading?
@@ -130,7 +148,8 @@ struct LYStripMeter: View {
 struct ChannelStripInspector: View {
     @Binding var session: LYLLTHSession
     let selectedTrackID: UUID?
-    @ObservedObject var meters: LYMeterStore
+    /// Not observed here: only the meters inside the strips watch it.
+    let meters: LYMeterStore
     let openFX: (FXKind, FXTarget) -> Void
     let toggleFX: (FXKind, FXTarget) -> Void
     let openPicker: (FXTarget) -> Void
@@ -313,8 +332,8 @@ struct ChannelStripInspector: View {
                     }
                 }
             ),
-            reading: meters.reading(for: track.id),
-            resetClip: { meters.reset(track.id) },
+            meters: meters,
+            meterKey: track.id,
             openFX: { openFX($0, target) },
             toggleFX: { toggleFX($0, target) },
             openPicker: { openPicker(target) }
@@ -341,8 +360,8 @@ struct ChannelStripInspector: View {
             isSolo: nil,
             isArmed: nil,
             reverbSend: nil,
-            reading: meters.reading(for: LYMeterStore.mainKey),
-            resetClip: { meters.reset(LYMeterStore.mainKey) },
+            meters: meters,
+            meterKey: LYMeterStore.mainKey,
             openFX: { openFX($0, .main) },
             toggleFX: { toggleFX($0, .main) },
             openPicker: { openPicker(.main) }
@@ -393,8 +412,8 @@ private struct LYChannelStrip: View {
     var isSolo: Binding<Bool>?
     var isArmed: Binding<Bool>?
     var reverbSend: Binding<Float>?
-    let reading: LYMeterStore.Reading?
-    let resetClip: () -> Void
+    let meters: LYMeterStore
+    let meterKey: UUID
     let openFX: (FXKind) -> Void
     let toggleFX: (FXKind) -> Void
     let openPicker: () -> Void
@@ -507,7 +526,7 @@ private struct LYChannelStrip: View {
             }
 
             HStack(spacing: 4) {
-                LYClipIndicator(reading: reading, reset: resetClip)
+                LYLiveClipIndicator(store: meters, key: meterKey)
                 Text(volumeDB <= -47.9 ? "−∞" : String(format: "%.1f", volumeDB))
                     .font(LYLLTHTheme.value(10))
                     .foregroundStyle(LYLLTHTheme.text)
@@ -519,7 +538,7 @@ private struct LYChannelStrip: View {
             HStack(alignment: .bottom, spacing: 10) {
                 LYStripFader(value: $volumeDB, range: -48...(isMain ? 0 : 6), accent: accent)
                     .frame(width: 30)
-                LYStripMeter(reading: hasChannel ? reading : nil, tint: accent == LYLLTHTheme.chromeText ? LYLLTHTheme.teal : accent)
+                LYLiveStripMeter(store: meters, key: meterKey, tint: accent == LYLLTHTheme.chromeText ? LYLLTHTheme.teal : accent, isActive: hasChannel)
                     .frame(width: 12)
             }
             .frame(height: 170)
