@@ -46,6 +46,7 @@
 		9AB195A56B1DC6168799741C /* LYSynthLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A289B564195B5876C2AEE5D /* LYSynthLibrary.swift */; };
 		9CEC9247F9086363A88353A1 /* LYWavetableEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0618CFBCAE4DFCA5D4BA204B /* LYWavetableEditor.swift */; };
 		A3B2C9A6D7CCF44DEE0683CB /* Nightshape-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6DA38B4ADC0D30D3DE76127B /* Nightshape-Bold.ttf */; };
+		A65BB141E76824F4F93607CE /* SonicDecimatorEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95DE102CFAEFE0774BDF2B06 /* SonicDecimatorEditorView.swift */; };
 		A72727F891A861CF9EBE3149 /* FXRack.swift in Sources */ = {isa = PBXBuildFile; fileRef = F548D526F8DC778B1DCD460A /* FXRack.swift */; };
 		AB673A7B503D67D52EEC2E24 /* DrumKitRootShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D0D01CA5DFBABAF7CB19114 /* DrumKitRootShims.swift */; };
 		B1123646A4225427ECE8197B /* CompressorWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B60B660A74B0473F5FCECCF /* CompressorWindowView.swift */; };
@@ -70,6 +71,7 @@
 		F3072584030C31119C4860C6 /* LYLLTHSessionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */; };
 		F3B64D71CED48EEFD02691B4 /* LYRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16D07685D250C91B37E5CD8F /* LYRecorder.swift */; };
 		F5073A5322475A1DCD36C06D /* LYBounce.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26A43024412B8FC79FFECBA7 /* LYBounce.swift */; };
+		FDA597E345BBC5A57BA5F2C0 /* DecimatorMotionDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63BA1223576AF041D954B929 /* DecimatorMotionDisplay.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -114,6 +116,7 @@
 		5D2710D240A4FA97144EC0A9 /* SessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModels.swift; sourceTree = "<group>"; };
 		5EC8025D09EE241120C506F1 /* LYSynthControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthControls.swift; sourceTree = "<group>"; };
 		60D7E4EBAA99B89AB4C6C272 /* ZipArchiveWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ZipArchiveWriter.swift; path = "../nightshape-drumkit-ios/Services/ZipArchiveWriter.swift"; sourceTree = "<group>"; };
+		63BA1223576AF041D954B929 /* DecimatorMotionDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecimatorMotionDisplay.swift; sourceTree = "<group>"; };
 		66DDC1CD43034C66B7DEB682 /* LYLLTH-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "LYLLTH-Bridging-Header.h"; sourceTree = "<group>"; };
 		67535C49D147B10E190ACCD8 /* TimelinePlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelinePlayback.swift; sourceTree = "<group>"; };
 		67A45FFE78C9215B9D662390 /* BusRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BusRoutingTests.swift; sourceTree = "<group>"; };
@@ -129,6 +132,7 @@
 		8D80641FB01504BDFF2D6E83 /* FontRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontRegistrar.swift; sourceTree = "<group>"; };
 		8E8249E5B5CE85685DDD1A42 /* LYSynthEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthEditor.swift; sourceTree = "<group>"; };
 		90BF7073365CA38A142C3FA5 /* AudioUnitCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitCatalog.swift; sourceTree = "<group>"; };
+		95DE102CFAEFE0774BDF2B06 /* SonicDecimatorEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SonicDecimatorEditorView.swift; path = "../nightshape-drumkit-ios/Views/Components/SonicDecimatorEditorView.swift"; sourceTree = "<group>"; };
 		960F211F505A6A045668116C /* LYLLTHTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LYLLTHTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1957573B0E550787521E811 /* LYLLTH.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LYLLTH.entitlements; sourceTree = "<group>"; };
 		A3622C427AB836F95F83FB66 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -202,6 +206,7 @@
 				543A005C681BF5D44EE192DB /* ReverbModels.swift */,
 				CE8658DEE809F98F0303AC07 /* SequencerModels.swift */,
 				E67BF43BB0AB1DE22EEB35A8 /* SignalBloomModels.swift */,
+				95DE102CFAEFE0774BDF2B06 /* SonicDecimatorEditorView.swift */,
 				6F5EDEEECA0B5AF0315DC28E /* ZipArchiveReader.swift */,
 				60D7E4EBAA99B89AB4C6C272 /* ZipArchiveWriter.swift */,
 			);
@@ -284,6 +289,7 @@
 		C16D0DEE10F19F705FDF7C1B /* DrumKitShared */ = {
 			isa = PBXGroup;
 			children = (
+				63BA1223576AF041D954B929 /* DecimatorMotionDisplay.swift */,
 				8D0D01CA5DFBABAF7CB19114 /* DrumKitRootShims.swift */,
 				2076405DA45D97F6974188B2 /* NightshapeTheme+macOS.swift */,
 				3BF85EAD4DB1AAE6788D582A /* TransportDisplayState.swift */,
@@ -500,6 +506,7 @@
 				1F169417CEC23D5306D775ED /* ChannelStripInspector.swift in Sources */,
 				B7937CF1156F2D4D5449C232 /* CompressorModels.swift in Sources */,
 				B1123646A4225427ECE8197B /* CompressorWindowView.swift in Sources */,
+				FDA597E345BBC5A57BA5F2C0 /* DecimatorMotionDisplay.swift in Sources */,
 				AB673A7B503D67D52EEC2E24 /* DrumKitRootShims.swift in Sources */,
 				426BA90C5EE003358A9D6E10 /* DrumKitSequencerVisuals.swift in Sources */,
 				C9669E21D8851AEC280A6749 /* DrumSoundBrowser.swift in Sources */,
@@ -536,6 +543,7 @@
 				00CD8A9C08C13F42A6624EDB /* SequencerModels.swift in Sources */,
 				C619A497E1A0A6EEAEC62A38 /* SessionModels.swift in Sources */,
 				E6AFE555883CC0E0E74FA6D0 /* SignalBloomModels.swift in Sources */,
+				A65BB141E76824F4F93607CE /* SonicDecimatorEditorView.swift in Sources */,
 				8294D8BFBBA557ED35152BE3 /* TimelinePlayback.swift in Sources */,
 				CE3B4B50242937A2DCF7A2C6 /* TransportDisplayState.swift in Sources */,
 				6F3A38A7891F6397397D6048 /* WorkspaceView.swift in Sources */,

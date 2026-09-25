@@ -6,10 +6,11 @@ struct LYFXWindowRequest: Equatable {
     var target: FXTarget
 }
 
-/// Floats one of DrumKit's own FX windows over the workspace, on the same dark
-/// scrim and at the same size DrumKit uses, and routes its edits into the
-/// document and the engine. The windows are DrumKit's source, compiled here, so
-/// their displays and animation are identical on both products.
+/// Floats one of DrumKit's own FX windows over the workspace and routes its
+/// edits into the document and the engine. The windows are DrumKit's source,
+/// compiled here, so their displays and animation match DrumKit; on the Mac
+/// they use the wide layout, display on the left and controls beside it,
+/// rather than the phone's single column.
 struct LYFXWindowHost: View {
     @Binding var session: LYLLTHSession
     @Binding var request: LYFXWindowRequest?
@@ -21,24 +22,32 @@ struct LYFXWindowHost: View {
     private let engine = NightshapeAudioEngine.shared
     @State private var parkedReverbSend: Float?
     @State private var mainEQVolume: Double = 0
+    @StateObject private var decimatorModel = SonicDecimatorEditorModel()
+    @StateObject private var decimatorMotion = DecimatorMotionDisplay()
+    @State private var loadedDecimatorFor: LYFXWindowRequest?
 
     var body: some View {
         if let request {
             GeometryReader { geo in
-                let scale = Self.macScale(for: geo.size)
+                let size = Self.windowSize(for: request.kind, in: geo.size)
                 LYFloatingWindow(
-                    id: "fx",
+                    // Their own saved positions: the old narrow window's would put
+                    // these wider ones half off screen.
+                    id: request.kind == .decim ? "fx.decimator" : "fx.wide",
                     title: request.kind.title + "  ·  " + targetName,
                     accent: request.kind.accent,
-                    size: CGSize(width: 380, height: min(max(510, geo.size.height / scale - 60), 660)),
-                    scale: scale,
+                    size: size.content,
+                    scale: size.scale,
                     close: close
                 ) {
                     window(request)
+                        .environment(\.fxWindowWide, request.kind != .decim)
                 }
                 .transition(.scale(scale: 0.96).combined(with: .opacity))
             }
             .preferredColorScheme(.dark)
+            .onAppear { loadDecimator(request) }
+            .onChange(of: request) { _, next in loadDecimator(next) }
         }
     }
 
@@ -50,6 +59,47 @@ struct LYFXWindowHost: View {
     /// downsamples the whole frame and thin 8 pt type breaks up.
     static func macScale(for size: CGSize) -> CGFloat {
         min(1.25, max(1, (size.height - 40) / 660), max(1, (size.width - 40) / 380))
+    }
+
+    /// Wide windows: the display takes the left, a 356-point control column
+    /// the right. The decimator keeps its tall XY field.
+    static func windowSize(for kind: FXKind, in workspace: CGSize) -> (content: CGSize, scale: CGFloat) {
+        if kind == .decim {
+            // Its full height, shrunk to fit a short workspace.
+            let scale = min(1.1, max(0.8, (workspace.height - 70) / 772))
+            return (CGSize(width: 440, height: 750), scale)
+        }
+        let scale = min(1.15, max(1, (workspace.width - 40) / 900))
+        let height = min(max(470, (workspace.height - 60) / scale), 560)
+        return (CGSize(width: min(900, (workspace.width - 40) / scale), height: height), scale)
+    }
+
+    // MARK: Sonic Decimator
+
+    /// DrumKit's decimator editor works on its own model; it is loaded from
+    /// the channel's state when the window opens and written back on edits.
+    private func loadDecimator(_ request: LYFXWindowRequest?) {
+        guard let request, request.kind == .decim, loadedDecimatorFor != request else { return }
+        loadedDecimatorFor = request
+        let state = rack.decimator ?? .neutral
+        decimatorModel.isAudioReactive = false
+        decimatorModel.isBypassed = state.isBypassed
+        decimatorModel.motion = state.motion ?? DecimatorMotion()
+        decimatorModel.selectedStep = 0
+        decimatorModel.setPosition(x: Double(state.destroy), y: Double(state.crush))
+    }
+
+    private func commitDecimator() {
+        update(.decim) { rack in
+            var state = rack.decimator ?? .neutral
+            if !decimatorModel.motion.isEnabled {
+                state.destroy = Float(decimatorModel.position.x)
+                state.crush = Float(decimatorModel.position.y)
+            }
+            state.isBypassed = decimatorModel.isBypassed
+            state.motion = decimatorModel.motion
+            rack.decimator = state
+        }
     }
 
     // MARK: State plumbing
@@ -294,33 +344,32 @@ struct LYFXWindowHost: View {
                 keySources: keySources
             ))
         case .decim:
-            let state = rack.decimator ?? .neutral
-            return AnyView(FXWindowChrome(
-                title: "SONIC DECIMATOR",
-                targetName: targetName,
-                accent: FXKind.decim.accent,
-                isEngaged: engaged,
-                isPlaying: isPlaying,
-                presetName: nil,
-                onPreset: { _ in },
-                onToggleEngaged: toggle(.decim),
-                onTransportTap: transportTap,
-                onReset: { update(.decim) { $0.decimator = .neutral } },
-                onCancel: cancel,
-                onDone: done
-            ) {
-                HStack(spacing: 24) {
-                    FXKnob(label: "DESTROY", valueText: "\(Int((state.destroy * 100).rounded()))%", fraction: state.destroy,
-                           accent: FXKind.decim.accent, diameter: 64,
-                           onChange: { value in update(.decim) { rack in var s = rack.decimator ?? .neutral; s.destroy = value; s.isBypassed = false; rack.decimator = s } },
-                           onReset: { update(.decim) { rack in var s = rack.decimator ?? .neutral; s.destroy = DecimatorState.neutral.destroy; rack.decimator = s } })
-                    FXKnob(label: "CRUSH", valueText: "\(Int((state.crush * 100).rounded()))%", fraction: state.crush,
-                           accent: NightshapeTheme.accentTeal, diameter: 64,
-                           onChange: { value in update(.decim) { rack in var s = rack.decimator ?? .neutral; s.crush = value; s.isBypassed = false; rack.decimator = s } },
-                           onReset: { update(.decim) { rack in var s = rack.decimator ?? .neutral; s.crush = DecimatorState.neutral.crush; rack.decimator = s } })
+            return AnyView(
+                SonicDecimatorFloatingEditorView(
+                    model: decimatorModel,
+                    motionDisplay: decimatorMotion,
+                    rowName: targetName,
+                    isPlaying: isPlaying,
+                    playingStep: nil,
+                    motionRowID: nil,
+                    onTransportTap: transportTap,
+                    onMotionChange: { commitDecimator() },
+                    onCancel: cancel,
+                    onApply: { commitDecimator(); close() }
+                )
+                .onChange(of: decimatorModel.position) { _, _ in
+                    if decimatorModel.motion.isEnabled {
+                        decimatorModel.writeSelectedStepFromPosition()
+                    } else if decimatorModel.isBypassed {
+                        // Moving the pad is intent to hear it.
+                        decimatorModel.isBypassed = false
+                    }
+                    commitDecimator()
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            })
+                .onChange(of: decimatorModel.isBypassed) { _, _ in commitDecimator() }
+                .background(LYDecimatorMotionFollower(display: decimatorMotion, trackIndex: engineIndex, isPlaying: isPlaying,
+                                                       isActive: decimatorModel.motion.isEnabled))
+            )
         }
     }
 
@@ -359,3 +408,28 @@ struct LYFXWindowHost: View {
     }
 }
 
+
+
+/// Asks the engine where MOTION is and shows it on the decimator's XY field,
+/// twenty times a second while the transport runs.
+private struct LYDecimatorMotionFollower: View {
+    let display: DecimatorMotionDisplay
+    let trackIndex: Int?
+    let isPlaying: Bool
+    let isActive: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !(isPlaying && isActive))) { context in
+            Color.clear.onChange(of: context.date) { _, _ in
+                let engine = NightshapeAudioEngine.shared
+                let point = trackIndex.flatMap { engine.decimatorMotionPosition(trackIndex: $0) } ?? (trackIndex == nil ? engine.mainDecimatorMotionPosition() : nil)
+                if let point {
+                    display.setPosition(.init(x: Double(point.x), y: Double(point.y)), for: nil)
+                } else {
+                    display.clearPosition(for: nil)
+                }
+            }
+        }
+        .onChange(of: isPlaying) { _, playing in if !playing { display.clearPosition(for: nil) } }
+    }
+}
