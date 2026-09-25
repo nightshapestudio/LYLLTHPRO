@@ -44,3 +44,4 @@ The arrangement is the persistent focal plane. Library, mixer, and inspector are
 6. Prefer a waveform, envelope, meter, or useful musical preview over decorative graphics.
 7. Panels must collapse without changing the document or audio state.
 8. Narrow layouts may hide the inspector, but the arrangement and transport remain usable.
+9. Generic Apple product menus are never allowed inside the LYLLTH interface. Do not use SwiftUI `Menu`, `.contextMenu`, menu-styled `Picker`, `confirmationDialog`, or stock `.popover` presentation for product controls. Use the shared NIGHTSHAPE menu overlay, header, divider, row, and square panel chrome; preserve outside-click dismissal, accessibility, keyboard behavior, selection state, and the original action. System-owned Open/Save, permission, authentication, and application-menu surfaces are the only exception.

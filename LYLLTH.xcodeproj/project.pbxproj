@@ -12,6 +12,7 @@
 		55B23E27BAAC6FC150BBEC20 /* Adam-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1703868BDA0F39CBC2D0032D /* Adam-Bold.ttf */; };
 		6E98A0974A6201257826EF93 /* Adam-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD2467CDCE9B421E3430FFFE /* Adam-Light.ttf */; };
 		6F3A38A7891F6397397D6048 /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */; };
+		A14C7B9D2E5F4180B3C6D721 /* DrumKitSequencerVisuals.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24C7B9D2E5F4180B3C6D721 /* DrumKitSequencerVisuals.swift */; };
 		7DF88DF9F126EE98522AAD31 /* AudioUnitCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90BF7073365CA38A142C3FA5 /* AudioUnitCatalog.swift */; };
 		865DADC7F42A9E3484ABCDAD /* LYLLTHApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */; };
 		A3B2C9A6D7CCF44DEE0683CB /* Nightshape-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6DA38B4ADC0D30D3DE76127B /* Nightshape-Bold.ttf */; };
@@ -41,6 +42,7 @@
 		6DA38B4ADC0D30D3DE76127B /* Nightshape-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Nightshape-Bold.ttf"; sourceTree = "<group>"; };
 		8D80641FB01504BDFF2D6E83 /* FontRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontRegistrar.swift; sourceTree = "<group>"; };
 		90BF7073365CA38A142C3FA5 /* AudioUnitCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitCatalog.swift; sourceTree = "<group>"; };
+		A24C7B9D2E5F4180B3C6D721 /* DrumKitSequencerVisuals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumKitSequencerVisuals.swift; sourceTree = "<group>"; };
 		960F211F505A6A045668116C /* LYLLTHTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LYLLTHTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYLLTHApp.swift; sourceTree = "<group>"; };
 		CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDocumentTests.swift; sourceTree = "<group>"; };
@@ -131,6 +133,7 @@
 		DBBEA465A998CDDEAC4110FA /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				A24C7B9D2E5F4180B3C6D721 /* DrumKitSequencerVisuals.swift */,
 				D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */,
 			);
 			path = Views;
@@ -273,6 +276,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A14C7B9D2E5F4180B3C6D721 /* DrumKitSequencerVisuals.swift in Sources */,
 				C5FC2050CF73E1D9599F3518 /* AudioEngineController.swift in Sources */,
 				7DF88DF9F126EE98522AAD31 /* AudioUnitCatalog.swift in Sources */,
 				ECA8EDA23F1164FC2719CA0C /* FontRegistrar.swift in Sources */,
@@ -340,6 +344,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -420,6 +425,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

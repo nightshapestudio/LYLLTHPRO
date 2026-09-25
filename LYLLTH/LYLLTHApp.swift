@@ -16,6 +16,7 @@ struct LYLLTHApp: App {
                 .environmentObject(plugins)
                 .preferredColorScheme(.dark)
         }
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(after: .toolbar) {
                 Button(audio.isPlaying ? "Stop" : "Play") {
