@@ -2,10 +2,72 @@ import Combine
 import Foundation
 import NightshapeAudioEngine
 import AVFoundation
+import CryptoKit
+
+/// DrumKit's two transport modes. PATTERN loops the pattern being edited;
+/// SONG plays the arrangement, pattern regions and audio events together.
+enum LYTransportMode: String {
+    case pattern
+    case song
+}
 
 @MainActor
 final class AudioEngineController: ObservableObject {
-    let engine = NightshapeAudioEngine.shared
+    let engine: NightshapeAudioEngine = {
+        LYChannelMap.configureEngine()
+        return NightshapeAudioEngine.shared
+    }()
+    private lazy var timeline: LYTimelineAudioPlayer = {
+        let player = LYTimelineAudioPlayer(engine: engine)
+        player.onRenderError = { [weak self] message in self?.audioEventError = message }
+        return player
+    }()
+
+    /// Transport record enable. Capture is not built yet; this is the state
+    /// the record path will read.
+    @Published var isRecordEnabled = false
+    @Published private(set) var transportMode: LYTransportMode = .song
+    /// LYLLTH SYNTH instances by track, and which engine channel each is on.
+    private var instruments: [UUID: LYSynthInstrument] = [:]
+    private var instrumentOnChannel: [Int: UUID] = [:]
+    /// What each engine channel's built-in synth was last set to, so an edit
+    /// elsewhere does not re-apply it (which silences held notes).
+    private var appliedSynth: [Int: (root: UInt8, preset: SynthPreset)] = [:]
+    /// The drum preset each channel has loaded (or is loading).
+    private var appliedDrum: [Int: String] = [:]
+
+    // What the engine already has, so a sync only sends what changed. A mute
+    // click should cost one engine call, not a full re-send of every pattern.
+    private struct SentPattern: Equatable { var steps: [Bool]; var locks: [LYStepParameters] }
+    private struct SentMix: Equatable { var volume: Double; var pan: Double; var muted: Bool }
+    private struct SongInputs: Equatable {
+        var tracks: [[LYClip]]
+        var chord: [Bool]
+        var chordPresets: [String?]
+        var roots: [Int?]
+        var key: SongKey
+        var window: LYSongWindow
+        var numerator: Int
+        var denominator: Int
+    }
+    private var sentPatterns: [Int: SentPattern] = [:]
+    private var sentMix: [Int: SentMix] = [:]
+    private var sentSong: SongInputs?
+    private var sentRoutes: [Int: NightshapeAudioEngine.BusRoute]?
+    private var sentTransport: (bpm: Double, numerator: Int, denominator: Int, length: Int, mode: LYTransportMode)?
+
+    /// Drops every cache, for when the engine may have lost state.
+    func invalidateEngineCaches() {
+        sentPatterns = [:]
+        sentMix = [:]
+        sentSong = nil
+        sentTransport = nil
+        sentRoutes = nil
+        appliedSynth = [:]
+        appliedDrum = [:]
+    }
+    /// The song window the transport cycles through while in SONG mode.
+    @Published private(set) var songWindow = LYSongWindow(startBar: 0, barCount: 4, beatsPerBar: 4)
 
     @Published private(set) var isPlaying = false
     @Published private(set) var currentStep = 0
@@ -26,12 +88,58 @@ final class AudioEngineController: ObservableObject {
         engine.state.$timecodeText
             .removeDuplicates()
             .assign(to: &$timecode)
+        engine.state.$isPlaying
+            .removeDuplicates()
+            .sink { [weak self] playing in
+                guard let self else { return }
+                if playing && self.transportMode == .song {
+                    self.timeline.start()
+                } else {
+                    self.timeline.stop()
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Switches between looping the edited pattern and playing the song. A
+    /// running transport keeps running; the next bar follows the new mode.
+    func setTransportMode(_ mode: LYTransportMode, session: LYLLTHSession, assets: [String: Data]) {
+        guard mode != transportMode else { return }
+        transportMode = mode
+        syncSequencer(session)
+        syncTimeline(session, assets: assets)
+        if isPlaying && mode == .song {
+            timeline.start()
+        } else {
+            timeline.stop()
+        }
+    }
+
+    /// Hands the arranged audio events to the timeline player. Cheap to call on
+    /// every edit: renders are cached and only timing changes reschedule.
+    func syncTimeline(_ session: LYLLTHSession, assets: [String: Data]) {
+        let meter = transportMeter(numerator: session.numerator, denominator: session.denominator)
+        let window = LYSongWindow.resolve(for: session, stepsPerBar: meter.activeSubdivisionCount)
+        if window != songWindow { songWindow = window }
+        timeline.update(session: session, assets: assets, window: window)
+    }
+
+    /// The song beat being heard right now, for the arrangement playhead.
+    func currentSongBeat() -> Double? {
+        guard transportMode == .song, isPlaying else { return nil }
+        if let beat = timeline.currentSongBeat() { return beat }
+        guard let anchor = engine.transportAnchor() else { return nil }
+        let now = mach_absolute_time()
+        guard now >= anchor.epochHostTime else { return songWindow.startBeat }
+        let beats = AVAudioTime.seconds(forHostTime: now - anchor.epochHostTime) / anchor.stepDuration * lyBeatsPerStep
+        return songWindow.startBeat + beats.truncatingRemainder(dividingBy: max(songWindow.lengthBeats, 0.25))
     }
 
     func prepare(_ session: LYLLTHSession) {
         if !engine.isReady {
             do {
                 try engine.start()
+                engine.setTrackMeteringEnabled(true)
                 startupError = nil
             } catch {
                 startupError = error.localizedDescription
@@ -43,6 +151,7 @@ final class AudioEngineController: ObservableObject {
 
     func updateTempo(_ bpm: Double) {
         engine.setBPM(bpm)
+        sentTransport?.bpm = bpm
     }
 
     /// Mirrors the document's active desktop pattern into the shared realtime
@@ -56,19 +165,70 @@ final class AudioEngineController: ObservableObject {
         let clips = tracks.map { activeSequencedClip(in: $0, patternIndex: selectedPattern) }
         let stepCount = min(max(clips.compactMap { $0?.steps?.count }.max() ?? 16, 1), 64)
         let meter = transportMeter(numerator: session.numerator, denominator: session.denominator)
-        let hasSolo = tracks.contains(where: \.isSolo)
 
-        engine.setBPM(session.bpm)
-        engine.setTransportMeter(meter)
-        engine.setPatternLength(stepCount)
-        configureMetronome(meter: meter, stepCount: stepCount)
+        let length = transportMode == .song ? meter.activeSubdivisionCount : stepCount
+        let transport = (session.bpm, session.numerator, session.denominator, length, transportMode)
+        let transportChanged = sentTransport.map { $0 != transport } ?? true
+        if transportChanged {
+            engine.setBPM(session.bpm)
+            engine.setTransportMeter(meter)
+            engine.setPatternLength(length)
+            configureMetronome(meter: meter, stepCount: length)
+            sentTransport = transport
+        }
+        if transportMode == .song {
+            // Song frames are one bar each, so the pattern length becomes the bar.
+            let stepsPerBar = meter.activeSubdivisionCount
+            let window = LYSongWindow.resolve(for: session, stepsPerBar: stepsPerBar)
+            if window != songWindow { songWindow = window }
+            let key = session.songKey ?? .default
+            let inputs = SongInputs(
+                tracks: tracks.prefix(16).map { $0.clips.filter { $0.kind == .pattern || $0.kind == .midi } },
+                chord: tracks.prefix(16).map { $0.isChordTrack == true },
+                chordPresets: tracks.prefix(16).map(\.chordPresetID),
+                roots: tracks.prefix(16).map(\.rootNote),
+                key: key,
+                window: window,
+                numerator: session.numerator,
+                denominator: session.denominator
+            )
+            if inputs != sentSong {
+            sentSong = inputs
+            engine.setSongArrangement(
+                LYSongCompiler.frames(session: session, window: window, stepsPerBar: stepsPerBar) { track, clip in
+                    let count = max(clip.steps?.count ?? 16, 1)
+                    return self.renderedPattern(
+                        track: track,
+                        storedSteps: self.normalizedSteps(clip.steps, count: count),
+                        locks: self.normalizedLocks(clip.stepParameters, count: count),
+                        key: key,
+                        meter: meter,
+                        rootNote: track.rootNote ?? (track.kind == .drumkit ? 36 : 48)
+                    )
+                }
+            )
+            }
+        } else if sentSong != nil || transportChanged {
+            engine.setSongArrangement([])
+            sentSong = nil
+        }
 
         for (trackIndex, track) in tracks.prefix(16).enumerated() {
             let fallbackRoot = track.kind == .drumkit ? 36 : 48
             let rootNote = UInt8(clamping: track.rootNote ?? fallbackRoot)
             let preset = track.synthPresetID.flatMap(SynthPreset.init(rawValue:))
                 ?? (track.kind == .drumkit ? .deepMono : .junoDream)
-            engine.setTrackSynth(trackIndex: trackIndex, rootNote: rootNote, preset: preset)
+            if let drumID = LYDrumSounds.presetID(for: track) {
+                // A drum track plays its DrumKit drum-synth one-shot.
+                loadDrum(drumID, channel: trackIndex)
+            } else {
+                if appliedDrum[trackIndex] != nil { appliedDrum[trackIndex] = nil }
+                if appliedSynth[trackIndex]?.root != rootNote || appliedSynth[trackIndex]?.preset != preset {
+                    engine.setTrackSynth(trackIndex: trackIndex, rootNote: rootNote, preset: preset)
+                    appliedSynth[trackIndex] = (rootNote, preset)
+                }
+            }
+            syncInstrument(track: track, channel: trackIndex, bpm: session.bpm)
 
             let clip = clips[trackIndex]
             let storedSteps = normalizedSteps(clip?.steps, count: stepCount)
@@ -82,6 +242,9 @@ final class AudioEngineController: ObservableObject {
                 rootNote: Int(rootNote)
             )
 
+            let pattern = SentPattern(steps: rendered.enabled, locks: rendered.locks)
+            if sentPatterns[trackIndex] != pattern {
+            sentPatterns[trackIndex] = pattern
             engine.setPattern(trackIndex: trackIndex, steps: rendered.enabled)
             engine.setStepParameters(
                 trackIndex: trackIndex,
@@ -94,22 +257,111 @@ final class AudioEngineController: ObservableObject {
                 pitches: rendered.locks.map { Int($0.pitch.rounded()).clamped(to: -24...24) },
                 noteLengths: rendered.locks.map { Int($0.noteLength.rounded()).clamped(to: 1...64) }
             )
-            engine.setTrackVolume(trackIndex: trackIndex, volume: min(pow(10, track.volumeDB / 20), 1))
-            engine.setTrackPan(trackIndex: trackIndex, pan: track.pan)
-            engine.setTrackMuted(trackIndex: trackIndex, muted: track.isMuted || (hasSolo && !track.isSolo))
+            }
+            let mix = SentMix(volume: track.volumeDB, pan: track.pan, muted: !LYChannelMap.isAudible(track, in: session))
+            let previous = sentMix[trackIndex]
+            if previous?.volume != mix.volume { engine.setTrackVolume(trackIndex: trackIndex, volume: min(pow(10, mix.volume / 20), 1)) }
+            if previous?.pan != mix.pan { engine.setTrackPan(trackIndex: trackIndex, pan: mix.pan) }
+            if previous?.muted != mix.muted { engine.setTrackMuted(trackIndex: trackIndex, muted: mix.muted) }
+            sentMix[trackIndex] = mix
         }
 
-        if tracks.count < 16 {
-            for trackIndex in tracks.count..<16 {
-                engine.setPattern(trackIndex: trackIndex, steps: Array(repeating: false, count: stepCount))
-                engine.setTrackMuted(trackIndex: trackIndex, muted: true)
+        // Channels past the sequencer's play audio tracks and AUX RETURNs, or
+        // sit muted. They get no pattern and no instrument.
+        let byChannel = Dictionary(uniqueKeysWithValues: LYChannelMap.channels(in: session).map { ($0.index, $0.trackID) })
+        do {
+            for trackIndex in min(tracks.count, LYChannelMap.sequencerChannels)..<TrackChannel.maxTracks {
+                let silent = SentPattern(steps: Array(repeating: false, count: stepCount), locks: [])
+                if sentPatterns[trackIndex] != silent {
+                    sentPatterns[trackIndex] = silent
+                    engine.setPattern(trackIndex: trackIndex, steps: silent.steps)
+                    engine.resetTrackStepState(trackIndex: trackIndex)
+                }
+                if instrumentOnChannel[trackIndex] != nil {
+                    engine.setTrackInstrument(trackIndex: trackIndex, instrument: nil)
+                    instrumentOnChannel[trackIndex] = nil
+                }
+                if let id = byChannel[trackIndex], let track = session.tracks.first(where: { $0.id == id }) {
+                    let mix = SentMix(volume: track.volumeDB, pan: track.pan, muted: !LYChannelMap.isAudible(track, in: session))
+                    let previous = sentMix[trackIndex]
+                    if previous?.volume != mix.volume { engine.setTrackVolume(trackIndex: trackIndex, volume: min(pow(10, mix.volume / 20), 3.98)) }
+                    if previous?.pan != mix.pan { engine.setTrackPan(trackIndex: trackIndex, pan: mix.pan) }
+                    if previous?.muted != mix.muted { engine.setTrackMuted(trackIndex: trackIndex, muted: mix.muted) }
+                    sentMix[trackIndex] = mix
+                } else if sentMix[trackIndex]?.muted != true {
+                    engine.setTrackMuted(trackIndex: trackIndex, muted: true)
+                    sentMix[trackIndex] = SentMix(volume: -96, pan: 0, muted: true)
+                }
             }
         }
+
+        let routes = LYChannelMap.routes(in: session)
+        if routes != sentRoutes {
+            engine.setBusRouting(routes)
+            sentRoutes = routes
+        }
+    }
+
+    // MARK: - Drum sounds
+
+    private func loadDrum(_ presetID: String, channel: Int) {
+        guard appliedDrum[channel] != presetID, let preset = LYDrumSounds.preset(id: presetID) else { return }
+        appliedDrum[channel] = presetID
+        appliedSynth[channel] = nil
+        engine.clearTrackSynth(trackIndex: channel)
+        Task { @MainActor in
+            do {
+                let url = try await LYDrumSounds.renderedFile(for: preset)
+                // Another sound may have been chosen while this one rendered.
+                guard appliedDrum[channel] == presetID else { return }
+                try engine.loadSample(url: url, trackIndex: channel)
+            } catch {
+                audioEventError = "Could not load drum sound \(preset.name): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func auditionDrum(_ preset: DrumSynthPreset) {
+        Task { @MainActor in
+            if let buffer = await LYDrumSounds.auditionBuffer(for: preset) { engine.audition(buffer) }
+        }
+    }
+
+    // MARK: - LYLLTH SYNTH
+
+    private func syncInstrument(track: LYTrack, channel: Int, bpm: Double) {
+        guard let patch = track.synth else {
+            if instrumentOnChannel[channel] != nil {
+                engine.setTrackInstrument(trackIndex: channel, instrument: nil)
+                instrumentOnChannel[channel] = nil
+            }
+            return
+        }
+        let instrument = instruments[track.id] ?? {
+            let created = LYSynthInstrument()
+            instruments[track.id] = created
+            return created
+        }()
+        if instrument.patch != patch || instrument.bpm != bpm { instrument.apply(patch, bpm: bpm) }
+        if instrumentOnChannel[channel] != track.id {
+            engine.setTrackInstrument(trackIndex: channel, instrument: instrument)
+            instrumentOnChannel[channel] = track.id
+        }
+    }
+
+    func synthInstrument(for trackID: UUID) -> LYSynthInstrument? {
+        instruments[trackID]
     }
 
     func togglePlayback() {
         guard engine.isReady else { return }
         engine.toggleTransport()
+    }
+
+    /// Stops the song without silencing what is still ringing, for the end
+    /// of a bounce: synth releases and effect tails play out.
+    func stopTransportKeepingTails() {
+        engine.stopTransport()
     }
 
     func stop() {
@@ -140,6 +392,13 @@ final class AudioEngineController: ObservableObject {
 
     func toggleMetronome(for session: LYLLTHSession) {
         isMetronomeEnabled.toggle()
+        guard transportMode == .pattern else {
+            configureMetronome(
+                meter: transportMeter(numerator: session.numerator, denominator: session.denominator),
+                stepCount: transportMeter(numerator: session.numerator, denominator: session.denominator).activeSubdivisionCount
+            )
+            return
+        }
         let tracks = session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }
         let selectedPattern = max(0, session.activePatternIndex ?? 0)
         let stepCount = min(max(tracks.compactMap {
@@ -246,13 +505,7 @@ enum LYAudioEventRenderer {
         projectBPM: Double
     ) async throws -> AVAudioPCMBuffer {
         try await Task.detached(priority: .userInitiated) {
-            let ext = fileExtension.isEmpty ? "audio" : fileExtension
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("lyllth-event-\(UUID().uuidString)")
-                .appendingPathExtension(ext)
-            try data.write(to: url, options: .atomic)
-            defer { try? FileManager.default.removeItem(at: url) }
-
+            let url = try LYAudioSourceFileCache.url(for: data, fileExtension: fileExtension)
             let file = try AVAudioFile(forReading: url)
             let sourceDuration = Double(file.length) / file.processingFormat.sampleRate
             let start = min(max(0, clip.sourceStartSeconds + clip.slipOffsetSeconds), sourceDuration)
@@ -281,6 +534,38 @@ enum LYAudioEventRenderer {
                 fadeInSeconds: clip.fadeInSeconds,
                 fadeOutSeconds: clip.fadeOutSeconds
             )
+        }.value
+    }
+
+    /// Resamples a rendered event to the graph's fixed program format so every
+    /// timeline player shares one connection format regardless of the source.
+    static func convert(_ source: AVAudioPCMBuffer, to format: AVAudioFormat) async throws -> AVAudioPCMBuffer {
+        if source.format.isEqual(format) { return source }
+        return try await Task.detached(priority: .userInitiated) {
+            guard let converter = AVAudioConverter(from: source.format, to: format) else {
+                throw LYAudioEventRenderError.renderFailed
+            }
+            let capacity = AVAudioFrameCount(
+                ceil(Double(source.frameLength) * format.sampleRate / source.format.sampleRate) + 64
+            )
+            guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
+                throw LYAudioEventRenderError.bufferAllocation
+            }
+            var provided = false
+            var conversionError: NSError?
+            let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
+                if provided {
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+                provided = true
+                inputStatus.pointee = .haveData
+                return source
+            }
+            guard conversionError == nil, status != .error, output.frameLength > 0 else {
+                throw LYAudioEventRenderError.renderFailed
+            }
+            return output
         }.value
     }
 
@@ -490,5 +775,30 @@ enum LYAudioEventRenderer {
 private extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
         min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+/// Project audio lives in the document as bytes; AVAudioFile needs a path.
+/// Each distinct original is written once per launch and reused by every
+/// render of every event cut from it.
+enum LYAudioSourceFileCache {
+    private static let lock = NSLock()
+    private static var urls: [String: URL] = [:]
+
+    static func url(for data: Data, fileExtension: String) throws -> URL {
+        let key = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        lock.lock()
+        defer { lock.unlock() }
+        if let existing = urls[key], FileManager.default.fileExists(atPath: existing.path) {
+            return existing
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("LYLLTH-Sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(fileExtension.isEmpty ? "audio" : fileExtension)
+        try data.write(to: url, options: .atomic)
+        urls[key] = url
+        return url
     }
 }

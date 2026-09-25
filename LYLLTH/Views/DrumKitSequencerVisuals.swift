@@ -150,7 +150,7 @@ struct LYPatternPlaybackVisualizer: View {
             let track = tracks[rowIndex]
             let steps = activeClip(in: track)?.steps ?? []
             let locks = activeClip(in: track)?.stepParameters ?? []
-            let accent = LYLLTHTheme.accent(track.accent)
+            let accent = LYLLTHTheme.trackAccent(position: rowIndex)
             let y = top + CGFloat(rowIndex) * laneHeight
             let inset = min(1.25, laneHeight * 0.16)
             for step in 0..<stepCount {

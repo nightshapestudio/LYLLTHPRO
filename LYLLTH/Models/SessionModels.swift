@@ -705,6 +705,12 @@ struct LYClip: Codable, Identifiable, Equatable {
     var isMuted = false
     var isLocked = false
     var isLooped = false
+    /// Where playback enters the source cycle, in beats. Trimming an event's
+    /// left edge or splitting it moves this instead of rewriting the source
+    /// region, so every piece of a chopped loop still repeats the same loop.
+    var loopOffsetBeats: Double = 0
+    /// Length of the whole original file. `waveformPeaks` spans all of it.
+    var sourceFileDurationSeconds: Double?
 
     /// Resize a sequenced clip without turning newly-created chord space into
     /// an accidental sustain. Chord `nil` means HOLD, so the first appended
@@ -752,6 +758,7 @@ struct LYClip: Codable, Identifiable, Equatable {
         if let bpm = sourceBPM {
             sourceBPM = min(max(bpm.isFinite ? bpm : 120, 20), 400)
         }
+        loopOffsetBeats = loopOffsetBeats.isFinite ? max(0, loopOffsetBeats) : 0
     }
 }
 
@@ -761,7 +768,7 @@ extension LYClip {
         case sourceStartSeconds, sourceDurationSeconds, waveformPeaks, sourceSampleRate, sourceChannelCount
         case slipOffsetSeconds, eventGainDB
         case pitchSemitones, fadeInSeconds, fadeOutSeconds, fadeCurve, stretchMode
-        case sourceBPM, preservePitch, beatMap, isMuted, isLocked, isLooped
+        case sourceBPM, preservePitch, beatMap, isMuted, isLocked, isLooped, loopOffsetBeats, sourceFileDurationSeconds
     }
 
     init(from decoder: Decoder) throws {
@@ -792,16 +799,20 @@ extension LYClip {
         isMuted = try values.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
         isLocked = try values.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
         isLooped = try values.decodeIfPresent(Bool.self, forKey: .isLooped) ?? false
+        loopOffsetBeats = try values.decodeIfPresent(Double.self, forKey: .loopOffsetBeats) ?? 0
+        sourceFileDurationSeconds = try values.decodeIfPresent(Double.self, forKey: .sourceFileDurationSeconds)
         normalizeAudioEvent()
     }
 }
 
 enum LYAudioEventEditor {
+    /// Splits without touching the source region: the right piece enters the
+    /// source where the cut fell. Both halves still loop the original audio if
+    /// they are dragged longer, which is what makes chop-and-repeat work.
     static func split(_ clip: LYClip, atBeat beat: Double) -> (left: LYClip, right: LYClip)? {
         let end = clip.startBeat + clip.lengthBeats
         guard beat > clip.startBeat + 0.000_001, beat < end - 0.000_001 else { return nil }
 
-        let fraction = (beat - clip.startBeat) / clip.lengthBeats
         var left = clip
         var right = clip
         left.id = UUID()
@@ -809,13 +820,7 @@ enum LYAudioEventEditor {
         left.lengthBeats = beat - clip.startBeat
         right.startBeat = beat
         right.lengthBeats = end - beat
-
-        if let sourceDuration = clip.sourceDurationSeconds {
-            let leftDuration = sourceDuration * fraction
-            left.sourceDurationSeconds = leftDuration
-            right.sourceStartSeconds = clip.sourceStartSeconds + leftDuration
-            right.sourceDurationSeconds = max(0.001, sourceDuration - leftDuration)
-        }
+        right.loopOffsetBeats = clip.loopOffsetBeats + (beat - clip.startBeat)
         left.fadeOutSeconds = 0
         right.fadeInSeconds = 0
         left.normalizeAudioEvent()
@@ -833,6 +838,11 @@ enum LYAudioEventEditor {
 }
 
 struct LYTrack: Codable, Identifiable, Equatable {
+    var isArmed: Bool {
+        get { isRecordArmed ?? false }
+        set { isRecordArmed = newValue }
+    }
+
     var id = UUID()
     var name: String
     var kind: LYTrackKind
@@ -841,6 +851,8 @@ struct LYTrack: Codable, Identifiable, Equatable {
     var pan: Double = 0
     var isMuted = false
     var isSolo = false
+    /// Record arm. Optional preserves older documents.
+    var isRecordArmed: Bool? = nil
     var inputName: String?
     var isChordTrack: Bool? = nil
     var chordPresetID: String? = nil
@@ -848,6 +860,25 @@ struct LYTrack: Codable, Identifiable, Equatable {
     var rootNote: Int? = nil
     var clips: [LYClip] = []
     var inserts: [LYPluginSlot] = []
+    /// NIGHTSHAPE effects on this channel. Optional preserves older documents.
+    var fx: LYFXRack? = nil
+    /// Set when this track plays LYLLTH SYNTH instead of a DrumKit synth preset.
+    var synth: LYSynthPatch? = nil
+    /// A drum track's DrumKit drum-synth preset. nil plays the default chosen
+    /// from the track's name.
+    var drumPresetID: String? = nil
+    /// Post-fader sends into AUX RETURN tracks. Optional preserves older documents.
+    var sends: [LYBusSend]? = nil
+    /// The AUX RETURN this track plays through instead of MAIN. nil is MAIN.
+    var outputBusID: UUID? = nil
+}
+
+/// One send from a track into an AUX RETURN.
+struct LYBusSend: Codable, Equatable, Identifiable {
+    var id: UUID { busID }
+    var busID: UUID
+    /// Linear gain, 0…1. 1 is 0 dB.
+    var level: Float = 0.7
 }
 
 struct LYLoopRange: Codable, Equatable {
@@ -856,7 +887,7 @@ struct LYLoopRange: Codable, Equatable {
 }
 
 struct LYLLTHSession: Codable, Equatable {
-    static let currentSchemaVersion = 3
+    static let currentSchemaVersion = 4
 
     var schemaVersion = currentSchemaVersion
     var id = UUID()
@@ -869,13 +900,25 @@ struct LYLLTHSession: Codable, Equatable {
     var sampleRate: Double
     var bitDepth: Int
     var loopRange: LYLoopRange?
+    /// LOOP on the transport. Optional preserves older documents, which loop.
+    var isLoopEnabled: Bool? = nil
+    /// Four clicks before recording starts. Optional preserves older
+    /// documents; on unless turned off.
+    var countIn: Bool? = nil
     /// Optional preserves documents created before desktop pattern editing.
     var activePatternIndex: Int? = nil
     /// Shared with DrumKit's chord system. Optional preserves older documents.
     var songKey: SongKey? = nil
     /// Per-project Tracks-area view state. Optional preserves older documents.
     var arrangementEditor: LYArrangementEditorState? = nil
+    /// MAIN's NIGHTSHAPE effects and the shared reverb every track sends to.
+    var mainFX: LYFXRack? = nil
+    /// MAIN fader, dB (≤ 0). Optional preserves older documents.
+    var mainVolumeDB: Double? = nil
+    var reverb: ReverbState? = nil
     var tracks: [LYTrack]
+
+    var isLoopActive: Bool { (isLoopEnabled ?? true) && loopRange != nil }
 
     static func starter() -> LYLLTHSession {
         func pattern(
@@ -969,14 +1012,21 @@ struct LYLLTHSession: Codable, Equatable {
         ]
 
         tracks[0].inserts = Self.nightshapeStarterChain
+        // The melodic starter tracks play LYLLTH SYNTH factory sounds.
+        let starterSounds = [
+            "SUB BASS": "SUB PRESSURE", "GLASS ARP": "GLASS ARP", "ANALOG PAD": "NIGHT PAD",
+            "SYNC LEAD": "SYNC SCREAM", "VINTAGE KEYS": "NIGHT KEYS", "FX TEXTURE": "SPECTRAL DRIFT"
+        ]
+        for index in tracks.indices {
+            if let sound = starterSounds[tracks[index].name] { tracks[index].synth = LYSynthPatch.factory(named: sound) }
+        }
         tracks.append(
             LYTrack(
                 name: "VOCAL",
                 kind: .audio,
                 accent: .purple,
                 volumeDB: -6,
-                inputName: "INPUT 1",
-                clips: [LYClip(name: "DROP AUDIO HERE", kind: .audio, startBeat: 8, lengthBeats: 12)]
+                inputName: "INPUT 1"
             )
         )
         tracks.append(LYTrack(name: "RETURN A", kind: .auxiliary, accent: .teal, volumeDB: -8))
@@ -1033,6 +1083,20 @@ struct LYLLTHSession: Codable, Equatable {
                     locks[16].chord = ChordLaneCompiler.rest
                     clip.stepParameters = locks
                     migrated.tracks[chordIndex].clips[clipIndex] = clip
+                }
+            }
+        }
+
+        // Version 4: songs from before LYLLTH SYNTH give their melodic starter
+        // tracks the factory sounds new songs start with.
+        if schemaVersion < 4 {
+            let sounds = [
+                "SUB BASS": "SUB PRESSURE", "GLASS ARP": "GLASS ARP", "ANALOG PAD": "NIGHT PAD",
+                "SYNC LEAD": "SYNC SCREAM", "VINTAGE KEYS": "NIGHT KEYS", "FX TEXTURE": "SPECTRAL DRIFT"
+            ]
+            for index in migrated.tracks.indices where migrated.tracks[index].synth == nil {
+                if let sound = sounds[migrated.tracks[index].name] {
+                    migrated.tracks[index].synth = LYSynthPatch.factory(named: sound)
                 }
             }
         }

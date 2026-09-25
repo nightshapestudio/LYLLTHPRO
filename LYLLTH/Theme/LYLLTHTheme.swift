@@ -11,17 +11,48 @@ enum LYLLTHTheme {
     static let lineStrong = Color(hex: 0x343440)
     static let lineFocused = Color(hex: 0x57586A)
 
+    // Text has two tiers on the dark ground and nothing dimmer, same as
+    // DrumKit: near-white for anything read, #888899 for the quiet tier.
+    // `secondary` is the heading register only. Dimming is not a hierarchy
+    // tool here; size, weight, tracking and placement are.
     static let text = Color(hex: 0xEEEEFF)
     static let secondary = Color(hex: 0xB6B8C6)
-    static let metadata = Color(hex: 0x9090A0)
-    static let dim = Color(hex: 0x656574)
-    static let off = Color(hex: 0x393945)
+    static let metadata = Color(hex: 0x888899)
+    static let dim = Color(hex: 0x888899)
+    /// OFF chrome: unlit LEDs, empty meter wells. Never text.
+    static let off = Color(hex: 0x3A3A48)
     static let chrome = Color(hex: 0xDCE6FA)
+    /// DrumKit's control-chrome white at its text opacity, the ceiling for
+    /// light UI. Transport glyphs and M/S labels use it.
+    static let chromeText = Color(hex: 0xDCE6FA).opacity(0.86)
+    /// Fill behind a lit control. Faint on purpose: outline and bloom say
+    /// "live", the fill only warms the cell.
+    static let controlFill: Double = 0.055
+    static let playhead = Color.white.opacity(0.92)
 
     static let teal = Color(hex: 0x33CCCC)
     static let indigo = Color(hex: 0x6666FF)
     static let purple = Color(hex: 0x9933FF)
     static let lavender = Color(hex: 0xBBA6FD)
+    /// Record arm. The one colour outside the three accents: a cool, near-neon
+    /// red-pink that leans toward purple so it sits with the palette instead
+    /// of reading as a warning light.
+    static let record = Color(hex: 0xFF3380)
+
+    /// DrumKit's fixed track rhythm: two teal, two indigo, two purple,
+    /// repeating. Position only; never derived from what a track holds.
+    static func trackAccent(position: Int) -> Color {
+        switch (max(position, 0) % 6) / 2 {
+        case 0: return teal
+        case 1: return indigo
+        default: return purple
+        }
+    }
+
+    // The app's three springs, shared with DrumKit so both move alike.
+    static let snap = Animation.spring(response: 0.22, dampingFraction: 0.62)
+    static let settle = Animation.spring(response: 0.35, dampingFraction: 0.78)
+    static let glide = Animation.spring(response: 0.45, dampingFraction: 0.82)
 
     static func accent(_ token: LYAccent) -> Color {
         switch token {
@@ -53,6 +84,10 @@ enum LYLLTHTheme {
         .custom("NIGHTSHAPE-Bold", size: size)
     }
 
+    static func wordmarkOutline(_ size: CGFloat) -> Font {
+        .custom("NIGHTSHAPEOutline-Bold", size: size)
+    }
+
     static func wordmarkOpticalDrop(_ size: CGFloat) -> CGFloat {
         size * 0.061
     }
@@ -67,6 +102,31 @@ extension Color {
             blue: Double(hex & 0xFF) / 255,
             opacity: alpha
         )
+    }
+}
+
+extension View {
+    /// Same-colour bloom that lifts indigo and purple to read as loud as teal.
+    /// Teal is already the loudest accent and is never bloomed.
+    func lyBloom(_ color: Color, isOn: Bool = true, strength: Double = 1) -> some View {
+        let applies = isOn && color != LYLLTHTheme.teal
+        return self
+            .shadow(color: applies ? color.opacity(0.9 * strength) : .clear, radius: applies ? 2.5 * strength : 0)
+            .shadow(color: applies ? color.opacity(0.5 * strength) : .clear, radius: applies ? 5 * strength : 0)
+    }
+
+    /// DrumKit's selected-state light: a single-colour bloom rising from the
+    /// bottom edge. Vertical and one hue; never a horizontal ramp.
+    func lyRisingBloom(_ color: Color, isOn: Bool, strength: Double = 1) -> some View {
+        background {
+            if isOn {
+                LinearGradient(
+                    colors: [color.opacity(0.03 * strength), color.opacity(0.20 * strength)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
     }
 }
 
@@ -172,6 +232,169 @@ struct LYNightshapeMenuOverlay<Content: View>: View {
 
             content
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
+        }
+    }
+}
+
+/// Where each menu-opening control sits in the workspace, so its menu can
+/// drop down from it instead of appearing in the middle of the window.
+struct LYMenuAnchorKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+extension View {
+    /// Marks this control as the place menu `id` drops down from, measured
+    /// in `space` (the workspace unless a window has its own).
+    func lyMenuAnchor(_ id: String, in space: String = LYDropdownOverlay<EmptyView>.space) -> some View {
+        background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: LYMenuAnchorKey.self, value: [id: proxy.frame(in: .named(space))])
+            }
+        }
+    }
+}
+
+/// A window that floats over the workspace and can be dragged by its title
+/// bar, like a Logic plug-in window. It remembers where it was left, per
+/// kind of window, and never lets its bar go fully off screen.
+struct LYFloatingWindow<Content: View>: View {
+    let title: String
+    let accent: Color
+    let size: CGSize
+    var scale: CGFloat = 1
+    let close: () -> Void
+    let content: Content
+    @AppStorage private var storedX: Double
+    @AppStorage private var storedY: Double
+    @State private var drag: CGSize = .zero
+
+    init(id: String, title: String, accent: Color, size: CGSize, scale: CGFloat = 1,
+         close: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.accent = accent
+        self.size = size
+        self.scale = scale
+        self.close = close
+        self.content = content()
+        _storedX = AppStorage(wrappedValue: 0, "lyllth.window.\(id).x")
+        _storedY = AppStorage(wrappedValue: 0, "lyllth.window.\(id).y")
+    }
+
+    private static var barHeight: CGFloat { 22 }
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = size.width * scale
+            let height = size.height * scale + Self.barHeight
+            let offset = clamped(CGSize(width: storedX + drag.width, height: storedY + drag.height),
+                                 window: CGSize(width: width, height: height), in: geo.size)
+            VStack(spacing: 0) {
+                titleBar
+                    .frame(width: width, height: Self.barHeight)
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { drag = $0.translation }
+                            .onEnded { value in
+                                let final = clamped(CGSize(width: storedX + value.translation.width, height: storedY + value.translation.height),
+                                                    window: CGSize(width: width, height: height), in: geo.size)
+                                storedX = final.width
+                                storedY = final.height
+                                drag = .zero
+                            }
+                    )
+                content
+                    .frame(width: size.width, height: size.height)
+                    .scaleEffect(scale)
+                    .frame(width: width, height: size.height * scale)
+            }
+            .shadow(color: Color.black.opacity(0.6), radius: 24, x: 0, y: 12)
+            .position(x: geo.size.width / 2 + offset.width, y: geo.size.height / 2 + offset.height)
+        }
+    }
+
+    private var titleBar: some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(accent).frame(width: 12, height: 2)
+            Text(title)
+                .font(LYLLTHTheme.label(8, weight: .bold))
+                .tracking(1.6)
+                .foregroundStyle(LYLLTHTheme.dim)
+                .lineLimit(1)
+            Spacer()
+            HStack(spacing: 3) {
+                ForEach(0..<6, id: \.self) { _ in Circle().fill(LYLLTHTheme.off).frame(width: 2.5, height: 2.5) }
+            }
+            Spacer()
+            Button(action: close) {
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(LYLLTHTheme.chromeText)
+                    .frame(width: 22, height: 22).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close")
+        }
+        .padding(.leading, 10)
+        .background(Color(hex: 0x0B0C10))
+        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onHover { inside in if inside { NSCursor.openHand.set() } else { NSCursor.arrow.set() } }
+        .help("Drag to move")
+    }
+
+    /// Keeps at least 120 pt of the title bar inside the workspace.
+    private func clamped(_ offset: CGSize, window: CGSize, in area: CGSize) -> CGSize {
+        let maxX = area.width / 2 + window.width / 2 - 120
+        let maxY = (area.height - window.height) / 2 + window.height - Self.barHeight
+        let minY = -(area.height - window.height) / 2
+        return CGSize(width: min(max(offset.width, -maxX), maxX), height: min(max(offset.height, minY), maxY))
+    }
+}
+
+/// A NIGHTSHAPE dropdown: the panel hangs just under the control that opened
+/// it, left-aligned to it and kept inside the window (it opens upward when
+/// there is no room below). A click anywhere else closes it. No scrim, so it
+/// reads as part of the control rather than a dialog.
+struct LYDropdownOverlay<Content: View>: View {
+    static var space: String { "LYWorkspace" }
+
+    let anchor: CGRect?
+    let dismiss: () -> Void
+    let content: Content
+    @State private var size: CGSize = .zero
+
+    init(anchor: CGRect?, dismiss: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+        self.anchor = anchor
+        self.dismiss = dismiss
+        self.content = content()
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let frame = anchor ?? CGRect(x: geo.size.width / 2, y: geo.size.height / 3, width: 0, height: 0)
+            let x = min(max(8, frame.minX), max(8, geo.size.width - size.width - 8))
+            let below = frame.maxY + 6
+            let opensUp = below + size.height > geo.size.height - 8 && frame.minY - size.height - 6 > 8
+            let y = opensUp ? frame.minY - size.height - 6 : below
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.001)
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: dismiss)
+                content
+                    .fixedSize()
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear { size = proxy.size }
+                                .onChange(of: proxy.size) { _, value in size = value }
+                        }
+                    }
+                    .offset(x: x, y: y)
+                    .opacity(size == .zero ? 0 : 1)
+                    .transition(.scale(scale: 0.96, anchor: opensUp ? .bottomLeading : .topLeading).combined(with: .opacity))
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
     }
 }

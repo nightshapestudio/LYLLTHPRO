@@ -16,11 +16,14 @@ The current visual language and desktop adaptation rules are documented in `DESI
 - Provides persistent horizontal and vertical arrangement zoom, horizontal/vertical auto-fit, trackpad pinch zoom, and Option-pinch vertical zoom.
 - Provides working Smart Snap plus Bar, Beat, Division, Ticks, Frames, Quarter Frames, Samples, and Off modes; snap can be absolute or relative, Shift temporarily suspends it, and Control requests Division precision.
 - Moves and trims arrangement regions non-destructively against the visible, zoom-aware grid.
-- Provides ACID-style audio-event split, cut/copy/paste, adjacent duplication, delete, Option-drag source slip, direct top-line event gain, and per-event semitone pitch controls with keyboard shortcuts.
-- Persists source offsets, gain, pitch, fades, stretch mode, source tempo, and transient beat maps without modifying the original audio file.
-- Imports WAV, AIFF, MP3, M4A, CAF, and FLAC audio into the project package, builds a real waveform preview, and estimates source tempo for beat-mapping.
-- Ports TETHR's confidence-gated transient analysis and smoothed source-to-project beat-anchor planning into native Swift.
-- Renders selected audio events for audition with source trim/slip, event gain, fades, semitone pitch, tempo stretch, and TETHR beat-map spans while preserving pitch.
+- Plays the arrangement in SONG mode: pattern regions compile to the engine's bar-by-bar song frames, and audio events play on the same transport clock through players in the one engine graph. PATTERN mode loops the pattern being edited, as in DrumKit.
+- ACID-style audio events: drag the right edge past the source to loop it (loop seams are notched), split and left-trim move the loop entry point instead of cutting the source, drag the top line for volume, +/- for semitones, Option-drag to slip the audio inside the event, and drop files from Finder onto any lane.
+- A LOOP brace in the ruler (drag its edges, drag to move, drag across empty ruler to draw one) and a working LOOP transport toggle.
+- Imports WAV, AIFF, MP3, M4A, CAF, and FLAC audio into the project package with waveform, tempo, and TETHR beat-map analysis; stretch per event is OFF, TEMPO, or BEAT MAP.
+- NIGHTSHAPE FX on musical tracks and MAIN using DrumKit's own FX windows, compiled from the sibling checkout (see `LYLLTH/DrumKitShared`), so displays and animation are identical to the phone. Effect state is stored as DrumKit's state types and pushed to the engine the same way DrumKit does.
+- LYLLTH SYNTH, a realtime wavetable synth with its own C++ core (`LYLLTH/SynthCore`): two band-limited wavetable oscillators with up to 16-voice unison and 9 warp modes, sub, noise, 7 filters, 3 curved envelopes, 4 LFOs (tempo sync, drawable), 4 macros, 16-slot matrix with drag-to-modulate, MIDI and MPE input, 16-voice polyphony or mono/legato/glide. Wavetables import from Serum-format files or any audio, and can be drawn and reshaped harmonic by harmonic in the wavetable editor; custom tables travel inside the song. User presets save to ~/Library/Application Support/LYLLTH/Presets with their wavetables.
+- EXPORT bounces the whole song to a 24-bit WAV in real time from the main mix.
+- Real per-track and MAIN meters, M / S / R per track, and transport record enable. Record enable and R are saved but audio capture is not built yet.
 - Adds drum, live-instrument, audio, and auxiliary tracks from the workspace toolbar.
 - Runs the shared transport-synchronized metronome.
 - Presents a macOS-sized arrangement, mixer, browser, inspector, and transport in the existing matte NIGHTSHAPE visual language.
@@ -28,7 +31,7 @@ The current visual language and desktop adaptation rules are documented in `DESI
 - Creates and edits a versioned `.lyllth` document package with reserved `Audio`, `Presets`, and `PluginStates` directories.
 - Registers `.lyllth` as a Finder-openable document type.
 
-This is not yet a finished DAW. The exact DrumKit boundary is tracked in `DRUMKIT_PARITY.md`, and the professional workstation capability contract is tracked in `LOGIC_PARITY.md`. Audio-file import and pitch-preserving event audition now work, but audio-event playback inside the arrangement transport, audio-input recording, note-level MIDI editing, editable fades/crossfades, undo, routing, plug-in insertion/hosting, bounce UI, and DrumKit/iCloud interchange remain implementation work rather than implied functionality.
+This is not yet a finished DAW. The exact DrumKit boundary is tracked in `DRUMKIT_PARITY.md`, and the professional workstation capability contract is tracked in `LOGIC_PARITY.md`. Audio recording, NIGHTSHAPE FX on audio tracks, buses and sends, note-level MIDI editing, editable fades/crossfades, undo, routing, plug-in insertion/hosting, bounce UI, and DrumKit/iCloud interchange remain implementation work rather than implied functionality.
 
 ## Realtime synth direction
 

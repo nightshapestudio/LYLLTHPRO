@@ -25,6 +25,9 @@ struct LYLLTHSessionDocument: FileDocument {
     /// Project-owned originals keyed by their path below `Audio/`.
     /// Edits remain references into these immutable bytes.
     var audioAssets: [String: Data]
+    /// Custom LYLLTH SYNTH wavetables the song uses, raw Float32 frames by
+    /// name, so a song opens with its sounds on any Mac.
+    var wavetables: [String: Data] = [:]
 
     init(session: LYLLTHSession = .starter()) {
         self.session = session
@@ -51,6 +54,10 @@ struct LYLLTHSessionDocument: FileDocument {
         audioAssets = children["Audio"]?.fileWrappers?.reduce(into: [:]) { result, entry in
             guard let data = entry.value.regularFileContents else { return }
             result[entry.key] = data
+        } ?? [:]
+        wavetables = children["Wavetables"]?.fileWrappers?.reduce(into: [:]) { result, entry in
+            guard let data = entry.value.regularFileContents else { return }
+            result[(entry.key as NSString).deletingPathExtension] = data
         } ?? [:]
     }
 
@@ -80,6 +87,9 @@ struct LYLLTHSessionDocument: FileDocument {
             "manifest.json": FileWrapper(regularFileWithContents: try encoder.encode(manifest)),
             "project.json": FileWrapper(regularFileWithContents: try encoder.encode(snapshot)),
             "Audio": FileWrapper(directoryWithFileWrappers: audioWrappers),
+            "Wavetables": FileWrapper(directoryWithFileWrappers: wavetables.reduce(into: [String: FileWrapper]()) { result, entry in
+                result[entry.key + ".f32"] = FileWrapper(regularFileWithContents: entry.value)
+            }),
             "Presets": FileWrapper(directoryWithFileWrappers: [:]),
             "PluginStates": FileWrapper(directoryWithFileWrappers: [:])
         ])
@@ -105,12 +115,11 @@ struct LYLLTHSessionDocument: FileDocument {
 
         let storedName = uniqueAudioName(imported.fileName)
         audioAssets[storedName] = imported.data
-        let durationBeats = imported.duration * max(session.bpm, 1) / 60
-        let clip = LYClip(
+        var clip = LYClip(
             name: imported.displayName,
             kind: .audio,
             startBeat: max(0, atBeat),
-            lengthBeats: max(0.001, durationBeats),
+            lengthBeats: max(0.001, imported.duration * max(session.bpm, 1) / 60),
             sourceRelativePath: storedName,
             sourceStartSeconds: 0,
             sourceDurationSeconds: imported.duration,
@@ -122,6 +131,12 @@ struct LYLLTHSessionDocument: FileDocument {
             preservePitch: true,
             beatMap: imported.beatMap
         )
+        // Lay the event down at the length it actually plays for, so a
+        // beat-mapped loop fills whole beats on the grid.
+        clip.sourceFileDurationSeconds = imported.duration
+        if let cycle = LYAudioEventTiming.cycleBeats(for: clip, projectBPM: session.bpm) {
+            clip.lengthBeats = cycle
+        }
         session.tracks[trackIndex].clips.append(clip)
         return clip.id
     }

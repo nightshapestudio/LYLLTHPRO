@@ -192,7 +192,7 @@ final class SessionDocumentTests: XCTestCase {
         XCTAssertTrue(clip.preservePitch)
     }
 
-    func testAudioEventSplitPreservesSourceSliceAndSettings() throws {
+    func testAudioEventSplitKeepsSourceLoopAndOffsetsRightHalf() throws {
         let clip = LYClip(
             name: "VOCAL CHOP",
             kind: .audio,
@@ -211,16 +211,95 @@ final class SessionDocumentTests: XCTestCase {
 
         XCTAssertEqual(result.left.startBeat, 4)
         XCTAssertEqual(result.left.lengthBeats, 2)
-        XCTAssertEqual(result.left.sourceStartSeconds, 10)
-        XCTAssertEqual(result.left.sourceDurationSeconds, 1)
         XCTAssertEqual(result.right.startBeat, 6)
         XCTAssertEqual(result.right.lengthBeats, 6)
-        XCTAssertEqual(result.right.sourceStartSeconds, 11)
-        XCTAssertEqual(result.right.sourceDurationSeconds, 3)
+        // Both halves keep the whole source loop; the right half enters it
+        // where the cut fell, so either can be dragged out to repeat it.
+        XCTAssertEqual(result.left.sourceStartSeconds, 10)
+        XCTAssertEqual(result.left.sourceDurationSeconds, 4)
+        XCTAssertEqual(result.right.sourceStartSeconds, 10)
+        XCTAssertEqual(result.right.sourceDurationSeconds, 4)
+        XCTAssertEqual(result.left.loopOffsetBeats, 0)
+        XCTAssertEqual(result.right.loopOffsetBeats, 2)
         XCTAssertEqual(result.right.eventGainDB, -5.5)
         XCTAssertEqual(result.right.pitchSemitones, 7)
         XCTAssertNotEqual(result.left.id, result.right.id)
         XCTAssertNotEqual(result.left.id, clip.id)
+    }
+
+    func testCycleBeatsFollowsStretchMode() {
+        var clip = LYClip(
+            name: "LOOP",
+            kind: .audio,
+            startBeat: 0,
+            lengthBeats: 4,
+            sourceRelativePath: "loop.wav",
+            sourceStartSeconds: 0,
+            sourceDurationSeconds: 2.5,
+            stretchMode: .tempo,
+            sourceBPM: 96
+        )
+        // 2.5 s at 96 BPM is four beats, whatever the project tempo.
+        XCTAssertEqual(LYAudioEventTiming.cycleBeats(for: clip, projectBPM: 120) ?? 0, 4, accuracy: 0.0001)
+        clip.stretchMode = .off
+        // Unstretched, it lasts 2.5 s of the project's beats.
+        XCTAssertEqual(LYAudioEventTiming.cycleBeats(for: clip, projectBPM: 120) ?? 0, 5, accuracy: 0.0001)
+    }
+
+    func testSongCompilerRepeatsPatternAcrossLongRegion() {
+        var session = LYLLTHSession.starter()
+        session.isLoopEnabled = false
+        var steps = Array(repeating: false, count: 16)
+        steps[0] = true
+        steps[8] = true
+        let kick = LYClip(name: "P", kind: .pattern, startBeat: 0, lengthBeats: 12,
+                          steps: steps, stepParameters: Array(repeating: .default, count: 16))
+        session.tracks = [LYTrack(name: "KICK", kind: .drumkit, accent: .teal, clips: [kick])]
+
+        let window = LYSongWindow.resolve(for: session, stepsPerBar: 16)
+        XCTAssertEqual(window.barCount, 3)
+        let frames = LYSongCompiler.frames(session: session, window: window, stepsPerBar: 16) { _, clip in
+            (clip.steps ?? [], clip.stepParameters ?? [])
+        }
+        XCTAssertEqual(frames.count, 3)
+        for frame in frames {
+            XCTAssertEqual(frame.tracks[0].activeSteps.enumerated().filter(\.element).map(\.offset), [0, 8])
+        }
+    }
+
+    func testSongWindowUsesLoopOnlyWhenEnabled() {
+        var session = LYLLTHSession.starter()
+        session.loopRange = LYLoopRange(startBeat: 4, lengthBeats: 8)
+        session.isLoopEnabled = true
+        let looped = LYSongWindow.resolve(for: session, stepsPerBar: 16)
+        XCTAssertEqual(looped.startBar, 1)
+        XCTAssertEqual(looped.barCount, 2)
+
+        session.isLoopEnabled = false
+        let whole = LYSongWindow.resolve(for: session, stepsPerBar: 16)
+        XCTAssertEqual(whole.startBar, 0)
+        XCTAssertGreaterThan(whole.barCount, 2)
+    }
+
+    func testTrackEffectsRoundTripWithDrumKitState() throws {
+        var document = LYLLTHSessionDocument()
+        var flanger = FlangerState.neutral
+        flanger.depth = 0.9
+        flanger.isBypassed = false
+        var rack = LYFXRack()
+        rack.flanger = flanger
+        rack.order = [.eq, .flanger, .comp]
+        rack.reverbSend = 0.4
+        document.session.tracks[0].fx = rack
+        document.session.tracks[0].isArmed = true
+
+        let reopened = try LYLLTHSessionDocument(fileWrapper: document.packageFileWrapper())
+        let restored = try XCTUnwrap(reopened.session.tracks[0].fx)
+        XCTAssertEqual(restored.flanger?.depth, 0.9)
+        XCTAssertEqual(restored.chain(isMain: false), [.eq, .flanger, .comp])
+        XCTAssertEqual(restored.reverbSend, 0.4)
+        XCTAssertTrue(restored.isEngaged(.flanger, isMain: false, reverb: .neutral))
+        XCTAssertTrue(reopened.session.tracks[0].isArmed)
     }
 
     func testAudioEventDuplicateIsIndependentAndAdjacent() {

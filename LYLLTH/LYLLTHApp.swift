@@ -1,4 +1,5 @@
 import SwiftUI
+import NightshapeAudioEngine
 
 @main
 struct LYLLTHApp: App {
@@ -6,6 +7,7 @@ struct LYLLTHApp: App {
     @StateObject private var plugins = AudioUnitCatalog()
 
     init() {
+        LYChannelMap.configureEngine()
         FontRegistrar.registerBundledFonts()
     }
 

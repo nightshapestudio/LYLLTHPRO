@@ -1,0 +1,361 @@
+import SwiftUI
+import NightshapeAudioEngine
+
+struct LYFXWindowRequest: Equatable {
+    var kind: FXKind
+    var target: FXTarget
+}
+
+/// Floats one of DrumKit's own FX windows over the workspace, on the same dark
+/// scrim and at the same size DrumKit uses, and routes its edits into the
+/// document and the engine. The windows are DrumKit's source, compiled here, so
+/// their displays and animation are identical on both products.
+struct LYFXWindowHost: View {
+    @Binding var session: LYLLTHSession
+    @Binding var request: LYFXWindowRequest?
+    let original: (rack: LYFXRack, reverb: ReverbState?)
+    @ObservedObject var transport: TransportDisplayState
+    let isPlaying: Bool
+    let onTransportTap: () -> Void
+
+    private let engine = NightshapeAudioEngine.shared
+    @State private var parkedReverbSend: Float?
+    @State private var mainEQVolume: Double = 0
+
+    var body: some View {
+        if let request {
+            GeometryReader { geo in
+                let scale = Self.macScale(for: geo.size)
+                LYFloatingWindow(
+                    id: "fx",
+                    title: request.kind.title + "  ·  " + targetName,
+                    accent: request.kind.accent,
+                    size: CGSize(width: 380, height: min(max(510, geo.size.height / scale - 60), 660)),
+                    scale: scale,
+                    close: close
+                ) {
+                    window(request)
+                }
+                .transition(.scale(scale: 0.96).combined(with: .opacity))
+            }
+            .preferredColorScheme(.dark)
+        }
+    }
+
+    /// DrumKit's windows are laid out for a phone. On a desktop they are drawn
+    /// a quarter larger, shrinking only if the workspace is too short to fit.
+    /// SwiftUI re-renders text and strokes at the scaled size (measured: the
+    /// result is as sharp as unscaled), so this is not a bitmap stretch. The
+    /// extra size matters on scaled "More Space" display modes, where macOS
+    /// downsamples the whole frame and thin 8 pt type breaks up.
+    static func macScale(for size: CGSize) -> CGFloat {
+        min(1.25, max(1, (size.height - 40) / 660), max(1, (size.width - 40) / 380))
+    }
+
+    // MARK: State plumbing
+
+    private var target: FXTarget { request?.target ?? .main }
+    private var rack: LYFXRack { LYFXBridge.rack(for: target, in: session) }
+    private var isMain: Bool { target == .main }
+
+    private var engineIndex: Int? {
+        if case .track(let id) = target { return LYFXBridge.engineIndex(for: id, in: session) }
+        return nil
+    }
+
+    private var targetName: String {
+        switch target {
+        case .main: return "MAIN MIX"
+        case .track(let id): return session.tracks.first { $0.id == id }?.name ?? "TRACK"
+        }
+    }
+
+    private func update(_ kind: FXKind, _ change: (inout LYFXRack) -> Void) {
+        var next = rack
+        change(&next)
+        LYFXBridge.setRack(next, for: target, in: &session)
+        LYFXBridge.push(kind, rack: next, index: engineIndex, session: session, engine: engine)
+    }
+
+    private func isEngaged(_ kind: FXKind) -> Bool {
+        rack.isEngaged(kind, isMain: isMain, reverb: session.reverb ?? .neutral)
+    }
+
+    private func toggle(_ kind: FXKind) -> () -> Void {
+        {
+            NightshapeHaptics.selection()
+            if kind == .reverb && isMain {
+                var reverb = session.reverb ?? .neutral
+                reverb.isBypassed.toggle()
+                session.reverb = reverb
+                LYFXBridge.pushReverb(session, engine: engine)
+                return
+            }
+            var parked = parkedReverbSend
+            update(kind) { $0.toggleBypass(kind, parkedReverbSend: &parked) }
+            parkedReverbSend = parked
+        }
+    }
+
+    private func close() {
+        withAnimation(LYLLTHTheme.snap) { request = nil }
+    }
+
+    private func cancel() {
+        LYFXBridge.setRack(original.rack, for: target, in: &session)
+        session.reverb = original.reverb
+        LYFXBridge.pushRack(target: target, session: session, engine: engine)
+        LYFXBridge.pushReverb(session, engine: engine)
+        close()
+    }
+
+    private var keySources: [(id: UUID, name: String)] {
+        LYFXBridge.keySources(in: session, excluding: target)
+    }
+
+    private var stepsPerBar: Int { session.numerator == 4 ? 16 : 12 }
+
+    // MARK: Windows
+
+    private func window(_ request: LYFXWindowRequest) -> AnyView {
+        let kind = request.kind
+        let engaged = isEngaged(kind)
+        let done = { close() }
+        let cancel = { self.cancel() }
+        let transportTap = onTransportTap
+        let bpm = session.bpm
+
+        switch kind {
+        case .eq:
+            return AnyView(EQWindowView(
+                targetName: targetName,
+                bands: rack.bands,
+                volume: eqVolume,
+                isPlaying: isPlaying,
+                onBandChange: { index, frequency, gain in
+                    update(.eq) { rack in
+                        var bands = rack.bands
+                        guard bands.indices.contains(index) else { return }
+                        bands[index].frequency = max(20, min(20_000, frequency))
+                        bands[index].gain = max(-12, min(12, gain))
+                        rack.eqBands = bands
+                    }
+                },
+                onBandWidthChange: { index, octaves in
+                    update(.eq) { rack in
+                        var bands = rack.bands
+                        guard bands.indices.contains(index), bands[index].type == .peaking else { return }
+                        bands[index].q = min(max(octaves, 0.2), 3.0)
+                        rack.eqBands = bands
+                    }
+                },
+                onVolumeChange: { setEQVolume($0) },
+                onTransportTap: transportTap,
+                onCancel: cancel,
+                onDone: done,
+                cut: rack.eqCut ?? .neutral,
+                showsPolarity: !isMain,
+                onCutChange: { cut in update(.eq) { $0.eqCut = cut } }
+            ))
+        case .comp:
+            return AnyView(CompressorWindowView(
+                targetName: targetName,
+                state: rack.compressor ?? .neutral,
+                sidechainSources: keySources,
+                isPlaying: isPlaying,
+                gainReduction: { [engineIndex] in
+                    engineIndex.map { engine.compressionAmount(trackIndex: $0) } ?? engine.mainCompressionAmount()
+                },
+                levels: { [engineIndex] in
+                    engineIndex.map { engine.compressorLevels(trackIndex: $0) } ?? engine.mainCompressorLevels()
+                },
+                onStateChange: { state in update(.comp) { $0.compressor = state } },
+                onTransportTap: transportTap,
+                onCancel: cancel,
+                onDone: done
+            ))
+        case .filter:
+            return AnyView(FilterWindowView(
+                targetName: targetName,
+                state: rack.filter ?? .neutral,
+                isPlaying: isPlaying,
+                isAutomatedInSong: false,
+                onStateChange: { state in update(.filter) { $0.filter = state } },
+                onTransportTap: transportTap,
+                onCancel: cancel,
+                onDone: done,
+                keySources: keySources
+            ))
+        case .fracture:
+            return AnyView(FractureWindowView(
+                targetName: targetName,
+                state: rack.fracture ?? .neutral,
+                stepsPerBar: stepsPerBar,
+                isPlaying: isPlaying,
+                isAutomatedInSong: false,
+                transport: transport,
+                onStateChange: { state in update(.fracture) { $0.fracture = state } },
+                onTransportTap: transportTap,
+                onCancel: cancel,
+                onDone: done
+            ))
+        case .tape:
+            return AnyView(TapeWindowView(targetName: targetName, state: rack.tape ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                          onStateChange: { state in update(.tape) { $0.tape = state } }, onToggleEngaged: toggle(.tape),
+                                          onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .flanger:
+            return AnyView(FlangerWindowView(targetName: targetName, state: rack.flanger ?? .neutral, bpm: bpm, isEngaged: engaged, isPlaying: isPlaying,
+                                             onStateChange: { state in update(.flanger) { $0.flanger = state } }, onToggleEngaged: toggle(.flanger),
+                                             onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .chorus:
+            return AnyView(ChorusWindowView(targetName: targetName, state: rack.chorus ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                            onStateChange: { state in update(.chorus) { $0.chorus = state } }, onToggleEngaged: toggle(.chorus),
+                                            onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .voidGate:
+            return AnyView(VoidGateWindowView(targetName: targetName, state: rack.voidGate ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                              onStateChange: { state in update(.voidGate) { $0.voidGate = state } }, onToggleEngaged: toggle(.voidGate),
+                                              onTransportTap: transportTap, onCancel: cancel, onDone: done,
+                                              keySources: keySources))
+        case .tempoDelay:
+            return AnyView(DelayWindowView(targetName: targetName, state: rack.tempoDelay ?? .neutral, bpm: bpm, meter: session.timeSignature,
+                                           isEngaged: engaged, isPlaying: isPlaying,
+                                           onStateChange: { state in update(.tempoDelay) { $0.tempoDelay = state } }, onToggleEngaged: toggle(.tempoDelay),
+                                           onTransportTap: transportTap, onCancel: cancel, onDone: done,
+                                           activeStepCount: stepsPerBar))
+        case .pump:
+            return AnyView(PumpWindowView(targetName: targetName, state: rack.pump ?? .neutral, bpm: bpm, isEngaged: engaged, isPlaying: isPlaying,
+                                          transport: transport,
+                                          onStateChange: { state in update(.pump) { $0.pump = state } }, onToggleEngaged: toggle(.pump),
+                                          onTransportTap: transportTap, onCancel: cancel, onDone: done,
+                                          keySources: keySources))
+        case .deadlock:
+            return AnyView(DeadlockWindowView(targetName: targetName, state: rack.deadlock ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                              meter: { [engineIndex] in engineIndex.map { engine.deadlockMeter(trackIndex: $0) } ?? engine.mainDeadlockMeter() },
+                                              onStateChange: { state in update(.deadlock) { $0.deadlock = state } }, onToggleEngaged: toggle(.deadlock),
+                                              onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .strike:
+            return AnyView(StrikeWindowView(targetName: targetName, state: rack.strike ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                            onStateChange: { state in update(.strike) { $0.strike = state } }, onToggleEngaged: toggle(.strike),
+                                            onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .steelBody:
+            return AnyView(SteelBodyWindowView(targetName: targetName, state: rack.steelBody ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                               onStateChange: { state in update(.steelBody) { $0.steelBody = state } }, onToggleEngaged: toggle(.steelBody),
+                                               onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .undertow:
+            return AnyView(UndertowWindowView(targetName: targetName, state: rack.undertow ?? .neutral, activeStepCount: stepsPerBar,
+                                              isEngaged: engaged, isPlaying: isPlaying,
+                                              onStateChange: { state in update(.undertow) { $0.undertow = state } }, onToggleEngaged: toggle(.undertow),
+                                              onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .splitField:
+            return AnyView(SplitFieldWindowView(targetName: targetName, state: rack.splitField ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                                onStateChange: { state in update(.splitField) { $0.splitField = state } }, onToggleEngaged: toggle(.splitField),
+                                                onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .shear:
+            return AnyView(ShearWindowView(targetName: targetName, state: rack.shear ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                           onStateChange: { state in update(.shear) { $0.shear = state } }, onToggleEngaged: toggle(.shear),
+                                           onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .cabinet:
+            return AnyView(CabinetWindowView(targetName: targetName, state: rack.cabinet ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                             meter: { [engineIndex] in engineIndex.map { engine.cabinetMeter(trackIndex: $0) } ?? engine.mainCabinetMeter() },
+                                             onStateChange: { state in update(.cabinet) { $0.cabinet = state } }, onToggleEngaged: toggle(.cabinet),
+                                             onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .finale:
+            return AnyView(LimiterWindowView(targetName: targetName, state: rack.finale ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                             meter: { [engineIndex] in
+                                                 engineIndex.map { engine.elasticLimiterMeter(trackIndex: $0) ?? .silent } ?? engine.finaleLimiterMeter()
+                                             },
+                                             onStateChange: { state in update(.finale) { $0.finale = state } }, onToggleEngaged: toggle(.finale),
+                                             onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .delay:
+            return AnyView(SignalBloomWindowView(targetName: targetName, state: rack.signalBloom ?? .neutral, bpm: bpm,
+                                                 activeStepCount: stepsPerBar, isEngaged: engaged, isPlaying: isPlaying,
+                                                 onStateChange: { state in update(.delay) { $0.signalBloom = state } }, onToggleEngaged: toggle(.delay),
+                                                 onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .reverb:
+            return AnyView(ReverbWindowView(
+                targetName: targetName,
+                state: session.reverb ?? .neutral,
+                trackSend: isMain ? nil : (rack.reverbSend ?? 0),
+                kitSend: isMain ? kitReverbSend : nil,
+                isEngaged: engaged,
+                isPlaying: isPlaying,
+                onStateChange: { state in
+                    session.reverb = state
+                    LYFXBridge.pushReverb(session, engine: engine)
+                },
+                onSendChange: { amount in update(.reverb) { $0.reverbSend = amount } },
+                onKitSendSet: { amount in setAllReverbSends { _ in amount } },
+                onKitSendTrim: { delta in setAllReverbSends { min(max($0 + delta, 0), 1) } },
+                onOpenMain: { self.request = LYFXWindowRequest(kind: .reverb, target: .main) },
+                onToggleEngaged: toggle(.reverb),
+                onTransportTap: transportTap,
+                onCancel: cancel,
+                onDone: done,
+                keySources: keySources
+            ))
+        case .decim:
+            let state = rack.decimator ?? .neutral
+            return AnyView(FXWindowChrome(
+                title: "SONIC DECIMATOR",
+                targetName: targetName,
+                accent: FXKind.decim.accent,
+                isEngaged: engaged,
+                isPlaying: isPlaying,
+                presetName: nil,
+                onPreset: { _ in },
+                onToggleEngaged: toggle(.decim),
+                onTransportTap: transportTap,
+                onReset: { update(.decim) { $0.decimator = .neutral } },
+                onCancel: cancel,
+                onDone: done
+            ) {
+                HStack(spacing: 24) {
+                    FXKnob(label: "DESTROY", valueText: "\(Int((state.destroy * 100).rounded()))%", fraction: state.destroy,
+                           accent: FXKind.decim.accent, diameter: 64,
+                           onChange: { value in update(.decim) { rack in var s = rack.decimator ?? .neutral; s.destroy = value; s.isBypassed = false; rack.decimator = s } },
+                           onReset: { update(.decim) { rack in var s = rack.decimator ?? .neutral; s.destroy = DecimatorState.neutral.destroy; rack.decimator = s } })
+                    FXKnob(label: "CRUSH", valueText: "\(Int((state.crush * 100).rounded()))%", fraction: state.crush,
+                           accent: NightshapeTheme.accentTeal, diameter: 64,
+                           onChange: { value in update(.decim) { rack in var s = rack.decimator ?? .neutral; s.crush = value; s.isBypassed = false; rack.decimator = s } },
+                           onReset: { update(.decim) { rack in var s = rack.decimator ?? .neutral; s.crush = DecimatorState.neutral.crush; rack.decimator = s } })
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            })
+        }
+    }
+
+    // MARK: EQ volume and reverb sends
+
+    private var eqVolume: Double {
+        switch target {
+        case .main: return mainEQVolume
+        case .track(let id): return session.tracks.first { $0.id == id }?.volumeDB ?? -6
+        }
+    }
+
+    private func setEQVolume(_ value: Double) {
+        switch target {
+        case .main: mainEQVolume = value
+        case .track(let id):
+            guard let index = session.tracks.firstIndex(where: { $0.id == id }) else { return }
+            session.tracks[index].volumeDB = value
+        }
+    }
+
+    private var kitReverbSend: Float {
+        let sends = session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }.map { $0.fx?.reverbSend ?? 0 }
+        return sends.max() ?? 0
+    }
+
+    private func setAllReverbSends(_ transform: (Float) -> Float) {
+        for index in session.tracks.indices where session.tracks[index].kind == .drumkit || session.tracks[index].kind == .instrument {
+            var rack = session.tracks[index].fx ?? LYFXRack()
+            rack.reverbSend = transform(rack.reverbSend ?? 0)
+            session.tracks[index].fx = rack
+            if let engineIndex = LYFXBridge.engineIndex(for: session.tracks[index].id, in: session) {
+                engine.setReverbSend(trackIndex: engineIndex, amount: rack.reverbSend ?? 0)
+            }
+        }
+    }
+}
+

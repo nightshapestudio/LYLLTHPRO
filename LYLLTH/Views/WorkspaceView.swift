@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import AVFoundation
 import NightshapeAudioEngine
 
 private final class LYAudioOpenPanelDelegate: NSObject, NSOpenSavePanelDelegate {
@@ -18,7 +19,7 @@ private final class LYAudioOpenPanelDelegate: NSObject, NSOpenSavePanelDelegate 
 
 /// Builds a single label while keeping NIGHTSHAPE's typography split intact:
 /// Adam for words, thin fixed-width SF for digits and numeric separators.
-private func mixedNumericLabel(
+func mixedNumericLabel(
     _ string: String,
     labelFont: Font,
     numberFont: Font
@@ -77,7 +78,7 @@ private struct LYSecondaryClickMonitor: NSViewRepresentable {
 
 /// Keeps timeline edit shortcuts local to the visible Tracks area without
 /// falling back to stock menus or stealing unrelated key events.
-private struct LYArrangementKeyMonitor: NSViewRepresentable {
+struct LYArrangementKeyMonitor: NSViewRepresentable {
     let action: (NSEvent) -> Bool
 
     func makeNSView(context: Context) -> MonitorView {
@@ -134,12 +135,30 @@ struct WorkspaceView: View {
     @State private var selectedTrackID: UUID?
     @State private var selectedBrowserGroup = "NIGHTSHAPE"
     @State private var selectedBrowserItem = "DRUM SYNTH"
-    @State private var activeWorkspace = "ARRANGE"
+    /// SONG or PATTERN, DrumKit's two views. It also sets the transport mode.
+    @State private var activeWorkspace = "SONG"
     @State private var showBrowser = true
     @State private var showInspector = true
     @State private var showMixer = true
     @State private var activeMenu: LYWorkspaceMenu?
+    /// Which control opened the menu, and where every such control is.
+    @State private var menuAnchorID: String?
+    @State private var menuAnchors: [String: CGRect] = [:]
     @State private var audioImportError: String?
+    @State private var inspectMain = false
+    @State private var fxRequest: LYFXWindowRequest?
+    @State private var fxOriginal: (rack: LYFXRack, reverb: ReverbState?) = (LYFXRack(), nil)
+    @State private var fxPickerTarget: FXTarget?
+    @State private var synthTrackID: UUID?
+    @State private var drumTrackID: UUID?
+    @State private var bounce = LYBounce()
+    @State private var engineSync = LYCoalescedSync()
+    @State private var recorder = LYRecorder()
+    // Held with @State, not @StateObject: the workspace must not observe
+    // these. Meters publish 20 times a second and the transport every step;
+    // only the small views that draw them subscribe.
+    @State private var transportDisplay = TransportDisplayState()
+    @State private var meters = LYMeterStore()
 
     private var selectedTrackBinding: Binding<LYTrack>? {
         guard let selectedTrackID,
@@ -164,17 +183,21 @@ struct WorkspaceView: View {
                 VStack(spacing: 0) {
                     TransportBar(
                         session: $document.session,
-                        openSongKeyMenu: { presentMenu(.songKey) }
+                        activeWorkspace: $activeWorkspace,
+                        recorder: recorder,
+                        toggleRecording: toggleRecording,
+                        openSongKeyMenu: { presentMenu(.songKey, from: "songKey") }
                     )
                     .environmentObject(audio)
 
                     WorkspaceStrip(
-                        activeWorkspace: $activeWorkspace,
+                        activeWorkspace: activeWorkspace,
                         showBrowser: $showBrowser,
                         showInspector: $showInspector,
                         showMixer: $showMixer,
                         projectName: document.session.name,
-                        openTrackMenu: { presentMenu(.addTrack) }
+                        openTrackMenu: { presentMenu(.addTrack, from: "stripTrack") },
+                        export: presentExport
                     )
 
                 HStack(spacing: 0) {
@@ -182,10 +205,29 @@ struct WorkspaceView: View {
                         BrowserPanel(
                             selection: $selectedBrowserGroup,
                             selectedItem: $selectedBrowserItem,
+                            projectAudio: Array(document.audioAssets.keys),
+                            onEffect: { addEffectFromLibrary(named: $0) },
+                            onSound: { openSoundFromLibrary($0) },
                             close: { showBrowser = false }
                         )
                         .environmentObject(plugins)
                         .frame(width: compact ? 214 : 238)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
+
+                    if showInspector {
+                        ChannelStripInspector(
+                            session: $document.session,
+                            selectedTrackID: selectedTrackID,
+                            meters: meters,
+                            openFX: { openFX($0, target: $1) },
+                            toggleFX: { toggleFX($0, target: $1) },
+                            openPicker: { target in withAnimation(LYLLTHTheme.snap) { fxPickerTarget = target } },
+                            openSynth: { openSynth($0) },
+                            openDrums: { openDrums($0) },
+                            close: { showInspector = false }
+                        )
+                        .frame(width: 297)
                         .transition(.move(edge: .leading).combined(with: .opacity))
                     }
 
@@ -201,74 +243,139 @@ struct WorkspaceView: View {
                                 syncEngine: { audio.syncSequencer(document.session) }
                             )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else if activeWorkspace == "MIX" {
-                            MixerView(
-                                session: $document.session,
-                                selectedTrackID: $selectedTrackID,
-                                close: { activeWorkspace = "ARRANGE" }
-                            )
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
-                            ArrangementView(
-                                session: $document.session,
-                                selectedTrackID: $selectedTrackID,
-                                currentStep: audio.currentStep,
-                                isPlaying: audio.isPlaying,
-                                openSnapMenu: { presentMenu(.arrangementSnap) },
-                                requestAudioImport: { trackID, beat in
-                                    presentAudioImporter(trackID: trackID, atBeat: beat)
-                                },
-                                previewAudioEvent: { clip in
-                                    guard let path = clip.sourceRelativePath,
-                                          let data = document.audioAssets[path] else {
-                                        audioImportError = "This audio event's original file is missing from the project."
-                                        return
-                                    }
-                                    audio.previewAudioEvent(clip, assetData: data, projectBPM: document.session.bpm)
-                                }
-                            )
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            arrangementPane
 
                             if showMixer {
                                 MixerView(
                                     session: $document.session,
                                     selectedTrackID: $selectedTrackID,
+                                    meters: meters,
+                                    isMainSelected: inspectMain,
+                                    selectMain: { inspectMain = true; showInspector = true },
                                     close: { showMixer = false }
                                 )
-                                .frame(height: compact ? 176 : 196)
+                                .frame(height: compact ? 184 : 206)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    if showInspector && !compact {
-                        InspectorPanel(track: selectedTrackBinding, close: { showInspector = false })
-                            .frame(width: 286)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
                 }
-                .animation(.easeOut(duration: 0.16), value: showBrowser)
-                .animation(.easeOut(duration: 0.16), value: showInspector)
-                .animation(.easeOut(duration: 0.16), value: showMixer)
+                .animation(LYLLTHTheme.settle, value: showBrowser)
+                .animation(LYLLTHTheme.settle, value: showInspector)
+                .animation(LYLLTHTheme.settle, value: showMixer)
 
                     StatusBar(
                         error: audioImportError ?? audio.audioEventError ?? audio.startupError,
                         sampleRate: document.session.sampleRate,
                         bitDepth: document.session.bitDepth,
-                        hiddenInspector: showInspector && compact
+                        hiddenInspector: false
                     )
                 }
                 .background(LYLLTHTheme.background)
 
                 workspaceMenuOverlay
+                    .zIndex(120)
+
+                fxPickerOverlay
+
+                synthEditorOverlay
+                    .zIndex(180)
+
+                drumBrowserOverlay
+                    .zIndex(181)
+
+                LYBounceOverlay(bounce: bounce, cancel: { bounce.cancel(audio: audio) })
+                    .zIndex(250)
+
+                LYFXWindowHost(
+                    session: $document.session,
+                    request: $fxRequest,
+                    original: fxOriginal,
+                    transport: transportDisplay,
+                    isPlaying: audio.isPlaying,
+                    onTransportTap: { audio.togglePlayback() }
+                )
+                .zIndex(200)
             }
         }
+        .coordinateSpace(name: LYDropdownOverlay<EmptyView>.space)
+        .onPreferenceChange(LYMenuAnchorKey.self) { menuAnchors = $0 }
         .frame(minWidth: 960, minHeight: 640)
         .onAppear {
+            // Project wavetables first, so synth tracks find them when they load.
+            LYWavetableLibrary.shared.register(projectTables: document.wavetables)
             selectedTrackID = selectedTrackID ?? document.session.tracks.first?.id
             audio.prepare(document.session)
+            LYMIDIInput.shared.start()
+            DispatchQueue.main.async { updateMIDITarget() }
+            audio.setTransportMode(transportMode, session: document.session, assets: document.audioAssets)
+            audio.syncTimeline(document.session, assets: document.audioAssets)
+            LYFXBridge.pushAll(document.session, engine: audio.engine)
+            meters.track(document.session)
+            audio.engine.setMainOutputVolume(volume: pow(10, (document.session.mainVolumeDB ?? 0) / 20))
             plugins.scan()
+            #if DEBUG
+            // Screenshot hook: LYLLTH_DEBUG_FX=<FXKind raw value> opens that
+            // effect on the first track at launch.
+            if let raw = ProcessInfo.processInfo.environment["LYLLTH_DEBUG_FX"],
+               let kind = FXKind(rawValue: raw),
+               let first = document.session.tracks.first {
+                selectedTrackID = first.id
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { openFX(kind, target: .track(first.id)) }
+            }
+            if ProcessInfo.processInfo.environment["LYLLTH_DEBUG_DRUMS"] != nil, let first = document.session.tracks.first {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { openDrums(first.id) }
+            }
+            if ProcessInfo.processInfo.environment["LYLLTH_DEBUG_KEYMENU"] != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { presentMenu(.songKey, from: "songKey") }
+            }
+            if ProcessInfo.processInfo.environment["LYLLTH_DEBUG_SYNTH"] != nil,
+               let track = document.session.tracks.first(where: { $0.synth != nil }) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { openSynth(track.id) }
+            }
+            #endif
+            // AppKit hands a new window's first text field the keyboard. The
+            // workspace wants space for the transport, so start with nothing.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                NSApp.keyWindow?.makeFirstResponder(nil)
+            }
+        }
+        .onChange(of: audio.currentStep) { _, step in transportDisplay.update(step: step) }
+        .onChange(of: audio.isPlaying) { _, playing in
+            // Stop or space while recording ends the take.
+            if !playing && recorder.phase == .recording { finishRecording() }
+        }
+        .onChange(of: selectedTrackID) { _, _ in
+            inspectMain = false
+            updateMIDITarget()
+        }
+        .onChange(of: document.session.tracks.map(\.isArmed)) { _, _ in updateMIDITarget() }
+        .onChange(of: document.session.tracks.map { $0.synth != nil }) { _, _ in
+            DispatchQueue.main.async { updateMIDITarget() }
+        }
+        .onChange(of: document.session.tracks.map(\.id)) { _, _ in
+            // Engine channels follow track order, so a reorder or a new track
+            // moves every rack onto a different channel.
+            LYFXBridge.pushAll(document.session, engine: audio.engine)
+            meters.track(document.session)
+        }
+        .onChange(of: document.session.mainVolumeDB) { _, value in
+            audio.engine.setMainOutputVolume(volume: pow(10, (value ?? 0) / 20))
+        }
+        .onChange(of: activeWorkspace) { _, _ in
+            audio.setTransportMode(transportMode, session: document.session, assets: document.audioAssets)
+        }
+        .onChange(of: document.session) { _, _ in
+            // Arrangement edits have to reach the song frames and the audio
+            // players. Deferred to just after this frame and coalesced, so a
+            // click shows before the engine work runs.
+            engineSync.schedule {
+                audio.syncSequencer(document.session)
+                audio.syncTimeline(document.session, assets: document.audioAssets)
+            }
         }
         .onChange(of: document.session.bpm) { _, newValue in
             audio.updateTempo(newValue)
@@ -281,6 +388,395 @@ struct WorkspaceView: View {
         }
         .onChange(of: document.session.denominator) { _, _ in
             audio.syncSequencer(document.session)
+        }
+    }
+
+    private var arrangementPane: some View {
+        ArrangementView(
+            session: $document.session,
+            selectedTrackID: $selectedTrackID,
+            isPlaying: audio.isPlaying,
+            openSnapMenu: { presentMenu(.arrangementSnap, from: "snap") },
+            openTrackMenu: { presentMenu(.addTrack, from: "laneTrack") },
+            requestAudioImport: { trackID, beat in
+                presentAudioImporter(trackID: trackID, atBeat: beat)
+            },
+            importDroppedAudio: { url, trackID, beat in
+                importAudio(from: url, trackID: trackID, atBeat: beat)
+            },
+            previewAudioEvent: { clip in
+                guard let path = clip.sourceRelativePath,
+                      let data = document.audioAssets[path] else {
+                    audioImportError = "This audio event's original file is missing from the project."
+                    return
+                }
+                audio.previewAudioEvent(clip, assetData: data, projectBPM: document.session.bpm)
+            },
+            openSynth: { openSynth($0) },
+            openDrums: { openDrums($0) }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var inspectTarget: FXTarget {
+        if inspectMain { return .main }
+        return selectedTrackID.map(FXTarget.track) ?? .main
+    }
+
+    private func openFX(_ kind: FXKind, target: FXTarget) {
+        fxOriginal = (LYFXBridge.rack(for: target, in: document.session), document.session.reverb)
+        NightshapeHaptics.selection()
+        withAnimation(LYLLTHTheme.snap) { fxRequest = LYFXWindowRequest(kind: kind, target: target) }
+    }
+
+    private func toggleFX(_ kind: FXKind, target: FXTarget) {
+        NightshapeHaptics.selection()
+        if kind == .reverb && target == .main {
+            var reverb = document.session.reverb ?? .neutral
+            reverb.isBypassed.toggle()
+            document.session.reverb = reverb
+            LYFXBridge.pushReverb(document.session, engine: audio.engine)
+            return
+        }
+        var rack = LYFXBridge.rack(for: target, in: document.session)
+        var parked: Float?
+        rack.toggleBypass(kind, parkedReverbSend: &parked)
+        LYFXBridge.setRack(rack, for: target, in: &document.session)
+        let index: Int? = { if case .track(let id) = target { return LYFXBridge.engineIndex(for: id, in: document.session) }; return nil }()
+        LYFXBridge.push(kind, rack: rack, index: index, session: document.session, engine: audio.engine)
+    }
+
+    /// A hardware keyboard plays the selected track's synth, or failing that
+    /// the first record-armed synth track.
+    private func updateMIDITarget() {
+        let tracks = document.session.tracks
+        let target = tracks.first { $0.id == selectedTrackID && $0.synth != nil }
+            ?? tracks.first { $0.isArmed && $0.synth != nil }
+        LYMIDIInput.shared.setTarget(target.flatMap { audio.synthInstrument(for: $0.id) })
+    }
+
+    /// EXPORT: a real-time bounce of the whole song to WAV.
+    private func presentExport() {
+        let panel = NSSavePanel()
+        panel.title = "EXPORT SONG"
+        panel.prompt = "EXPORT"
+        panel.allowedContentTypes = [.wav]
+        panel.nameFieldStringValue = document.session.name + ".wav"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let beatsPerBar = max(1, Double(document.session.numerator) * 4 / Double(max(document.session.denominator, 1)))
+        let end = document.session.tracks.flatMap(\.clips)
+            .filter { $0.kind != .audio || $0.sourceRelativePath != nil }
+            .map { $0.startBeat + $0.lengthBeats }.max() ?? beatsPerBar
+        let bars = max(1, ceil(end / beatsPerBar - 0.0001))
+        let songSeconds = bars * beatsPerBar * 60 / max(document.session.bpm, 1)
+        let previousWorkspace = activeWorkspace
+        let previousLoop = document.session.isLoopEnabled
+        bounce.start(url: url, songSeconds: songSeconds, audio: audio, prepare: {
+            activeWorkspace = "SONG"
+            document.session.isLoopEnabled = false
+            audio.setTransportMode(.song, session: document.session, assets: document.audioAssets)
+            audio.syncSequencer(document.session)
+            audio.syncTimeline(document.session, assets: document.audioAssets)
+        }, restore: {
+            document.session.isLoopEnabled = previousLoop
+            activeWorkspace = previousWorkspace
+        })
+    }
+
+    // MARK: Recording
+
+    private func toggleRecording() {
+        if recorder.isActive { finishRecording(); return }
+        let armedAudio = document.session.tracks.contains { $0.kind == .audio && $0.isArmed }
+        let begin = {
+            recorder.start(audio: audio, bpm: document.session.bpm, countIn: document.session.countIn ?? true,
+                           recordAudio: armedAudio, onError: { audioImportError = $0 })
+        }
+        guard armedAudio else { begin(); return }
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: begin()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                DispatchQueue.main.async {
+                    if granted { begin() } else { audioImportError = "MICROPHONE ACCESS WAS DECLINED. TURN IT ON IN SYSTEM SETTINGS › PRIVACY › MICROPHONE." }
+                }
+            }
+        default:
+            audioImportError = "LYLLTH CAN'T HEAR THE INPUT. ALLOW IT IN SYSTEM SETTINGS › PRIVACY › MICROPHONE."
+        }
+    }
+
+    private func finishRecording() {
+        recorder.stop(audio: audio) { notes, take in
+            writeRecordedNotes(notes)
+            if let take { placeRecordedAudio(take.url, transportBeat: take.startBeat) }
+        }
+    }
+
+    /// Where a transport beat lands in the song: SONG cycles its window,
+    /// PATTERN cycles the pattern.
+    private func songBeat(forTransportBeat beat: Double) -> Double {
+        let window = audio.songWindow
+        return window.startBeat + beat.truncatingRemainder(dividingBy: max(window.lengthBeats, lyBeatsPerStep))
+    }
+
+    /// Recorded MIDI becomes steps: quantised to sixteenths, with velocity,
+    /// pitch (on synth tracks) and length. Armed tracks record; with none
+    /// armed, the selected track does.
+    private func writeRecordedNotes(_ notes: [LYRecordedNote]) {
+        guard !notes.isEmpty else { return }
+        let musical = { (track: LYTrack) in track.kind == .drumkit || track.kind == .instrument }
+        var targets = document.session.tracks.indices.filter { musical(document.session.tracks[$0]) && document.session.tracks[$0].isArmed }
+        if targets.isEmpty, let selected = document.session.tracks.firstIndex(where: { $0.id == selectedTrackID }),
+           musical(document.session.tracks[selected]) {
+            targets = [selected]
+        }
+        guard !targets.isEmpty else {
+            audioImportError = "ARM A TRACK (R) OR SELECT ONE TO RECORD MIDI INTO"
+            return
+        }
+        let beatsPerBar = max(1, Double(document.session.numerator) * 4 / Double(max(document.session.denominator, 1)))
+        let stepsPerBar = Int(beatsPerBar / lyBeatsPerStep)
+        let inSong = activeWorkspace != "PATTERN"
+        for trackIndex in targets {
+            let track = document.session.tracks[trackIndex]
+            let kind: LYClip.Kind = track.kind == .drumkit ? .pattern : .midi
+            let root = track.rootNote ?? (track.kind == .drumkit ? 36 : 48)
+            for note in notes {
+                let length = max(1, min(64, Int((((note.offBeat ?? note.onBeat + 0.25) - note.onBeat) / lyBeatsPerStep).rounded())))
+                var clipIndex: Int?
+                var step = 0
+                if inSong {
+                    let beat = (songBeat(forTransportBeat: note.onBeat) / lyBeatsPerStep).rounded() * lyBeatsPerStep
+                    clipIndex = document.session.tracks[trackIndex].clips.firstIndex {
+                        ($0.kind == .pattern || $0.kind == .midi) && beat >= $0.startBeat - 0.0001 && beat < $0.startBeat + $0.lengthBeats - 0.0001
+                    }
+                    if clipIndex == nil {
+                        let barStart = floor(beat / beatsPerBar) * beatsPerBar
+                        document.session.tracks[trackIndex].clips.append(LYClip(
+                            name: "REC " + String(format: "%02d", Int(barStart / beatsPerBar) + 1),
+                            kind: kind, startBeat: barStart, lengthBeats: beatsPerBar,
+                            steps: Array(repeating: false, count: stepsPerBar),
+                            stepParameters: Array(repeating: .default, count: stepsPerBar)))
+                        clipIndex = document.session.tracks[trackIndex].clips.count - 1
+                    }
+                    if let clipIndex {
+                        let clip = document.session.tracks[trackIndex].clips[clipIndex]
+                        step = Int(((beat - clip.startBeat + clip.loopOffsetBeats) / lyBeatsPerStep).rounded())
+                    }
+                } else {
+                    let sequenced = document.session.tracks[trackIndex].clips.indices.filter {
+                        let k = document.session.tracks[trackIndex].clips[$0].kind
+                        return k == .pattern || k == .midi
+                    }
+                    guard !sequenced.isEmpty else { continue }
+                    clipIndex = sequenced[min(max(0, document.session.activePatternIndex ?? 0), sequenced.count - 1)]
+                    step = Int((note.onBeat / lyBeatsPerStep).rounded())
+                }
+                guard let clipIndex else { continue }
+                var clip = document.session.tracks[trackIndex].clips[clipIndex]
+                var steps = clip.steps ?? Array(repeating: false, count: stepsPerBar)
+                var locks = clip.stepParameters ?? Array(repeating: .default, count: steps.count)
+                if locks.count < steps.count { locks += Array(repeating: .default, count: steps.count - locks.count) }
+                guard !steps.isEmpty else { continue }
+                let index = ((step % steps.count) + steps.count) % steps.count
+                steps[index] = true
+                locks[index].velocity = min(max(Double(note.velocity) / 127, 0.05), 1)
+                if track.kind == .instrument { locks[index].pitch = Double(min(max(note.note - root, -24), 24)) }
+                locks[index].noteLength = Double(length)
+                clip.steps = steps
+                clip.stepParameters = locks
+                document.session.tracks[trackIndex].clips[clipIndex] = clip
+            }
+        }
+    }
+
+    private func placeRecordedAudio(_ url: URL, transportBeat: Double) {
+        guard let track = document.session.tracks.first(where: { $0.kind == .audio && $0.isArmed }) else { return }
+        let beat = activeWorkspace == "PATTERN" ? 0 : songBeat(forTransportBeat: transportBeat)
+        Task { @MainActor in
+            do {
+                var imported = try await LYAudioImporter.importFile(at: url)
+                imported.displayName = "RECORDING " + String(format: "%02d", document.session.tracks.flatMap(\.clips).filter { $0.name.hasPrefix("RECORDING") }.count + 1)
+                _ = document.addImportedAudio(imported, toTrackID: track.id, atBeat: beat)
+            } catch {
+                audioImportError = error.localizedDescription
+            }
+        }
+    }
+
+    /// LYLLTH SYNTH or DRUM SYNTH clicked in the library: open it on the
+    /// selected track if it fits, else on the first track that does, else a
+    /// new track.
+    private func openSoundFromLibrary(_ name: String) {
+        let tracks = document.session.tracks
+        switch name {
+        case "LYLLTH SYNTH":
+            if let track = tracks.first(where: { $0.id == selectedTrackID && $0.kind == .instrument && $0.isChordTrack != true })
+                ?? tracks.first(where: { $0.synth != nil }) {
+                openSynth(track.id)
+            } else {
+                addTrack(kind: .instrument)
+                if let id = selectedTrackID { openSynth(id) }
+            }
+        case "DRUM SYNTH":
+            if let track = tracks.first(where: { $0.id == selectedTrackID && $0.kind == .drumkit })
+                ?? tracks.first(where: { $0.kind == .drumkit }) {
+                openDrums(track.id)
+            } else {
+                addTrack(kind: .drumkit)
+                if let id = selectedTrackID { openDrums(id) }
+            }
+        default:
+            break
+        }
+    }
+
+    private func openDrums(_ trackID: UUID) {
+        guard document.session.tracks.contains(where: { $0.id == trackID && $0.kind == .drumkit }) else { return }
+        selectedTrackID = trackID
+        withAnimation(LYLLTHTheme.settle) { drumTrackID = trackID }
+    }
+
+    @ViewBuilder
+    private var drumBrowserOverlay: some View {
+        if let trackID = drumTrackID, let track = document.session.tracks.first(where: { $0.id == trackID }) {
+            let close = { withAnimation(LYLLTHTheme.snap) { drumTrackID = nil } }
+            GeometryReader { geo in
+                LYFloatingWindow(
+                    id: "drums",
+                    title: "DRUM SYNTH  ·  " + track.name,
+                    accent: LYLLTHTheme.teal,
+                    size: CGSize(width: min(geo.size.width - 40, 980), height: min(geo.size.height - 60, 680)),
+                    close: close
+                ) {
+                    LYDrumSoundBrowser(
+                        trackName: track.name,
+                        currentID: LYDrumSounds.presetID(for: track),
+                        audition: { audio.auditionDrum($0) },
+                        load: { preset in
+                            guard let index = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+                            document.session.tracks[index].drumPresetID = preset.id
+                        },
+                        close: close
+                    )
+                }
+                .transition(.scale(scale: 0.97).combined(with: .opacity))
+            }
+        }
+    }
+
+    /// Opens LYLLTH SYNTH for a track. An instrument track still on a DrumKit
+    /// preset is moved onto LYLLTH SYNTH first, starting from INIT.
+    private func openSynth(_ trackID: UUID) {
+        guard let index = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        if document.session.tracks[index].synth == nil {
+            guard document.session.tracks[index].kind == .instrument else { return }
+            document.session.tracks[index].synth = .initPatch
+            audio.syncSequencer(document.session)
+        }
+        selectedTrackID = trackID
+        withAnimation(LYLLTHTheme.settle) { synthTrackID = trackID }
+    }
+
+    @ViewBuilder
+    private var synthEditorOverlay: some View {
+        if let trackID = synthTrackID,
+           let track = document.session.tracks.first(where: { $0.id == trackID }),
+           track.synth != nil {
+            let close = { withAnimation(LYLLTHTheme.snap) { synthTrackID = nil } }
+            GeometryReader { geo in
+                LYFloatingWindow(
+                    id: "synth",
+                    title: "LYLLTH SYNTH  ·  " + track.name,
+                    accent: LYLLTHTheme.teal,
+                    size: CGSize(width: min(geo.size.width - 32, 1340), height: min(geo.size.height - 56, 800)),
+                    close: close
+                ) {
+                    LYSynthEditor(
+                        patch: Binding(
+                            get: { document.session.tracks.first { $0.id == trackID }?.synth ?? .initPatch },
+                            set: { patch in
+                                guard let index = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+                                document.session.tracks[index].synth = patch
+                                audio.synthInstrument(for: trackID)?.apply(patch, bpm: document.session.bpm)
+                            }
+                        ),
+                        trackName: track.name,
+                        instrument: audio.synthInstrument(for: trackID),
+                        storeTableInProject: { name, frames in
+                            document.wavetables[name] = LYWavetableLibrary.floatData(frames)
+                        },
+                        close: close
+                    )
+                }
+                .transition(.scale(scale: 0.97).combined(with: .opacity))
+            }
+        }
+    }
+
+    /// Adds or removes an effect from a chain, as DrumKit's ADD / REMOVE does.
+    private func toggleMembership(_ kind: FXKind, target: FXTarget) {
+        var rack = LYFXBridge.rack(for: target, in: document.session)
+        var chain = rack.chain(isMain: target == .main)
+        if let index = chain.firstIndex(of: kind) { chain.remove(at: index) } else { chain.append(kind) }
+        rack.order = chain
+        LYFXBridge.setRack(rack, for: target, in: &document.session)
+        LYFXBridge.pushRack(target: target, session: document.session, engine: audio.engine)
+    }
+
+    /// A library effect clicked: put it on the inspected channel and open it.
+    private func addEffectFromLibrary(named name: String) {
+        guard let kind = FXKind.allCases.first(where: { $0.title == name }) else { return }
+        let target = inspectTarget
+        if case .track(let id) = target, LYFXBridge.engineIndex(for: id, in: document.session) == nil { return }
+        if !LYFXBridge.rack(for: target, in: document.session).chain(isMain: target == .main).contains(kind) {
+            toggleMembership(kind, target: target)
+        }
+        showInspector = true
+        openFX(kind, target: target)
+    }
+
+    @ViewBuilder
+    private var fxPickerOverlay: some View {
+        if let target = fxPickerTarget {
+            let close = { withAnimation(LYLLTHTheme.snap) { fxPickerTarget = nil } }
+            ZStack {
+                Color.black.opacity(0.76)
+                    .ignoresSafeArea()
+                    .onTapGesture(perform: close)
+                FXPickerWindowView(
+                    targetName: target == .main ? "MAIN MIX" : (document.session.tracks.first { .track($0.id) == target }?.name ?? "TRACK"),
+                    target: target,
+                    chainOrder: LYFXBridge.rack(for: target, in: document.session).chain(isMain: target == .main),
+                    onToggle: { toggleMembership($0, target: target) },
+                    onDone: close
+                )
+                .frame(width: 380)
+                .frame(maxHeight: 640)
+                .scaleEffect(1.25)
+            }
+            .preferredColorScheme(.dark)
+            .zIndex(150)
+        }
+    }
+
+    private var transportMode: LYTransportMode {
+        activeWorkspace == "PATTERN" ? .pattern : .song
+    }
+
+    /// Finder drops land where they were dropped: on that track and beat.
+    private func importAudio(from url: URL, trackID: UUID?, atBeat beat: Double) {
+        Task { @MainActor in
+            do {
+                let imported = try await LYAudioImporter.importFile(at: url)
+                _ = document.addImportedAudio(imported, toTrackID: trackID, atBeat: beat)
+                selectedTrackID = trackID ?? document.session.tracks.last(where: { $0.kind == .audio })?.id
+                audioImportError = nil
+            } catch {
+                audioImportError = error.localizedDescription
+            }
         }
     }
 
@@ -329,18 +825,19 @@ struct WorkspaceView: View {
         panel.begin(completionHandler: completion)
     }
 
-    private func presentMenu(_ menu: LYWorkspaceMenu) {
-        withAnimation(.easeOut(duration: 0.14)) { activeMenu = menu }
+    private func presentMenu(_ menu: LYWorkspaceMenu, from anchor: String? = nil) {
+        menuAnchorID = anchor
+        withAnimation(LYLLTHTheme.snap) { activeMenu = menu }
     }
 
     private func dismissMenu() {
-        withAnimation(.easeOut(duration: 0.14)) { activeMenu = nil }
+        withAnimation(LYLLTHTheme.snap) { activeMenu = nil }
     }
 
     @ViewBuilder
     private var workspaceMenuOverlay: some View {
         if let activeMenu {
-            LYNightshapeMenuOverlay(dismiss: dismissMenu) {
+            LYDropdownOverlay(anchor: menuAnchorID.flatMap { menuAnchors[$0] }, dismiss: dismissMenu) {
                 switch activeMenu {
                 case .songKey:
                     SongKeyPicker(
@@ -404,6 +901,7 @@ struct WorkspaceView: View {
         }
 
         var track = LYTrack(name: name, kind: kind, accent: accent, volumeDB: -6)
+        if kind == .instrument { track.synth = .factory(named: "NIGHT PAD") ?? .initPatch }
         if kind == .drumkit || kind == .instrument {
             let clipKind: LYClip.Kind = kind == .drumkit ? .pattern : .midi
             let count = document.session.tracks
@@ -432,85 +930,72 @@ struct WorkspaceView: View {
 
 private struct TransportBar: View {
     @Binding var session: LYLLTHSession
+    @Binding var activeWorkspace: String
+    @ObservedObject var recorder: LYRecorder
+    let toggleRecording: () -> Void
     @EnvironmentObject private var audio: AudioEngineController
     let openSongKeyMenu: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 1) {
-                // Same NIGHTSHAPE tie-dye + purple byline lockup as DRUMKIT's brand header.
-                Text("LYLLTH")
-                    .font(LYLLTHTheme.wordmark(36))
-                    .tracking(2.1)
-                    .hidden()
-                    .overlay(
-                        LYWordmarkTieDye().mask(
-                            Text("LYLLTH")
-                                .font(LYLLTHTheme.wordmark(36))
-                                .tracking(2.1)
-                        )
-                    )
-                    .offset(y: LYLLTHTheme.wordmarkOpticalDrop(36))
-                    .shadow(color: LYLLTHTheme.teal.opacity(0.11), radius: 6)
-                Text("BY NIGHTSHAPE")
-                    .font(LYLLTHTheme.label(8.5))
-                    .tracking(6.4)
-                    .foregroundStyle(LYLLTHTheme.purple)
-                    .padding(.leading, 3)
-            }
-            .frame(width: 218, alignment: .leading)
+            LYWordmarkLockup()
+                .frame(width: 300, alignment: .leading)
 
-            LYHairline(color: LYLLTHTheme.lineStrong)
-                .rotationEffect(.degrees(90))
-                .frame(width: 28)
+            divider
 
-            HStack(spacing: 10) {
-                Button { audio.stop() } label: {
-                    Image(systemName: "stop.fill")
-                        .font(.system(size: 9, weight: .bold))
-                        .frame(width: 28, height: 28)
+            HStack(spacing: 12) {
+                Button { if recorder.isActive { toggleRecording() } else { audio.stop() } } label: {
+                    Rectangle()
+                        .fill(LYLLTHTheme.chromeText)
+                        .frame(width: 9, height: 9)
+                        .frame(width: 34, height: 34)
+                        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(LYLLTHTheme.metadata)
-                .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                .help("Stop and return to the start")
+                .accessibilityLabel("Stop")
 
-                Button { audio.togglePlayback() } label: {
-                    ZStack {
-                        Circle()
-                            .stroke(audio.isPlaying ? LYLLTHTheme.teal : LYLLTHTheme.lineFocused, lineWidth: 1)
-                        Image(systemName: audio.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 14, weight: .medium))
-                            .offset(x: audio.isPlaying ? 0 : 1)
-                    }
-                    .frame(width: 42, height: 42)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(audio.isPlaying ? LYLLTHTheme.teal : LYLLTHTheme.chrome)
-                .shadow(color: audio.isPlaying ? LYLLTHTheme.teal.opacity(0.14) : .clear, radius: 5)
-                .accessibilityLabel(audio.isPlaying ? "Pause" : "Play")
+                LYPlayButton(isPlaying: audio.isPlaying) { audio.togglePlayback() }
+
+                LYRecordButton(isOn: recorder.isActive, action: toggleRecording)
             }
+            .padding(.horizontal, 18)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(audio.timecode)
-                    .font(LYLLTHTheme.value(25))
-                    .tracking(1.1)
-                    .foregroundStyle(LYLLTHTheme.text)
-                Text(audio.isPlaying ? "PLAYING" : "READY")
+            VStack(alignment: .leading, spacing: 3) {
+                if case .countingIn(let beatsLeft) = recorder.phase {
+                    Text("\(beatsLeft)")
+                        .font(LYLLTHTheme.value(24))
+                        .foregroundStyle(LYLLTHTheme.record)
+                        .lyBloom(LYLLTHTheme.record)
+                } else {
+                    Text(audio.timecode)
+                        .font(LYLLTHTheme.value(24))
+                        .tracking(1.1)
+                        .foregroundStyle(LYLLTHTheme.text)
+                }
+                Text(statusText)
                     .font(LYLLTHTheme.label(8, weight: .bold))
-                    .tracking(1.6)
-                    .foregroundStyle(audio.isPlaying ? LYLLTHTheme.teal : LYLLTHTheme.dim)
+                    .tracking(1.8)
+                    .foregroundStyle(recorder.isActive ? LYLLTHTheme.record : (audio.isPlaying ? LYLLTHTheme.teal : LYLLTHTheme.dim))
             }
-            .padding(.leading, 15)
-            .frame(width: 145, alignment: .leading)
+            .frame(width: 128, alignment: .leading)
+
+            divider
+
+            LYModeSwitch(activeWorkspace: $activeWorkspace)
+                .padding(.horizontal, 18)
+
+            divider
 
             TempoReadout(
                 bpm: $session.bpm,
                 numerator: session.numerator,
                 denominator: session.denominator
             )
-            .padding(.horizontal, 15)
-            .frame(height: 50)
-            .overlay(alignment: .leading) { Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1) }
+            .padding(.horizontal, 18)
+
+            divider
 
             SongKeyReadout(
                 key: Binding(
@@ -519,9 +1004,8 @@ private struct TransportBar: View {
                 ),
                 openMenu: openSongKeyMenu
             )
-            .padding(.horizontal, 14)
-            .frame(height: 50)
-            .overlay(alignment: .leading) { Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1) }
+            .lyMenuAnchor("songKey")
+            .padding(.horizontal, 18)
 
             Spacer(minLength: 18)
 
@@ -533,14 +1017,192 @@ private struct TransportBar: View {
                     isOn: audio.isMetronomeEnabled,
                     action: { audio.toggleMetronome(for: session) }
                 )
-                TransportUtility(icon: "repeat", title: "LOOP", isOn: true)
-                TransportUtility(icon: "record.circle", title: "RECORD", tint: LYLLTHTheme.purple)
+                .help("Metronome")
+                TransportUtility(
+                    icon: "4.circle",
+                    title: "COUNT",
+                    tint: LYLLTHTheme.record,
+                    isOn: session.countIn ?? true,
+                    action: { session.countIn = !(session.countIn ?? true) }
+                )
+                .help("Four clicks before recording starts")
+                TransportUtility(
+                    icon: "repeat",
+                    title: "LOOP",
+                    tint: LYLLTHTheme.indigo,
+                    isOn: session.isLoopActive,
+                    action: toggleLoop
+                )
+                .help(loopHelp)
             }
         }
-        .padding(.horizontal, 18)
-        .frame(height: 86)
+        .padding(.leading, 20)
+        .padding(.trailing, 16)
+        .frame(height: 112)
         .background(LYLLTHTheme.deck)
         .overlay(alignment: .bottom) { LYHairline(color: LYLLTHTheme.lineStrong) }
+    }
+
+    private var divider: some View {
+        Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1, height: 46)
+    }
+
+    private var statusText: String {
+        switch recorder.phase {
+        case .countingIn: return "COUNT IN"
+        case .recording: return "RECORDING"
+        case .idle: return audio.isPlaying ? "PLAYING" : "READY"
+        }
+    }
+
+    private var loopHelp: String {
+        guard let loop = session.loopRange else { return "Loop the first four bars" }
+        let beatsPerBar = max(1, Double(session.numerator) * 4 / Double(max(session.denominator, 1)))
+        let first = Int(loop.startBeat / beatsPerBar) + 1
+        let last = Int(ceil((loop.startBeat + loop.lengthBeats) / beatsPerBar))
+        return "Loop bars \(first)–\(last). Drag the brace in the ruler to change it."
+    }
+
+    private func toggleLoop() {
+        if session.loopRange == nil {
+            let beatsPerBar = max(1, Double(session.numerator) * 4 / Double(max(session.denominator, 1)))
+            session.loopRange = LYLoopRange(startBeat: 0, lengthBeats: beatsPerBar * 4)
+            session.isLoopEnabled = true
+        } else {
+            session.isLoopEnabled = !session.isLoopActive
+        }
+    }
+}
+
+/// LYLLTH's lockup, built the way DRUMKIT's is: the first half in the NIGHTSHAPE
+/// outline cut, the second half solid, both carrying the same tie-dye field,
+/// with the tracked purple byline underneath.
+private struct LYWordmarkLockup: View {
+    private let size: CGFloat = 62
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            letters
+                .hidden()
+                .overlay(LYWordmarkTieDye().mask(letters))
+                .offset(y: LYLLTHTheme.wordmarkOpticalDrop(size))
+                .shadow(color: LYLLTHTheme.teal.opacity(0.08), radius: 5)
+                .accessibilityLabel("LYLLTH")
+            // Sized from the fonts' own metrics to span 75% of the wordmark.
+            Text("BY NIGHTSHAPE")
+                .font(LYLLTHTheme.label(11))
+                .tracking(7.1)
+                .foregroundStyle(LYLLTHTheme.purple)
+                .padding(.leading, 2)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var letters: some View {
+        HStack(spacing: 0) {
+            Text("LYL").font(LYLLTHTheme.wordmarkOutline(size))
+            Text("LTH").font(LYLLTHTheme.wordmark(size))
+        }
+        .tracking(1.6)
+        .fixedSize()
+    }
+}
+
+private struct LYPlayButton: View {
+    let isPlaying: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(LYLLTHTheme.teal.opacity(isPlaying ? 0.10 : 0))
+                Circle()
+                    .stroke(isPlaying ? LYLLTHTheme.teal : LYLLTHTheme.lineFocused, lineWidth: 1.5)
+                if isPlaying {
+                    HStack(spacing: 5) {
+                        Rectangle().frame(width: 4, height: 16)
+                        Rectangle().frame(width: 4, height: 16)
+                    }
+                    .foregroundStyle(LYLLTHTheme.teal)
+                } else {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(LYLLTHTheme.chromeText)
+                        .offset(x: 1.5)
+                }
+            }
+            .frame(width: 48, height: 48)
+            .contentShape(Circle())
+        }
+        .buttonStyle(LYPressScaleStyle())
+        .accessibilityLabel(isPlaying ? "Pause" : "Play")
+        .help("Play / pause (space)")
+    }
+}
+
+private struct LYRecordButton: View {
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle().fill(LYLLTHTheme.record.opacity(isOn ? 0.14 : 0))
+                Circle().stroke(isOn ? LYLLTHTheme.record : LYLLTHTheme.lineStrong, lineWidth: 1.5)
+                Circle()
+                    .fill(LYLLTHTheme.record)
+                    .frame(width: 12, height: 12)
+                    .opacity(isOn ? 1 : 0.75)
+            }
+            .frame(width: 34, height: 34)
+            .lyBloom(LYLLTHTheme.record, isOn: isOn)
+            .contentShape(Circle())
+        }
+        .buttonStyle(LYPressScaleStyle())
+        .accessibilityLabel("Record")
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+        .help("Record enable")
+    }
+}
+
+/// DrumKit's PATTERN | SONG switch: the live mode is set large and lit, the
+/// other sits small and quiet beside it.
+private struct LYModeSwitch: View {
+    @Binding var activeWorkspace: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            word("PATTERN", key: "PATTERN", color: LYLLTHTheme.purple)
+            word("SONG", key: "SONG", color: LYLLTHTheme.teal)
+        }
+        .animation(LYLLTHTheme.glide, value: activeWorkspace)
+    }
+
+    private func word(_ title: String, key: String, color: Color) -> some View {
+        let isActive = activeWorkspace == key
+        return Button { activeWorkspace = key } label: {
+            Text(title)
+                .font(isActive ? LYLLTHTheme.label(25, weight: .light) : LYLLTHTheme.label(10, weight: .bold))
+                .tracking(isActive ? 2.2 : 1.8)
+                .foregroundStyle(isActive ? color : LYLLTHTheme.dim)
+                .lyBloom(color, isOn: isActive)
+                .fixedSize()
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+        .help(key == "SONG" ? "Play the arrangement" : "Loop and edit one pattern")
+    }
+}
+
+/// The acknowledgement every NIGHTSHAPE control gives a click.
+struct LYPressScaleStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(LYLLTHTheme.snap, value: configuration.isPressed)
     }
 }
 
@@ -617,10 +1279,10 @@ private struct SongKeyPicker: View {
                     } label: {
                         Text(SongKey.rootNames[root])
                             .font(LYLLTHTheme.value(17))
-                            .foregroundStyle(root == key.root ? LYLLTHTheme.background : LYLLTHTheme.lavender)
+                            .foregroundStyle(root == key.root ? LYLLTHTheme.teal : LYLLTHTheme.lavender)
                             .frame(width: 55, height: 37)
-                            .background(root == key.root ? LYLLTHTheme.teal : LYLLTHTheme.panelRaised)
-                            .overlay(Rectangle().stroke(root == key.root ? LYLLTHTheme.teal : LYLLTHTheme.lineStrong, lineWidth: 1))
+                            .background(root == key.root ? LYLLTHTheme.teal.opacity(0.12) : LYLLTHTheme.panelRaised)
+                            .overlay(Rectangle().stroke(root == key.root ? LYLLTHTheme.teal : LYLLTHTheme.lineStrong, lineWidth: root == key.root ? 1.5 : 1))
                     }
                     .buttonStyle(.plain)
                 }
@@ -708,22 +1370,22 @@ private struct TempoReadout: View {
     @State private var dragStartBPM: Double?
 
     var body: some View {
-        HStack(alignment: .center, spacing: 9) {
-            Text("\(Int(bpm.rounded()))")
-                .font(LYLLTHTheme.value(31))
-                .foregroundStyle(LYLLTHTheme.lavender)
-                .lineLimit(1)
-                .frame(minWidth: 63, alignment: .trailing)
-
-            VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .trailing, spacing: 0) {
+            HStack(spacing: 6) {
+                Text("\(numerator)/\(denominator)")
+                    .font(LYLLTHTheme.value(9))
+                    .foregroundStyle(LYLLTHTheme.dim)
                 Text("BPM")
                     .font(LYLLTHTheme.label(8.5, weight: .bold))
-                    .tracking(1.8)
+                    .tracking(2)
                     .foregroundStyle(LYLLTHTheme.purple)
-                Text("\(numerator) / \(denominator)")
-                    .font(LYLLTHTheme.value(9))
-                    .foregroundStyle(LYLLTHTheme.teal)
+                    .lyBloom(LYLLTHTheme.purple)
             }
+            Text("\(Int(bpm.rounded()))")
+                .font(LYLLTHTheme.value(36))
+                .foregroundStyle(LYLLTHTheme.lavender)
+                .lineLimit(1)
+                .frame(minWidth: 70, alignment: .trailing)
         }
         .contentShape(Rectangle())
         .gesture(
@@ -735,7 +1397,7 @@ private struct TempoReadout: View {
                 }
                 .onEnded { _ in dragStartBPM = nil }
         )
-        .help("Drag vertically to adjust tempo")
+        .help("Drag vertically to change the tempo")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Tempo")
         .accessibilityValue("\(Int(bpm.rounded())) BPM, \(numerator) / \(denominator)")
@@ -752,94 +1414,93 @@ private struct TempoReadout: View {
 private struct TransportUtility: View {
     let icon: String
     let title: String
-    var tint = LYLLTHTheme.metadata
+    var tint = LYLLTHTheme.teal
     var isOn = false
     var action: () -> Void = {}
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
+            VStack(spacing: 5) {
                 Image(systemName: icon).font(.system(size: 12, weight: .medium))
-                Text(title).font(LYLLTHTheme.label(7, weight: .bold)).tracking(1.2)
+                Text(title).font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.4)
             }
-            .foregroundStyle(isOn ? tint : LYLLTHTheme.metadata)
-            .frame(width: 50, height: 44)
+            .foregroundStyle(isOn ? tint : LYLLTHTheme.chromeText)
+            .lyBloom(tint, isOn: isOn)
+            .frame(width: 54, height: 46)
+            .background(tint.opacity(isOn ? LYLLTHTheme.controlFill : 0))
+            .overlay(Rectangle().stroke(isOn ? tint.opacity(0.9) : LYLLTHTheme.lineStrong, lineWidth: 1))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(LYPressScaleStyle())
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
 // MARK: - Workspace chrome
 
 private struct WorkspaceStrip: View {
-    @Binding var activeWorkspace: String
+    let activeWorkspace: String
     @Binding var showBrowser: Bool
     @Binding var showInspector: Bool
     @Binding var showMixer: Bool
     let projectName: String
     let openTrackMenu: () -> Void
-
-    private let workspaces = ["ARRANGE", "PATTERN", "MIX", "SYNTH"]
+    let export: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 8) {
-                LYLED()
+        HStack(spacing: 14) {
+            HStack(spacing: 9) {
+                LYLED(color: LYLLTHTheme.teal, size: 5)
                 mixedNumericLabel(
                     projectName,
-                    labelFont: LYLLTHTheme.label(10, weight: .bold),
-                    numberFont: LYLLTHTheme.value(10)
+                    labelFont: LYLLTHTheme.label(10.5, weight: .bold),
+                    numberFont: LYLLTHTheme.value(11)
                 )
-                    .tracking(1.4)
-                    .foregroundStyle(LYLLTHTheme.secondary)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 7, weight: .bold))
-                    .foregroundStyle(LYLLTHTheme.dim)
+                .tracking(1.5)
+                .foregroundStyle(LYLLTHTheme.text)
             }
-            .frame(width: 218, alignment: .leading)
 
-            HStack(spacing: 1) {
-                ForEach(workspaces, id: \.self) { workspace in
-                    Button(workspace) { activeWorkspace = workspace }
-                        .buttonStyle(.plain)
-                        .font(LYLLTHTheme.label(9, weight: .bold))
-                        .tracking(1.4)
-                        .foregroundStyle(activeWorkspace == workspace ? LYLLTHTheme.text : LYLLTHTheme.dim)
-                        .padding(.horizontal, 13)
-                        .frame(height: 36)
-                        .overlay(alignment: .bottom) {
-                            Rectangle()
-                                .fill(activeWorkspace == workspace ? LYLLTHTheme.teal : .clear)
-                                .frame(height: 1)
-                        }
-                }
-            }
+            Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1, height: 14)
+
+            Text(activeWorkspace == "PATTERN" ? "PATTERN EDIT  ·  LOOPS THE PATTERN" : "SONG  ·  PLAYS THE ARRANGEMENT")
+                .font(LYLLTHTheme.label(8, weight: .bold))
+                .tracking(1.4)
+                .foregroundStyle(LYLLTHTheme.dim)
 
             Spacer()
 
-            HStack(spacing: 3) {
-                VisibilityButton(icon: "sidebar.left", help: "Library", isOn: $showBrowser)
-                VisibilityButton(icon: "rectangle.bottomthird.inset.filled", help: "Mixer", isOn: $showMixer)
-                VisibilityButton(icon: "sidebar.right", help: "Inspector", isOn: $showInspector)
-                Button(action: openTrackMenu) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus")
-                        Text("TRACK")
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 7, weight: .bold))
-                    }
+            LYMIDIIndicator(midi: LYMIDIInput.shared)
+
+            Button(action: export) {
+                HStack(spacing: 7) {
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 9, weight: .bold))
+                    Text("EXPORT")
                 }
-                .buttonStyle(LYChromeButtonStyle(compact: true))
-                .padding(.leading, 6)
             }
+            .buttonStyle(LYChromeButtonStyle(compact: true))
+            .help("Bounce the whole song to a WAV")
+
+            HStack(spacing: 2) {
+                VisibilityButton(icon: "books.vertical", help: "Library", isOn: $showBrowser)
+                VisibilityButton(icon: "rectangle.bottomthird.inset.filled", help: "Mixer", isOn: $showMixer)
+                VisibilityButton(icon: "slider.vertical.3", help: "Inspector", isOn: $showInspector)
+            }
+
+            Button(action: openTrackMenu) {
+                HStack(spacing: 7) {
+                    Image(systemName: "plus").font(.system(size: 9, weight: .bold))
+                    Text("TRACK")
+                }
+            }
+            .buttonStyle(LYChromeButtonStyle(compact: true))
+            .lyMenuAnchor("stripTrack")
         }
-        .padding(.horizontal, 13)
+        .padding(.horizontal, 16)
         .frame(height: 38)
         .background(LYLLTHTheme.panel)
         .overlay(alignment: .bottom) { LYHairline() }
     }
-
 }
 
 private struct VisibilityButton: View {
@@ -853,6 +1514,7 @@ private struct VisibilityButton: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(isOn ? LYLLTHTheme.teal : LYLLTHTheme.dim)
                 .frame(width: 30, height: 26)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
@@ -861,20 +1523,56 @@ private struct VisibilityButton: View {
 
 // MARK: - Library
 
+/// One NIGHTSHAPE effect as DrumKit names and colours it. The colour is the one
+/// its node carries in DrumKit's FX signal path, so a row here and the node it
+/// opens always agree.
+private struct LYNightshapeEffect: Hashable {
+    let name: String
+    let detail: String
+    let category: String
+    let accent: LYAccent?
+
+    var color: Color { accent.map(LYLLTHTheme.accent) ?? LYLLTHTheme.chromeText }
+
+    static let all: [LYNightshapeEffect] = [
+        .init(name: "EQUALIZER", detail: "5-BAND", category: "TONE", accent: .teal),
+        .init(name: "TAPE SATURATION", detail: "DRIVE · HEAD", category: "TONE", accent: .indigo),
+        .init(name: "FILTER", detail: "CUTOFF · RES", category: "TONE", accent: .teal),
+        .init(name: "STACK", detail: "AMP · CAB", category: "TONE", accent: .purple),
+        .init(name: "COMPRESSOR", detail: "PUNCH · GLUE", category: "DYNAMICS", accent: .indigo),
+        .init(name: "STRIKE", detail: "ATTACK · SUSTAIN", category: "DYNAMICS", accent: .indigo),
+        .init(name: "SIDECHAIN PUMP", detail: "DUCK CURVE", category: "DYNAMICS", accent: .indigo),
+        .init(name: "REVERB", detail: "ROOM · HALL · PLATE · SPRING", category: "SPACE", accent: .purple),
+        .init(name: "DELAY", detail: "TIME · FEEDBACK", category: "SPACE", accent: .teal),
+        .init(name: "SIGNAL BLOOM", detail: "STEP BLOOM", category: "SPACE", accent: .purple),
+        .init(name: "VOID GATE", detail: "GATED VERB", category: "SPACE", accent: .purple),
+        .init(name: "UNDERTOW", detail: "REVERSE SWELL", category: "SPACE", accent: .purple),
+        .init(name: "SPLIT FIELD", detail: "WIDTH · MONO", category: "SPACE", accent: .teal),
+        .init(name: "CHORUS", detail: "RATE · WIDTH", category: "MOTION", accent: .indigo),
+        .init(name: "FLANGER", detail: "SWEEP · FEEDBACK", category: "MOTION", accent: .indigo),
+        .init(name: "SONIC DECIMATOR", detail: "DESTROY · CRUSH", category: "DESTRUCTION", accent: .purple),
+        .init(name: "FRACTURE", detail: "GLITCH · STUTTER", category: "DESTRUCTION", accent: .purple),
+        .init(name: "DEADLOCK", detail: "CRUSH · CRUNCH", category: "DESTRUCTION", accent: .purple),
+        .init(name: "ANVIL", detail: "ROOT · RING", category: "DESTRUCTION", accent: .purple),
+        .init(name: "SHEAR", detail: "FOLD · SYMMETRY", category: "DESTRUCTION", accent: .purple),
+        .init(name: "ELASTIC LIMITER", detail: "FINAL LIMIT", category: "OUTPUT", accent: nil)
+    ]
+}
+
 private struct BrowserPanel: View {
     @Binding var selection: String
     @Binding var selectedItem: String
+    let projectAudio: [String]
+    let onEffect: (String) -> Void
+    let onSound: (String) -> Void
     let close: () -> Void
     @EnvironmentObject private var plugins: AudioUnitCatalog
     @State private var query = ""
+    /// The search field never takes focus by itself, so space stays play.
+    @FocusState private var searchFocused: Bool
 
-    private let groups = ["NIGHTSHAPE", "INSTRUMENTS", "EFFECTS", "PLUG-INS", "FILES"]
-    private let nightshape = [
-        "DRUM SYNTH", "SOUND ORACLE", "EQUALIZER", "COMPRESSOR", "TAPE SATURATION",
-        "SONIC DECIMATOR", "CHORUS", "PLATE REVERB", "SIGNAL BLOOM", "PUMP",
-        "VOID GATE", "FRACTURE", "FILTER", "DELAY", "DEADLOCK", "SHEAR",
-        "STACK", "SPLIT FIELD", "UNDERTOW", "ANVIL", "STRIKE", "FINALE"
-    ]
+    private let groups = ["NIGHTSHAPE", "AU INST", "AU FX", "PROJECT"]
+    private let categories = ["TONE", "DYNAMICS", "SPACE", "MOTION", "DESTRUCTION", "OUTPUT"]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -886,61 +1584,64 @@ private struct BrowserPanel: View {
                     .foregroundStyle(LYLLTHTheme.dim)
                 TextField("SEARCH", text: $query)
                     .textFieldStyle(.plain)
-                    .font(LYLLTHTheme.label(9))
-                    .foregroundStyle(LYLLTHTheme.secondary)
+                    .focused($searchFocused)
+                    .onAppear { DispatchQueue.main.async { searchFocused = false } }
+                    .onSubmit { searchFocused = false }
+                    .onExitCommand { searchFocused = false }
+                    .font(LYLLTHTheme.label(9.5, weight: .bold))
+                    .foregroundStyle(LYLLTHTheme.text)
             }
-            .padding(.horizontal, 10)
-            .frame(height: 32)
+            .padding(.horizontal, 12)
+            .frame(height: 34)
             .background(LYLLTHTheme.deck)
             .overlay(alignment: .bottom) { LYHairline() }
 
-            HStack(spacing: 2) {
+            HStack(spacing: 0) {
                 ForEach(groups, id: \.self) { group in
-                    Button(shortName(group)) { selection = group }
-                        .buttonStyle(.plain)
-                        .font(LYLLTHTheme.label(7, weight: .bold))
-                        .tracking(0.8)
-                        .foregroundStyle(selection == group ? LYLLTHTheme.text : LYLLTHTheme.dim)
-                        .frame(maxWidth: .infinity, minHeight: 31)
-                        .overlay(alignment: .bottom) {
-                            Rectangle()
-                                .fill(selection == group ? LYLLTHTheme.teal : .clear)
-                                .frame(height: 1)
-                        }
+                    let isOn = selection == group
+                    Button { selection = group } label: {
+                        Text(group)
+                            .font(LYLLTHTheme.label(7.5, weight: .bold))
+                            .tracking(0.9)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .foregroundStyle(isOn ? LYLLTHTheme.text : LYLLTHTheme.dim)
+                            .frame(maxWidth: .infinity, minHeight: 32)
+                            .lyRisingBloom(LYLLTHTheme.teal, isOn: isOn, strength: 0.6)
+                            .overlay(alignment: .bottom) {
+                                Rectangle().fill(isOn ? LYLLTHTheme.teal : .clear).frame(height: 2)
+                            }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 7)
+            .padding(.horizontal, 6)
             .background(LYLLTHTheme.panel)
+            .overlay(alignment: .bottom) { LYHairline() }
 
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(filteredItems, id: \.self) { item in
-                        BrowserRow(
-                            name: item,
-                            detail: detail(for: item),
-                            symbol: symbol(for: item),
-                            isSelected: selectedItem == item
-                        )
-                        .onTapGesture { selectedItem = item }
-                    }
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    content
                 }
-                .padding(.vertical, 5)
+                .padding(.bottom, 8)
             }
+            .lyScrollers()
 
             HStack(spacing: 8) {
                 LYLED(color: plugins.isScanning ? LYLLTHTheme.indigo : LYLLTHTheme.teal, size: 4)
                 (plugins.isScanning
-                    ? Text("SCANNING").font(LYLLTHTheme.label(7, weight: .bold))
+                    ? Text("SCANNING AUDIO UNITS").font(LYLLTHTheme.label(7.5, weight: .bold))
                     : mixedNumericLabel(
-                        "\(plugins.instruments.count + plugins.effects.count) COMPONENTS",
-                        labelFont: LYLLTHTheme.label(7, weight: .bold),
-                        numberFont: LYLLTHTheme.value(8)
+                        "\(plugins.instruments.count + plugins.effects.count) AUDIO UNITS",
+                        labelFont: LYLLTHTheme.label(7.5, weight: .bold),
+                        numberFont: LYLLTHTheme.value(8.5)
                     ))
-                    .tracking(1)
+                    .tracking(1.1)
                     .foregroundStyle(LYLLTHTheme.dim)
                 Spacer()
             }
-            .padding(.horizontal, 11)
+            .padding(.horizontal, 12)
             .frame(height: 28)
             .background(LYLLTHTheme.deck)
             .overlay(alignment: .top) { LYHairline() }
@@ -949,77 +1650,158 @@ private struct BrowserPanel: View {
         .overlay(alignment: .trailing) { Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1) }
     }
 
-    private var filteredItems: [String] {
-        let values = items(for: selection)
-        guard !query.isEmpty else { return values }
-        return values.filter { $0.localizedCaseInsensitiveContains(query) }
-    }
-
-    private func shortName(_ group: String) -> String {
-        switch group {
-        case "NIGHTSHAPE": return "NS"
-        case "INSTRUMENTS": return "INST"
-        case "PLUG-INS": return "PLUG"
-        default: return group.prefix(4).uppercased()
+    @ViewBuilder
+    private var content: some View {
+        switch selection {
+        case "NIGHTSHAPE":
+            section("SOUND")
+            ForEach(filter(["LYLLTH SYNTH", "DRUM SYNTH"]), id: \.self) { name in
+                row(name, detail: soundDetail(name), color: name == "LYLLTH SYNTH" ? LYLLTHTheme.indigo : LYLLTHTheme.teal, symbol: soundSymbol(name))
+                    .simultaneousGesture(TapGesture().onEnded { onSound(name) })
+                    .help(name == "LYLLTH SYNTH" ? "Open LYLLTH SYNTH on the selected synth track" : "Browse DrumKit drum sounds for the selected drum track")
+            }
+            ForEach(categories, id: \.self) { category in
+                let effects = LYNightshapeEffect.all.filter { $0.category == category && matches($0.name) }
+                if !effects.isEmpty {
+                    section(category)
+                    ForEach(effects, id: \.self) { effect in
+                        row(effect.name, detail: effect.detail, color: effect.color, symbol: nil)
+                            .simultaneousGesture(TapGesture().onEnded { onEffect(effect.name) })
+                            .help("Add to the selected channel and open it")
+                    }
+                }
+            }
+        case "AU INST":
+            pluginRows(plugins.instruments.map(\.name), empty: "NO AUDIO UNIT INSTRUMENTS FOUND")
+        case "AU FX":
+            pluginRows(plugins.effects.map(\.name), empty: "NO AUDIO UNIT EFFECTS FOUND")
+        default:
+            let files = filter(projectAudio.sorted())
+            if files.isEmpty {
+                emptyNote("NO AUDIO IN THIS PROJECT YET\nDRAG A FILE ONTO AN AUDIO TRACK")
+            } else {
+                section("AUDIO")
+                ForEach(files, id: \.self) { name in
+                    row(name.uppercased(), detail: nil, color: LYLLTHTheme.purple, symbol: "waveform")
+                }
+            }
         }
     }
 
-    private func items(for group: String) -> [String] {
-        switch group {
-        case "NIGHTSHAPE": return nightshape
-        case "INSTRUMENTS": return ["LYLLTH SYNTH", "DRUMKIT", "POLY SYNTH", "CHORD ENGINE"] + plugins.instruments.prefix(20).map(\.name)
-        case "EFFECTS": return plugins.effects.prefix(30).map(\.name)
-        case "PLUG-INS": return (plugins.instruments + plugins.effects).prefix(40).map(\.name)
-        default: return ["SONGS", "RECORDED AUDIO", "IMPORTED AUDIO", "PATCHES", "WAVETABLES"]
+    @ViewBuilder
+    private func pluginRows(_ names: [String], empty: String) -> some View {
+        let values = filter(names)
+        if values.isEmpty {
+            emptyNote(plugins.isScanning ? "SCANNING" : empty)
+        } else {
+            ForEach(values, id: \.self) { name in
+                row(name.uppercased(), detail: nil, color: LYLLTHTheme.indigo, symbol: "square.stack.3d.up")
+            }
         }
     }
 
-    private func detail(for item: String) -> String {
-        if nightshape.contains(item) || item == "LYLLTH SYNTH" || item == "DRUMKIT" { return "NIGHTSHAPE" }
-        if selection == "FILES" { return "LOCAL + ICLOUD" }
-        return selection == "INSTRUMENTS" ? "INSTRUMENT" : "AUDIO UNIT"
+    private func section(_ title: String) -> some View {
+        Text(title)
+            .font(LYLLTHTheme.label(7.5, weight: .bold))
+            .tracking(2)
+            .foregroundStyle(LYLLTHTheme.secondary)
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 6)
     }
 
-    private func symbol(for item: String) -> String {
-        if item.contains("SYNTH") || item == "DRUMKIT" { return "waveform.path" }
-        if selection == "FILES" { return "folder" }
-        if selection == "INSTRUMENTS" { return "pianokeys" }
-        return "slider.horizontal.3"
+    private func emptyNote(_ text: String) -> some View {
+        Text(text)
+            .font(LYLLTHTheme.label(8, weight: .bold))
+            .tracking(1.2)
+            .lineSpacing(5)
+            .foregroundStyle(LYLLTHTheme.dim)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 36)
+    }
+
+    private func row(_ name: String, detail: String?, color: Color, symbol: String?) -> some View {
+        BrowserRow(
+            name: name,
+            detail: detail,
+            color: color,
+            symbol: symbol,
+            isSelected: selectedItem == name
+        )
+        .onTapGesture { selectedItem = name }
+    }
+
+    private func matches(_ name: String) -> Bool {
+        query.isEmpty || name.localizedCaseInsensitiveContains(query)
+    }
+
+    private func filter(_ values: [String]) -> [String] {
+        values.filter(matches)
+    }
+
+    private func soundDetail(_ name: String) -> String {
+        switch name {
+        case "LYLLTH SYNTH": return "WAVETABLE SYNTH · OPEN"
+        case "DRUM SYNTH": return "\(LYDrumSounds.presets.count) DRUMKIT SOUNDS · OPEN"
+        case "SOUND ORACLE": return "DESCRIBE A SOUND"
+        default: return "KEY-AWARE CHORD LANES"
+        }
+    }
+
+    private func soundSymbol(_ name: String) -> String {
+        switch name {
+        case "LYLLTH SYNTH": return "pianokeys"
+        case "DRUM SYNTH": return "waveform.path"
+        case "SOUND ORACLE": return "wand.and.stars"
+        default: return "pianokeys"
+        }
     }
 }
 
 private struct BrowserRow: View {
     let name: String
-    let detail: String
-    let symbol: String
+    let detail: String?
+    let color: Color
+    let symbol: String?
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .light))
-                .foregroundStyle(isSelected ? LYLLTHTheme.teal : LYLLTHTheme.dim)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(LYLLTHTheme.label(10, weight: isSelected ? .bold : .medium))
-                    .foregroundStyle(isSelected ? LYLLTHTheme.text : LYLLTHTheme.secondary)
-                    .lineLimit(1)
-                Text(detail)
-                    .font(LYLLTHTheme.label(7))
-                    .tracking(0.8)
-                    .foregroundStyle(LYLLTHTheme.dim)
+        HStack(spacing: 11) {
+            ZStack {
+                Rectangle().stroke(color.opacity(isSelected ? 1 : 0.55), lineWidth: 1)
+                if let symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(color)
+                } else {
+                    Rectangle().fill(color).frame(width: 4, height: 4)
+                }
             }
-            Spacer()
-            Image(systemName: "plus")
-                .font(.system(size: 8, weight: .medium))
-                .foregroundStyle(isSelected ? LYLLTHTheme.metadata : LYLLTHTheme.off)
+            .frame(width: 20, height: 20)
+            .lyBloom(color, isOn: isSelected)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name)
+                    .font(LYLLTHTheme.label(10, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(LYLLTHTheme.text)
+                    .lineLimit(1)
+                if let detail {
+                    Text(detail)
+                        .font(LYLLTHTheme.label(7))
+                        .tracking(1)
+                        .foregroundStyle(LYLLTHTheme.dim)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 11)
-        .frame(height: 43)
-        .background(isSelected ? LYLLTHTheme.panelRaised : Color.clear)
+        .padding(.horizontal, 14)
+        .frame(height: detail == nil ? 34 : 42)
+        .background(isSelected ? color.opacity(LYLLTHTheme.controlFill) : Color.clear)
         .overlay(alignment: .leading) {
-            Rectangle().fill(isSelected ? LYLLTHTheme.teal : .clear).frame(width: 1)
+            Rectangle().fill(isSelected ? color : .clear).frame(width: 2)
         }
         .contentShape(Rectangle())
     }
@@ -1133,6 +1915,7 @@ private struct SequencerWorkspace: View {
                             alignment: .topLeading
                         )
                     }
+                    .lyScrollers()
                     .defaultScrollAnchor(.topLeading)
                     .background(LYDrumKitSequencerBackdrop())
                 }
@@ -1252,20 +2035,19 @@ private struct SequencerWorkspace: View {
 
     private func sequenceRow(trackIndex: Int, stepSide: CGFloat) -> some View {
         let track = session.tracks[trackIndex]
-        let accent = LYLLTHTheme.accent(track.accent)
+        let accent = LYLLTHTheme.trackAccent(position: musicalTrackIndices.firstIndex(of: trackIndex) ?? 0)
         let clipIndex = activeClipIndex(trackIndex: trackIndex)
         let steps = clipIndex.flatMap { session.tracks[trackIndex].clips[$0].steps } ?? []
         let locks = clipIndex.flatMap { session.tracks[trackIndex].clips[$0].stepParameters } ?? []
 
         return HStack(spacing: gridGap) {
             HStack(spacing: 10) {
-                ZStack {
-                    Circle().stroke(selectedTrackID == track.id ? accent : LYLLTHTheme.lineFocused, lineWidth: 1)
-                    Text("\((musicalTrackIndices.firstIndex(of: trackIndex) ?? 0) + 1)")
-                        .font(LYLLTHTheme.value(9))
-                        .foregroundStyle(selectedTrackID == track.id ? accent : LYLLTHTheme.metadata)
-                }
-                .frame(width: 25, height: 25)
+                Text(String(format: "%02d", (musicalTrackIndices.firstIndex(of: trackIndex) ?? 0) + 1))
+                    .font(LYLLTHTheme.value(10))
+                    .foregroundStyle(accent)
+                    .frame(width: 24, height: 24)
+                    .overlay(Rectangle().stroke(accent.opacity(selectedTrackID == track.id ? 1 : 0.6), lineWidth: 1))
+                    .lyBloom(accent, isOn: selectedTrackID == track.id)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.name)
@@ -1273,29 +2055,35 @@ private struct SequencerWorkspace: View {
                         .foregroundStyle(LYLLTHTheme.text)
                         .lineLimit(1)
                     Text(track.isChordTrack == true ? "CHORD TRACK" : track.kind.label)
-                        .font(LYLLTHTheme.label(7))
-                        .tracking(1)
-                        .foregroundStyle(accent)
+                        .font(LYLLTHTheme.label(7, weight: .bold))
+                        .tracking(1.3)
+                        .foregroundStyle(LYLLTHTheme.dim)
                 }
                 Spacer(minLength: 3)
-                TrackStateButton(
+                LYTrackToggle(
                     title: "M",
                     isOn: trackStateBinding(trackIndex: trackIndex, keyPath: \.isMuted),
                     tint: LYLLTHTheme.purple
                 )
-                TrackStateButton(
+                LYTrackToggle(
                     title: "S",
                     isOn: trackStateBinding(trackIndex: trackIndex, keyPath: \.isSolo),
                     tint: LYLLTHTheme.teal
+                )
+                LYTrackToggle(
+                    title: "R",
+                    isOn: trackStateBinding(trackIndex: trackIndex, keyPath: \.isArmed),
+                    tint: LYLLTHTheme.record
                 )
             }
             .padding(.horizontal, 10)
             .frame(width: trackWidth, height: stepSide)
             .background(LYDrumKitGlassSurface())
+            .lyRisingBloom(accent, isOn: selectedTrackID == track.id, strength: 0.8)
             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .strokeBorder(selectedTrackID == track.id ? accent : accent.opacity(0.72), lineWidth: sequencerBorderWidth)
+                    .strokeBorder(selectedTrackID == track.id ? accent : accent.opacity(0.55), lineWidth: sequencerBorderWidth)
             }
             .contentShape(Rectangle())
             .onTapGesture { selectedTrackID = track.id }
@@ -1835,1487 +2623,204 @@ private struct ArrangementSnapPanel: View {
     }
 }
 
-// MARK: - Arrangement
-
-private struct PlayheadHead: View {
-    let color: Color
-
-    var body: some View {
-        Canvas { context, size in
-            var path = Path()
-            path.move(to: .zero)
-            path.addLine(to: CGPoint(x: size.width, y: 0))
-            path.addLine(to: CGPoint(x: size.width / 2, y: size.height))
-            path.closeSubpath()
-            context.fill(path, with: .color(color))
-        }
-        .frame(width: 12, height: 10)
-    }
-}
-
-private struct ArrangementView: View {
-    @Binding var session: LYLLTHSession
-    @Binding var selectedTrackID: UUID?
-    let currentStep: Int
-    let isPlaying: Bool
-    let openSnapMenu: () -> Void
-    let requestAudioImport: (UUID?, Double) -> Void
-    let previewAudioEvent: (LYClip) -> Void
-
-    private let headerWidth: CGFloat = 190
-    private let beats = 64
-    @State private var selectedClipID: UUID?
-    @State private var pinchStartZoom: Double?
-    @State private var viewportSize: CGSize = .zero
-    @State private var editCursorBeat = 0.0
-    @State private var copiedAudioEvent: LYClip?
-    @State private var transportCycleStepOffset = 0
-    @State private var transportStepBeganAt = Date()
-
-    private var editor: LYArrangementEditorState {
-        var value = session.arrangementEditor ?? .default
-        value.normalize()
-        return value
-    }
-
-    private var beatWidth: CGFloat { CGFloat(editor.horizontalZoom) }
-    private var laneHeight: CGFloat { CGFloat(editor.verticalZoom) }
-
-    private var beatsPerBar: Double {
-        max(1, Double(session.numerator) * 4 / Double(max(session.denominator, 1)))
-    }
-
-    private var barCount: Int {
-        Int(ceil(Double(beats) / beatsPerBar))
-    }
-
-    private var transportStepCount: Int {
-        let patternIndex = max(0, session.activePatternIndex ?? 0)
-        let counts = session.tracks.compactMap { track -> Int? in
-            guard track.kind == .drumkit || track.kind == .instrument else { return nil }
-            let sequenced = track.clips.filter { $0.kind == .pattern || $0.kind == .midi }
-            guard !sequenced.isEmpty else { return nil }
-            return sequenced[min(patternIndex, sequenced.count - 1)].steps?.count
-        }
-        return min(max(counts.max() ?? 16, 1), 64)
-    }
-
-    private var transportStepDuration: TimeInterval {
-        let pulsesPerBar = session.numerator == 6 && session.denominator == 8
-            ? 2.0
-            : Double(max(session.numerator, 1))
-        let subdivisionsPerBar = session.numerator == 6 && session.denominator == 8
-            ? 12.0
-            : Double(max(session.numerator, 1) * 4)
-        return (60 / max(session.bpm, 1)) * pulsesPerBar / subdivisionsPerBar
-    }
-
-    private var arrangementPlayheads: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .topLeading) {
-                Rectangle()
-                    .fill(LYLLTHTheme.indigo.opacity(0.82))
-                    .frame(width: 1, height: geometry.size.height)
-                    .offset(x: headerWidth + CGFloat(editCursorBeat) * beatWidth)
-
-                Rectangle()
-                    .fill(LYLLTHTheme.indigo)
-                    .frame(width: 7, height: 7)
-                    .offset(x: headerWidth + CGFloat(editCursorBeat) * beatWidth - 3)
-
-                if isPlaying {
-                    TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
-                        let elapsed = max(0, timeline.date.timeIntervalSince(transportStepBeganAt))
-                        let fraction = min(elapsed / max(transportStepDuration, 0.001), 0.999)
-                        let absoluteStep = Double(transportCycleStepOffset + currentStep) + fraction
-                        let beat = wrappedTransportBeat(for: absoluteStep)
-                        let x = headerWidth + CGFloat(beat) * beatWidth
-
-                        ZStack(alignment: .topLeading) {
-                            Rectangle()
-                                .fill(LYLLTHTheme.teal)
-                                .frame(width: 2, height: geometry.size.height)
-                                .shadow(color: LYLLTHTheme.teal.opacity(0.25), radius: 2)
-                                .offset(x: x - 1)
-
-                            PlayheadHead(color: LYLLTHTheme.teal)
-                                .offset(x: x - 6, y: 1)
-                        }
-                    }
-                }
-            }
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    private func wrappedTransportBeat(for absoluteStep: Double) -> Double {
-        let absoluteBeat = absoluteStep * 0.25
-        if let loop = session.loopRange, loop.lengthBeats > 0 {
-            let relativeBeat = absoluteBeat - loop.startBeat
-            let wrapped = relativeBeat.truncatingRemainder(dividingBy: loop.lengthBeats)
-            return loop.startBeat + (wrapped >= 0 ? wrapped : wrapped + loop.lengthBeats)
-        }
-        let wrapped = absoluteBeat.truncatingRemainder(dividingBy: Double(beats))
-        return wrapped >= 0 ? wrapped : wrapped + Double(beats)
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("ARRANGEMENT")
-                        .font(LYLLTHTheme.label(11, weight: .bold))
-                        .tracking(1.8)
-                        .foregroundStyle(LYLLTHTheme.secondary)
-                    mixedNumericLabel(
-                        "16 BARS  ·  LOOP 01–04",
-                        labelFont: LYLLTHTheme.label(8),
-                        numberFont: LYLLTHTheme.value(8)
-                    )
-                        .tracking(1.1)
-                        .foregroundStyle(LYLLTHTheme.dim)
-                }
-                Spacer()
-                if selectedTrackKind == .audio {
-                    Button("IMPORT AUDIO") {
-                        requestAudioImport(selectedTrackID, editCursorBeat)
-                    }
-                    .buttonStyle(LYChromeButtonStyle(active: true, tint: LYLLTHTheme.purple, compact: true))
-                    .help("Copy an audio file into this LYLLTH project at the edit cursor")
-                }
-                snapMenu
-                autoZoomButton("H FIT", isOn: editor.autoHorizontalZoom) {
-                    updateEditor { $0.autoHorizontalZoom.toggle() }
-                    applyAutoZoom()
-                }
-                autoZoomButton("V FIT", isOn: editor.autoVerticalZoom) {
-                    updateEditor { $0.autoVerticalZoom.toggle() }
-                    applyAutoZoom()
-                }
-                ArrangementZoomControl(
-                    axis: "H",
-                    value: editorBinding(\.horizontalZoom),
-                    range: 10...140
-                )
-                ArrangementZoomControl(
-                    axis: "V",
-                    value: editorBinding(\.verticalZoom),
-                    range: 38...144
-                )
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 48)
-            .background(LYLLTHTheme.panel)
-            .overlay(alignment: .bottom) { LYHairline() }
-
-            audioEditStrip
-
-            GeometryReader { viewport in
-                ScrollView([.horizontal, .vertical]) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ruler
-                        ForEach($session.tracks) { $track in
-                            trackLane(track: $track)
-                        }
-                        automationLane
-                        addTrackLane
-                    }
-                    .frame(
-                        minWidth: max(headerWidth + CGFloat(beats) * beatWidth, viewport.size.width),
-                        minHeight: viewport.size.height,
-                        alignment: .topLeading
-                    )
-                    .overlay(alignment: .topLeading) {
-                        arrangementPlayheads
-                    }
-                }
-                .defaultScrollAnchor(.topLeading)
-                .background(LYLLTHTheme.background)
-                .simultaneousGesture(zoomGesture)
-                .onAppear {
-                    viewportSize = viewport.size
-                    applyAutoZoom()
-                }
-                .onChange(of: viewport.size) { _, size in
-                    viewportSize = size
-                    applyAutoZoom()
-                }
-            }
-        }
-        .background {
-            LYArrangementKeyMonitor(action: handleArrangementKey)
-        }
-        .onChange(of: currentStep) { oldStep, newStep in
-            guard isPlaying else { return }
-            if newStep < oldStep {
-                transportCycleStepOffset += transportStepCount
-            }
-            transportStepBeganAt = Date()
-        }
-        .onChange(of: isPlaying) { _, playing in
-            if playing {
-                transportCycleStepOffset = 0
-                transportStepBeganAt = Date()
-            }
-        }
-    }
-
-    private var selectedAudioLocation: (track: Int, clip: Int)? {
-        guard let selectedClipID else { return nil }
-        for trackIndex in session.tracks.indices {
-            if let clipIndex = session.tracks[trackIndex].clips.firstIndex(where: {
-                $0.id == selectedClipID && $0.kind == .audio
-            }) {
-                return (trackIndex, clipIndex)
-            }
-        }
-        return nil
-    }
-
-    private var selectedTrackKind: LYTrackKind? {
-        guard let selectedTrackID else { return nil }
-        return session.tracks.first(where: { $0.id == selectedTrackID })?.kind
-    }
-
-    private var selectedAudioClip: LYClip? {
-        guard let location = selectedAudioLocation else { return nil }
-        return session.tracks[location.track].clips[location.clip]
-    }
-
-    @ViewBuilder
-    private var audioEditStrip: some View {
-        if selectedAudioLocation != nil {
-            audioEventInspector
-        } else {
-            VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Rectangle().fill(LYLLTHTheme.purple).frame(width: 15, height: 1)
-                    Text("AUDIO EDIT")
-                        .font(LYLLTHTheme.label(8, weight: .bold))
-                        .tracking(1.1)
-                        .foregroundStyle(LYLLTHTheme.secondary)
-                    Text("SELECT AN AUDIO EVENT, THEN CLICK IT TO PLACE THE EDIT CURSOR")
-                        .font(LYLLTHTheme.label(7))
-                        .tracking(0.65)
-                        .foregroundStyle(LYLLTHTheme.dim)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-                .frame(height: 27)
-
-                audioActionRow(selectionEnabled: false)
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 58)
-            .background(LYLLTHTheme.deck)
-            .overlay(alignment: .bottom) { LYHairline() }
-        }
-    }
-
-    private var audioEventInspector: some View {
-        let clip = selectedAudioClip
-        return VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Rectangle().fill(LYLLTHTheme.purple).frame(width: 15, height: 1)
-                Text("AUDIO EVENT")
-                    .font(LYLLTHTheme.label(8, weight: .bold))
-                    .tracking(1.1)
-                    .foregroundStyle(LYLLTHTheme.secondary)
-                Text(clip?.name ?? "")
-                    .font(LYLLTHTheme.label(8))
-                    .foregroundStyle(LYLLTHTheme.dim)
-                    .lineLimit(1)
-
-                Spacer(minLength: 8)
-
-                eventReadout("CURSOR", String(format: "%.3f", editCursorBeat))
-                eventReadout("GAIN", gainText(clip?.eventGainDB ?? 0))
-                eventReadout("PITCH", pitchText(clip?.pitchSemitones ?? 0))
-                eventReadout("STRETCH", (clip?.stretchMode.rawValue ?? "off").uppercased())
-            }
-            .frame(height: 27)
-
-            audioActionRow(selectionEnabled: true)
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 58)
-        .background(LYLLTHTheme.deck)
-        .overlay(alignment: .bottom) { LYHairline() }
-    }
-
-    private func audioActionRow(selectionEnabled: Bool) -> some View {
-        HStack(spacing: 6) {
-            Text(selectionEnabled ? "EDIT SELECTED EVENT" : "SELECT AN EVENT TO ENABLE EDITING")
-                .font(LYLLTHTheme.label(7, weight: .bold))
-                .tracking(0.8)
-                .foregroundStyle(selectionEnabled ? LYLLTHTheme.metadata : LYLLTHTheme.dim)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            eventActionButton("PREVIEW", help: "Render and audition this event with its gain, pitch, and stretch", enabled: selectionEnabled) {
-                if let clip = selectedAudioClip { previewAudioEvent(clip) }
-            }
-            eventActionButton("SPLIT  S", help: "Split the selected event at the purple edit cursor", enabled: selectionEnabled && canSplitSelectedAudioEvent, action: splitSelectedAudioEvent)
-            eventActionButton("CUT  ⌘X", help: "Cut event", enabled: selectionEnabled, action: cutSelectedAudioEvent)
-            eventActionButton("COPY  ⌘C", help: "Copy event", enabled: selectionEnabled, action: copySelectedAudioEvent)
-            eventActionButton("PASTE  ⌘V", help: "Paste at the edit cursor", enabled: copiedAudioEvent != nil && (selectionEnabled || selectedTrackKind == .audio), action: pasteAudioEvent)
-            eventActionButton("DUPLICATE  ⌘D", help: "Duplicate directly after the event", enabled: selectionEnabled, action: duplicateSelectedAudioEvent)
-            eventActionButton("DELETE", help: "Remove the selected event", enabled: selectionEnabled, action: deleteSelectedAudioEvent)
-            eventActionButton("−", help: "Pitch down one semitone (-)", enabled: selectionEnabled) { transposeSelectedAudioEvent(by: -1) }
-            eventActionButton("+", help: "Pitch up one semitone (=)", enabled: selectionEnabled) { transposeSelectedAudioEvent(by: 1) }
-        }
-        .frame(height: 30)
-    }
-
-    private func eventReadout(_ label: String, _ value: String) -> some View {
-        HStack(spacing: 4) {
-            Text(label)
-                .font(LYLLTHTheme.label(7, weight: .bold))
-                .tracking(0.7)
-                .foregroundStyle(LYLLTHTheme.dim)
-            Text(value)
-                .font(LYLLTHTheme.value(8))
-                .foregroundStyle(LYLLTHTheme.metadata)
-        }
-        .padding(.horizontal, 6)
-        .frame(height: 22)
-        .overlay { Rectangle().stroke(LYLLTHTheme.line, lineWidth: 1) }
-    }
-
-    private func eventActionButton(
-        _ title: String,
-        help: String,
-        enabled: Bool = true,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(title, action: action)
-            .buttonStyle(LYChromeButtonStyle(compact: true))
-            .disabled(!enabled)
-            .opacity(enabled ? 1 : 0.38)
-            .help(help)
-    }
-
-    private var canSplitSelectedAudioEvent: Bool {
-        guard let clip = selectedAudioClip else { return false }
-        let inset = max(0.001, 6 / Double(max(beatWidth, 1)))
-        return editCursorBeat > clip.startBeat + inset
-            && editCursorBeat < clip.startBeat + clip.lengthBeats - inset
-    }
-
-    private func handleArrangementKey(_ event: NSEvent) -> Bool {
-        guard selectedAudioLocation != nil else { return false }
-        if event.window?.firstResponder is NSTextView || event.window?.firstResponder is NSTextField {
-            return false
-        }
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-
-        if flags.contains(.command) {
-            switch key {
-            case "c": copySelectedAudioEvent(); return true
-            case "x": cutSelectedAudioEvent(); return true
-            case "v": pasteAudioEvent(); return true
-            case "d": duplicateSelectedAudioEvent(); return true
-            default: break
-            }
-        }
-
-        if key == "\u{7F}" || key == "\u{8}" {
-            deleteSelectedAudioEvent()
-            return true
-        }
-        if key == "s", flags.isDisjoint(with: [.command, .option, .control]) {
-            splitSelectedAudioEvent()
-            return true
-        }
-        if key == "=" || key == "+" {
-            transposeSelectedAudioEvent(by: pitchIncrement(for: flags))
-            return true
-        }
-        if key == "-" || key == "_" {
-            transposeSelectedAudioEvent(by: -pitchIncrement(for: flags))
-            return true
-        }
-        if key == "/" {
-            adjustSelectedAudioGain(increase: false, flags: flags)
-            return true
-        }
-        if key == "*" {
-            adjustSelectedAudioGain(increase: true, flags: flags)
-            return true
-        }
-        return false
-    }
-
-    private func pitchIncrement(for flags: NSEvent.ModifierFlags) -> Double {
-        if flags.contains(.command) && flags.contains(.shift) { return 0 }
-        if flags.contains(.command) { return 12 }
-        if flags.contains(.shift) { return 4 }
-        return 1
-    }
-
-    private func updateSelectedAudioEvent(_ update: (inout LYClip) -> Void) {
-        guard let location = selectedAudioLocation else { return }
-        update(&session.tracks[location.track].clips[location.clip])
-        session.tracks[location.track].clips[location.clip].normalizeAudioEvent()
-    }
-
-    private func transposeSelectedAudioEvent(by semitones: Double) {
-        let flags = NSEvent.modifierFlags
-        if flags.contains(.command) && flags.contains(.shift) {
-            updateSelectedAudioEvent { $0.pitchSemitones = 0 }
-        } else {
-            updateSelectedAudioEvent { $0.pitchSemitones += semitones }
-        }
-    }
-
-    private func adjustSelectedAudioGain(increase: Bool, flags: NSEvent.ModifierFlags) {
-        if flags.contains(.command) && flags.contains(.shift) {
-            updateSelectedAudioEvent { $0.eventGainDB = increase ? 0 : -60 }
-            return
-        }
-        let increment: Double
-        if flags.contains(.command) {
-            increment = 0.25
-        } else if flags.contains(.shift) {
-            increment = 0.10
-        } else {
-            increment = 0.01
-        }
-        updateSelectedAudioEvent { clip in
-            let amplitude = clip.eventGainDB <= -59.95 ? 0 : pow(10, clip.eventGainDB / 20)
-            let adjusted = min(max(amplitude + (increase ? increment : -increment), 0), 3.981_071_706)
-            clip.eventGainDB = adjusted <= 0 ? -60 : 20 * log10(adjusted)
-        }
-    }
-
-    private func copySelectedAudioEvent() {
-        copiedAudioEvent = selectedAudioClip
-    }
-
-    private func cutSelectedAudioEvent() {
-        copySelectedAudioEvent()
-        deleteSelectedAudioEvent()
-    }
-
-    private func pasteAudioEvent() {
-        guard let source = copiedAudioEvent else { return }
-        let trackIndex = selectedAudioLocation?.track
-            ?? session.tracks.firstIndex(where: { $0.id == selectedTrackID && $0.kind == .audio })
-            ?? session.tracks.firstIndex(where: { $0.kind == .audio })
-        guard let trackIndex else { return }
-        let copy = LYAudioEventEditor.duplicate(source, atBeat: snapBeat(editCursorBeat, editCursorBeat))
-        session.tracks[trackIndex].clips.append(copy)
-        selectedTrackID = session.tracks[trackIndex].id
-        selectedClipID = copy.id
-    }
-
-    private func duplicateSelectedAudioEvent() {
-        guard let location = selectedAudioLocation else { return }
-        let original = session.tracks[location.track].clips[location.clip]
-        let copy = LYAudioEventEditor.duplicate(original)
-        session.tracks[location.track].clips.insert(copy, at: location.clip + 1)
-        selectedClipID = copy.id
-        editCursorBeat = copy.startBeat
-    }
-
-    private func splitSelectedAudioEvent() {
-        guard let location = selectedAudioLocation else { return }
-        let original = session.tracks[location.track].clips[location.clip]
-        let beat = snapBeat(editCursorBeat, editCursorBeat)
-        guard let split = LYAudioEventEditor.split(original, atBeat: beat) else { return }
-        session.tracks[location.track].clips.replaceSubrange(
-            location.clip...location.clip,
-            with: [split.left, split.right]
-        )
-        selectedClipID = split.right.id
-    }
-
-    private func deleteSelectedAudioEvent() {
-        guard let location = selectedAudioLocation else { return }
-        session.tracks[location.track].clips.remove(at: location.clip)
-        selectedClipID = nil
-    }
-
-    private func gainText(_ value: Double) -> String {
-        value <= -59.95 ? "−∞ dB" : String(format: "%+.1f dB", value)
-    }
-
-    private func pitchText(_ value: Double) -> String {
-        abs(value) < 0.001 ? "0 st" : String(format: "%+.0f st", value)
-    }
-
-    private var snapMenu: some View {
-        Button(action: openSnapMenu) {
-            HStack(spacing: 5) {
-                Text(editor.snapMode.label)
-                    .font(LYLLTHTheme.label(8, weight: .bold))
-                    .tracking(0.8)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 7, weight: .bold))
-            }
-            .foregroundStyle(editor.snapMode == .off ? LYLLTHTheme.dim : LYLLTHTheme.teal)
-            .padding(.horizontal, 8)
-            .frame(height: 25)
-            .overlay { Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1) }
-        }
-        .buttonStyle(.plain)
-        .fixedSize()
-        .help("Arrangement snap mode and absolute/relative behavior")
-    }
-
-    private func autoZoomButton(_ title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .buttonStyle(LYChromeButtonStyle(active: isOn, compact: true))
-    }
-
-    private func editorBinding(_ keyPath: WritableKeyPath<LYArrangementEditorState, Double>) -> Binding<Double> {
-        Binding(
-            get: { editor[keyPath: keyPath] },
-            set: { value in
-                updateEditor {
-                    $0[keyPath: keyPath] = value
-                    if keyPath == \.horizontalZoom { $0.autoHorizontalZoom = false }
-                    if keyPath == \.verticalZoom { $0.autoVerticalZoom = false }
-                }
-            }
-        )
-    }
-
-    private func updateEditor(_ update: (inout LYArrangementEditorState) -> Void) {
-        var value = session.arrangementEditor ?? .default
-        update(&value)
-        value.normalize()
-        session.arrangementEditor = value
-    }
-
-    private func applyAutoZoom() {
-        guard viewportSize.width > 0, viewportSize.height > 0 else { return }
-        updateEditor { value in
-            if value.autoHorizontalZoom {
-                value.horizontalZoom = Double(max(10, (viewportSize.width - headerWidth) / CGFloat(beats)))
-            }
-            if value.autoVerticalZoom {
-                let usable = max(38, viewportSize.height - 30 - 36 - 44)
-                value.verticalZoom = Double(max(38, usable / CGFloat(max(session.tracks.count, 1))))
-            }
-        }
-    }
-
-    private var zoomGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { scale in
-                let vertical = NSEvent.modifierFlags.contains(.option)
-                let baseline = pinchStartZoom ?? (vertical ? editor.verticalZoom : editor.horizontalZoom)
-                if pinchStartZoom == nil { pinchStartZoom = baseline }
-                updateEditor { value in
-                    if vertical {
-                        value.autoVerticalZoom = false
-                        value.verticalZoom = baseline * Double(scale)
-                    } else {
-                        value.autoHorizontalZoom = false
-                        value.horizontalZoom = baseline * Double(scale)
-                    }
-                }
-            }
-            .onEnded { _ in pinchStartZoom = nil }
-    }
-
-    private var ruler: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 7) {
-                Text("TRACKS")
-                    .font(LYLLTHTheme.label(8, weight: .bold))
-                    .tracking(1.4)
-                Spacer()
-                Text("M")
-                Text("S")
-            }
-            .font(LYLLTHTheme.label(7, weight: .bold))
-            .foregroundStyle(LYLLTHTheme.dim)
-            .padding(.horizontal, 12)
-            .frame(width: headerWidth, height: 30)
-            .background(LYLLTHTheme.deck)
-
-            HStack(spacing: 0) {
-                ForEach(0..<barCount, id: \.self) { bar in
-                    Text("\(bar + 1)")
-                        .font(LYLLTHTheme.value(8))
-                        .foregroundStyle(bar < 4 ? LYLLTHTheme.secondary : LYLLTHTheme.dim)
-                        .padding(.top, 8)
-                        .padding(.leading, 5)
-                        .frame(width: beatWidth * beatsPerBar, height: 30, alignment: .topLeading)
-                        .overlay(alignment: .leading) {
-                            Rectangle().fill(bar % 4 == 0 ? LYLLTHTheme.lineStrong : LYLLTHTheme.line).frame(width: 1)
-                        }
-                }
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        let raw = Double(value.location.x / max(beatWidth, 1))
-                        editCursorBeat = min(max(0, snapBeat(raw, raw)), Double(beats))
-                    }
-            )
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(LYLLTHTheme.teal.opacity(0.5))
-                    .frame(width: beatWidth * CGFloat(session.loopRange?.lengthBeats ?? 16), height: 1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .overlay(alignment: .bottom) { LYHairline() }
-    }
-
-    private func trackLane(track: Binding<LYTrack>) -> some View {
-        let selected = selectedTrackID == track.wrappedValue.id
-        let accent = LYLLTHTheme.accent(track.wrappedValue.accent)
-
-        return HStack(spacing: 0) {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle().stroke(selected ? accent : LYLLTHTheme.lineFocused, lineWidth: 1)
-                    Text(String(trackNumber(track.wrappedValue.id)))
-                        .font(LYLLTHTheme.value(9))
-                        .foregroundStyle(selected ? accent : LYLLTHTheme.metadata)
-                }
-                .frame(width: 22, height: 22)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(track.wrappedValue.name)
-                        .font(LYLLTHTheme.label(11, weight: .bold))
-                        .foregroundStyle(LYLLTHTheme.text)
-                        .lineLimit(1)
-                    Text(track.wrappedValue.kind.label)
-                        .font(LYLLTHTheme.label(7))
-                        .tracking(1.1)
-                        .foregroundStyle(selected ? accent : LYLLTHTheme.dim)
-                }
-                Spacer(minLength: 4)
-                TrackStateButton(title: "M", isOn: track.isMuted, tint: LYLLTHTheme.purple)
-                TrackStateButton(title: "S", isOn: track.isSolo, tint: LYLLTHTheme.teal)
-            }
-            .padding(.horizontal, 10)
-            .frame(width: headerWidth, height: laneHeight)
-            .background(selected ? LYLLTHTheme.panelRaised : LYLLTHTheme.panel)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(selected ? accent.opacity(0.72) : .clear).frame(height: 1)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture { selectedTrackID = track.wrappedValue.id }
-
-            ZStack(alignment: .leading) {
-                BeatGrid(
-                    beats: beats,
-                    beatWidth: beatWidth,
-                    height: laneHeight,
-                    beatsPerBar: beatsPerBar,
-                    subdivisionBeats: displayGridBeats,
-                    showsGrid: editor.showsGrid
-                )
-
-                ForEach(track.clips) { $clip in
-                    ArrangementClip(
-                        clip: $clip,
-                        accent: accent,
-                        isFocused: selectedClipID == clip.id || selected,
-                        beatWidth: beatWidth,
-                        laneHeight: laneHeight,
-                        projectBPM: session.bpm,
-                        maximumBeat: Double(beats),
-                        snap: snapBeat
-                    )
-                    .frame(
-                        width: max(beatWidth * clip.lengthBeats - 4, 28),
-                        height: max(30, laneHeight - 18)
-                    )
-                    .offset(x: beatWidth * clip.startBeat + 2)
-                    .simultaneousGesture(
-                        SpatialTapGesture()
-                            .onEnded { value in
-                                selectedTrackID = track.wrappedValue.id
-                                selectedClipID = clip.id
-                                let localBeat = Double(value.location.x / max(beatWidth, 1))
-                                let rawBeat = clip.startBeat + localBeat
-                                editCursorBeat = min(
-                                    max(0, snapBeat(rawBeat, clip.startBeat)),
-                                    Double(beats)
-                                )
-                            }
-                    )
-                }
-
-            }
-            .frame(width: CGFloat(beats) * beatWidth, height: laneHeight)
-        }
-        .overlay(alignment: .bottom) { LYHairline() }
-    }
-
-    private var automationLane: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
-                    .font(.system(size: 11, weight: .light))
-                    .foregroundStyle(LYLLTHTheme.purple)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("AUTOMATION")
-                        .font(LYLLTHTheme.label(9, weight: .bold))
-                        .foregroundStyle(LYLLTHTheme.secondary)
-                    Text("DARK POLY · CUTOFF")
-                        .font(LYLLTHTheme.label(7))
-                        .foregroundStyle(LYLLTHTheme.dim)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .frame(width: headerWidth, height: 44)
-            .background(LYLLTHTheme.panel)
-
-            BeatGrid(
-                beats: beats,
-                beatWidth: beatWidth,
-                height: 44,
-                beatsPerBar: beatsPerBar,
-                subdivisionBeats: displayGridBeats,
-                showsGrid: editor.showsGrid
-            )
-                .overlay(alignment: .leading) {
-                    Path { path in
-                        path.move(to: CGPoint(x: 0, y: 34))
-                        path.addCurve(
-                            to: CGPoint(x: beatWidth * 24, y: 9),
-                            control1: CGPoint(x: beatWidth * 7, y: 34),
-                            control2: CGPoint(x: beatWidth * 15, y: 7)
-                        )
-                    }
-                    .stroke(LYLLTHTheme.purple.opacity(0.82), lineWidth: 1.2)
-                }
-                .frame(width: CGFloat(beats) * beatWidth, height: 44)
-        }
-        .overlay(alignment: .bottom) { LYHairline() }
-    }
-
-    private var addTrackLane: some View {
-        HStack(spacing: 9) {
-            Image(systemName: "plus")
-                .font(.system(size: 9, weight: .medium))
-            Text("ADD TRACK")
-                .font(LYLLTHTheme.label(8, weight: .bold))
-                .tracking(1.2)
-        }
-        .foregroundStyle(LYLLTHTheme.dim)
-        .padding(.leading, 14)
-        .frame(width: headerWidth, height: 36, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LYLLTHTheme.deck)
-    }
-
-    private func trackNumber(_ id: UUID) -> Int {
-        (session.tracks.firstIndex(where: { $0.id == id }) ?? 0) + 1
-    }
-
-    private var displayGridBeats: Double? {
-        let grid = editor.gridBeats(
-            bpm: session.bpm,
-            numerator: session.numerator,
-            denominator: session.denominator,
-            sampleRate: session.sampleRate,
-            beatWidth: Double(beatWidth)
-        )
-        guard let grid, grid * Double(beatWidth) >= 6 else { return nil }
-        return grid
-    }
-
-    private func snapBeat(_ rawBeat: Double, _ originalBeat: Double) -> Double {
-        let flags = NSEvent.modifierFlags
-        if flags.contains(.shift) { return max(0, rawBeat) }
-        let override: LYArrangementSnapMode?
-        if flags.contains(.control) {
-            override = .division
-        } else {
-            override = nil
-        }
-        return editor.snap(
-            rawBeat: rawBeat,
-            originalBeat: originalBeat,
-            bpm: session.bpm,
-            numerator: session.numerator,
-            denominator: session.denominator,
-            sampleRate: session.sampleRate,
-            beatWidth: Double(beatWidth),
-            overrideMode: override
-        )
-    }
-}
-
-private struct ArrangementZoomControl: View {
-    let axis: String
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Text(axis)
-                .font(LYLLTHTheme.value(8))
-                .foregroundStyle(LYLLTHTheme.dim)
-            Slider(value: $value, in: range)
-                .controlSize(.mini)
-                .frame(width: 58)
-                .tint(LYLLTHTheme.indigo)
-        }
-        .help(axis == "H" ? "Horizontal zoom" : "Vertical track zoom; Option-pinch also adjusts this")
-    }
-}
-
-private struct TrackStateButton: View {
-    let title: String
-    @Binding var isOn: Bool
-    let tint: Color
-
-    var body: some View {
-        Button(title) { isOn.toggle() }
-            .buttonStyle(.plain)
-            .font(LYLLTHTheme.label(7, weight: .bold))
-            .foregroundStyle(isOn ? tint : LYLLTHTheme.dim)
-            .frame(width: 17, height: 20)
-    }
-}
-
-private struct BeatGrid: View {
-    let beats: Int
-    let beatWidth: CGFloat
-    let height: CGFloat
-    let beatsPerBar: Double
-    let subdivisionBeats: Double?
-    let showsGrid: Bool
-
-    var body: some View {
-        Canvas { context, size in
-            let totalWidth = CGFloat(beats) * beatWidth
-            let barWidth = CGFloat(beatsPerBar) * beatWidth
-            let bars = max(1, Int(ceil(Double(beats) / beatsPerBar)))
-
-            context.fill(Path(CGRect(x: 0, y: 0, width: totalWidth, height: height)), with: .color(LYLLTHTheme.background))
-            for bar in 0..<bars where bar.isMultiple(of: 2) == false {
-                let x = CGFloat(bar) * barWidth
-                context.fill(
-                    Path(CGRect(x: x, y: 0, width: min(barWidth, totalWidth - x), height: height)),
-                    with: .color(LYLLTHTheme.deck.opacity(0.72))
-                )
-            }
-
-            guard showsGrid else { return }
-            for beat in 0...beats {
-                let x = CGFloat(beat) * beatWidth
-                let isBar = abs(Double(beat).truncatingRemainder(dividingBy: beatsPerBar)) < 0.0001
-                context.fill(
-                    Path(CGRect(x: floor(x), y: 0, width: 1, height: height)),
-                    with: .color(isBar ? LYLLTHTheme.lineStrong : LYLLTHTheme.line)
-                )
-            }
-
-            if let subdivisionBeats, subdivisionBeats < 1 {
-                let divisionWidth = CGFloat(subdivisionBeats) * beatWidth
-                guard divisionWidth >= 6 else { return }
-                let count = Int(ceil(Double(beats) / subdivisionBeats))
-                for division in 0...count {
-                    let beat = Double(division) * subdivisionBeats
-                    if abs(beat.rounded() - beat) < 0.0001 { continue }
-                    let x = CGFloat(beat) * beatWidth
-                    context.fill(
-                        Path(CGRect(x: floor(x), y: 0, width: 0.5, height: height)),
-                        with: .color(LYLLTHTheme.line.opacity(0.58))
-                    )
-                }
-            }
-        }
-        .frame(width: CGFloat(beats) * beatWidth, height: height)
-    }
-}
-
-private struct ArrangementClip: View {
-    @Binding var clip: LYClip
-    let accent: Color
-    let isFocused: Bool
-    let beatWidth: CGFloat
-    let laneHeight: CGFloat
-    let projectBPM: Double
-    let maximumBeat: Double
-    let snap: (Double, Double) -> Double
-
-    @State private var moveOrigin: Double?
-    @State private var movePreviewBeat: Double?
-    @State private var leftTrimOrigin: (start: Double, length: Double, sourceStart: Double, sourceDuration: Double?)?
-    @State private var rightTrimOrigin: (length: Double, sourceDuration: Double?)?
-    @State private var slipOriginSeconds: Double?
-    @State private var slipPreviewSeconds: Double?
-    @State private var gainOriginDB: Double?
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            Rectangle().fill(LYLLTHTheme.panelRaised.opacity(0.94))
-            Rectangle().fill(accent.opacity(isFocused ? 0.105 : 0.065))
-            Rectangle().stroke(accent.opacity(isFocused ? 0.9 : 0.52), lineWidth: 1)
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    LYLED(color: accent, size: 4)
-                    Text(clip.name)
-                        .font(LYLLTHTheme.label(9, weight: .bold))
-                        .tracking(0.6)
-                        .foregroundStyle(LYLLTHTheme.text)
-                        .lineLimit(1)
-                }
-
-                if clip.kind == .audio {
-                    MiniWaveform(values: clip.waveformPeaks ?? [], color: accent)
-                        .opacity(max(0.15, min(1, pow(10, clip.eventGainDB / 20))))
-                        .frame(height: 13)
-                } else {
-                    HStack(alignment: .bottom, spacing: 3) {
-                        ForEach(0..<previewCount, id: \.self) { index in
-                            Rectangle()
-                                .fill(isActive(index) ? accent : LYLLTHTheme.lineStrong)
-                                .frame(width: 3, height: CGFloat(4 + (index % 4) * 2))
-                        }
-                    }
-                    .frame(height: 12, alignment: .bottom)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .allowsHitTesting(false)
-
-            HStack(spacing: 0) {
-                trimHandle(edge: .leading)
-                Rectangle()
-                    .fill(Color.clear)
-                    .contentShape(Rectangle())
-                    .gesture(moveGesture)
-                trimHandle(edge: .trailing)
-            }
-
-            if clip.kind == .audio {
-                audioEventOverlay
-            }
-        }
-        .contentShape(Rectangle())
-        .offset(x: moveVisualOffset)
-        .shadow(
-            color: movePreviewBeat == nil ? .clear : accent.opacity(0.18),
-            radius: movePreviewBeat == nil ? 0 : 4
-        )
-        .overlay(alignment: .topTrailing) {
-            if let movePreviewBeat {
-                Text(String(format: "BEAT %.2f", movePreviewBeat + 1))
-                    .font(LYLLTHTheme.value(7))
-                    .foregroundStyle(accent)
-                    .padding(.horizontal, 5)
-                    .frame(height: 14)
-                    .background(LYLLTHTheme.background.opacity(0.9))
-                    .overlay { Rectangle().stroke(accent.opacity(0.55), lineWidth: 1) }
-                    .padding(4)
-            } else if let slipPreviewSeconds {
-                Text(String(format: "SLIP %+.3f s", slipPreviewSeconds))
-                    .font(LYLLTHTheme.value(7))
-                    .foregroundStyle(LYLLTHTheme.indigo)
-                    .padding(.horizontal, 5)
-                    .frame(height: 14)
-                    .background(LYLLTHTheme.background.opacity(0.9))
-                    .overlay { Rectangle().stroke(LYLLTHTheme.indigo.opacity(0.55), lineWidth: 1) }
-                    .padding(4)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(clip.kind == .audio ? "Audio event \(clip.name)" : "Region \(clip.name)")
-        .accessibilityValue(accessibilityDescription)
-        .accessibilityIdentifier("arrangement-clip-\(clip.id.uuidString)")
-        .help("Drag smoothly to move; snap is applied when released. Option-drag slips source audio. Drag edges to trim. Shift temporarily disables snap. Drag the gain line down to reduce event volume.")
-    }
-
-    private var accessibilityDescription: String {
-        let location = String(format: "beat %.2f", clip.startBeat + 1)
-        let duration = String(format: "%.2f beats", clip.lengthBeats)
-        guard clip.kind == .audio else {
-            return "\(location), \(duration)"
-        }
-
-        let gain = clip.eventGainDB <= -59.95
-            ? "minus infinity decibels"
-            : String(format: "%+.1f decibels", clip.eventGainDB)
-        let pitch = String(format: "%+.0f semitones", clip.pitchSemitones)
-        return "\(location), \(duration), \(gain), \(pitch)"
-    }
-
-    private var audioEventOverlay: some View {
-        GeometryReader { geometry in
-            let y = gainLineY(height: geometry.size.height)
-            ZStack(alignment: .topLeading) {
-                Rectangle()
-                    .fill(accent.opacity(isFocused ? 0.94 : 0.68))
-                    .frame(height: 1)
-                    .offset(y: y)
-
-                HStack(spacing: 5) {
-                    if abs(clip.eventGainDB) >= 0.05 {
-                        Text(clip.eventGainDB <= -59.95 ? "−∞ dB" : String(format: "%+.1f dB", clip.eventGainDB))
-                            .font(LYLLTHTheme.value(7))
-                            .foregroundStyle(accent)
-                    }
-                    if abs(clip.pitchSemitones) >= 0.05 {
-                        Text(String(format: "%+.0f st", clip.pitchSemitones))
-                            .font(LYLLTHTheme.value(7))
-                            .foregroundStyle(LYLLTHTheme.indigo)
-                    }
-                }
-                .padding(.horizontal, 4)
-                .frame(height: 11)
-                .background(LYLLTHTheme.background.opacity(0.78))
-                .offset(x: 9, y: min(max(1, y + 2), max(1, geometry.size.height - 12)))
-                .allowsHitTesting(false)
-
-                Rectangle()
-                    .fill(Color.clear)
-                    .frame(height: 13)
-                    .offset(y: min(max(0, y - 6), max(0, geometry.size.height - 13)))
-                    .contentShape(Rectangle())
-                    .highPriorityGesture(gainGesture(height: geometry.size.height))
-            }
-        }
-    }
-
-    private func gainLineY(height: CGFloat) -> CGFloat {
-        let normalized = CGFloat((12 - min(max(clip.eventGainDB, -60), 12)) / 72)
-        return 4 + normalized * max(1, height - 8)
-    }
-
-    private func gainGesture(height: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                let origin = gainOriginDB ?? clip.eventGainDB
-                if gainOriginDB == nil { gainOriginDB = origin }
-                let sensitivity = NSEvent.modifierFlags.contains(.control) ? 0.2 : 1.0
-                let delta = -Double(value.translation.height / max(height - 8, 1)) * 72 * sensitivity
-                clip.eventGainDB = min(max(origin + delta, -60), 12)
-            }
-            .onEnded { _ in gainOriginDB = nil }
-    }
-
-    private var previewCount: Int { min(16, clip.steps?.count ?? 16) }
-
-    private func isActive(_ index: Int) -> Bool {
-        guard let steps = clip.steps, steps.indices.contains(index) else { return index % 3 == 0 }
-        return steps[index]
-    }
-
-    private enum TrimEdge { case leading, trailing }
-
-    @ViewBuilder
-    private func trimHandle(edge: TrimEdge) -> some View {
-        if edge == .leading {
-            trimHandleBody.highPriorityGesture(leftTrimGesture)
-        } else {
-            trimHandleBody.highPriorityGesture(rightTrimGesture)
-        }
-    }
-
-    private var trimHandleBody: some View {
-        Rectangle()
-            .fill(isFocused ? accent.opacity(0.28) : Color.clear)
-            .frame(width: 7)
-            .overlay {
-                Rectangle()
-                    .fill(isFocused ? accent.opacity(0.82) : Color.clear)
-                    .frame(width: 1)
-            }
-            .contentShape(Rectangle())
-    }
-
-    private var moveGesture: some Gesture {
-        DragGesture(minimumDistance: 3)
-            .onChanged { value in
-                if clip.kind == .audio, NSEvent.modifierFlags.contains(.option) {
-                    let origin = slipOriginSeconds ?? clip.slipOffsetSeconds
-                    if slipOriginSeconds == nil { slipOriginSeconds = origin }
-                    let secondsPerBeat = 60 / max(projectBPM, 1)
-                    slipPreviewSeconds = origin + Double(value.translation.width / beatWidth) * secondsPerBeat
-                    return
-                }
-                let origin = moveOrigin ?? clip.startBeat
-                if moveOrigin == nil { moveOrigin = origin }
-                let raw = origin + Double(value.translation.width / beatWidth)
-                movePreviewBeat = min(max(0, raw), max(0, maximumBeat - clip.lengthBeats))
-            }
-            .onEnded { _ in
-                if let slipPreviewSeconds {
-                    clip.slipOffsetSeconds = slipPreviewSeconds
-                } else if let movePreviewBeat, let moveOrigin {
-                    let snapped = snap(movePreviewBeat, moveOrigin)
-                    clip.startBeat = min(max(0, snapped), max(0, maximumBeat - clip.lengthBeats))
-                }
-                moveOrigin = nil
-                movePreviewBeat = nil
-                slipOriginSeconds = nil
-                slipPreviewSeconds = nil
-            }
-    }
-
-    private var moveVisualOffset: CGFloat {
-        guard let movePreviewBeat else { return 0 }
-        return CGFloat(movePreviewBeat - clip.startBeat) * beatWidth
-    }
-
-    private var leftTrimGesture: some Gesture {
-        DragGesture(minimumDistance: 1)
-            .onChanged { value in
-                let origin = leftTrimOrigin ?? (
-                    clip.startBeat,
-                    clip.lengthBeats,
-                    clip.sourceStartSeconds,
-                    clip.sourceDurationSeconds
-                )
-                if leftTrimOrigin == nil { leftTrimOrigin = origin }
-                let end = origin.start + origin.length
-                let raw = origin.start + Double(value.translation.width / beatWidth)
-                let snapped = min(snap(raw, origin.start), end - minimumLength)
-                clip.startBeat = max(0, snapped)
-                clip.lengthBeats = max(minimumLength, end - clip.startBeat)
-                if clip.kind == .audio, let sourceDuration = origin.sourceDuration {
-                    let originalSecondsPerBeat = sourceDuration / max(origin.length, 0.001)
-                    let trimmedBeats = clip.startBeat - origin.start
-                    clip.sourceStartSeconds = origin.sourceStart + max(0, trimmedBeats) * originalSecondsPerBeat
-                    clip.sourceDurationSeconds = max(0.001, sourceDuration - max(0, trimmedBeats) * originalSecondsPerBeat)
-                }
-            }
-            .onEnded { _ in leftTrimOrigin = nil }
-    }
-
-    private var rightTrimGesture: some Gesture {
-        DragGesture(minimumDistance: 1)
-            .onChanged { value in
-                let origin = rightTrimOrigin ?? (clip.lengthBeats, clip.sourceDurationSeconds)
-                if rightTrimOrigin == nil { rightTrimOrigin = origin }
-                let originalLength = origin.length
-                let originalEnd = clip.startBeat + originalLength
-                let rawEnd = originalEnd + Double(value.translation.width / beatWidth)
-                let snappedEnd = snap(rawEnd, originalEnd)
-                clip.lengthBeats = min(
-                    max(minimumLength, snappedEnd - clip.startBeat),
-                    max(minimumLength, maximumBeat - clip.startBeat)
-                )
-                if clip.kind == .audio, let sourceDuration = origin.sourceDuration {
-                    clip.sourceDurationSeconds = max(
-                        0.001,
-                        sourceDuration * (clip.lengthBeats / max(originalLength, 0.001))
-                    )
-                }
-            }
-            .onEnded { _ in rightTrimOrigin = nil }
-    }
-
-    private var minimumLength: Double {
-        max(0.001, 6 / Double(max(beatWidth, 1)))
-    }
-}
-
-private struct MiniWaveform: View {
-    let values: [Float]
-    let color: Color
-
-    var body: some View {
-        GeometryReader { geometry in
-            Path { path in
-                let displayValues: [CGFloat] = values.isEmpty
-                    ? [0.10, 0.38, 0.74, 0.31, 0.62, 0.92, 0.45, 0.66, 0.22, 0.48, 0.79, 0.34, 0.58, 0.17, 0.42]
-                    : values.map(CGFloat.init)
-                let step = geometry.size.width / CGFloat(max(displayValues.count - 1, 1))
-                for (index, value) in displayValues.enumerated() {
-                    let point = CGPoint(x: CGFloat(index) * step, y: geometry.size.height * (1 - value))
-                    index == 0 ? path.move(to: point) : path.addLine(to: point)
-                }
-            }
-            .stroke(color.opacity(0.82), lineWidth: 1)
-        }
-    }
-}
-
 // MARK: - Mixer
 
 private struct MixerView: View {
     @Binding var session: LYLLTHSession
     @Binding var selectedTrackID: UUID?
+    @ObservedObject var meters: LYMeterStore
+    let isMainSelected: Bool
+    let selectMain: () -> Void
     let close: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            LYPanelHeader(title: "MIX", detail: "SIGNAL / LEVEL", actionIcon: "chevron.down", action: close)
+            LYPanelHeader(title: "MIX", detail: "LEVEL  ·  PAN  ·  METERS", actionIcon: "chevron.down", action: close)
             ScrollView(.horizontal) {
-                HStack(spacing: 0) {
-                    ForEach($session.tracks) { $track in
-                        MixerChannel(track: $track, isSelected: selectedTrackID == track.id)
-                            .onTapGesture { selectedTrackID = track.id }
+                    HStack(spacing: 0) {
+                        ForEach(Array(session.tracks.indices), id: \.self) { index in
+                            MixerChannel(
+                                track: $session.tracks[index],
+                                number: index + 1,
+                                accent: LYLLTHTheme.trackAccent(position: index),
+                                reading: meters.reading(for: session.tracks[index].id),
+                                resetClip: { meters.reset(session.tracks[index].id) },
+                                isSelected: !isMainSelected && selectedTrackID == session.tracks[index].id
+                            )
+                            .onTapGesture { selectedTrackID = session.tracks[index].id }
+                        }
+                        MainChannel(
+                            reading: meters.reading(for: LYMeterStore.mainKey),
+                            resetClip: { meters.reset(LYMeterStore.mainKey) },
+                            isSelected: isMainSelected
+                        )
+                        .onTapGesture(perform: selectMain)
                     }
-                    MainChannel()
-                }
             }
+            .lyScrollers()
             .background(LYLLTHTheme.deck)
         }
         .overlay(alignment: .top) { Rectangle().fill(LYLLTHTheme.lineStrong).frame(height: 1) }
     }
+
+
 }
 
 private struct MixerChannel: View {
     @Binding var track: LYTrack
+    let number: Int
+    let accent: Color
+    let reading: LYMeterStore.Reading?
+    let resetClip: () -> Void
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(track.name)
-                    .font(LYLLTHTheme.label(10, weight: .bold))
-                    .foregroundStyle(LYLLTHTheme.text)
-                    .lineLimit(1)
-                Text(track.kind.label)
-                    .font(LYLLTHTheme.label(7))
-                    .tracking(0.9)
-                    .foregroundStyle(isSelected ? LYLLTHTheme.accent(track.accent) : LYLLTHTheme.dim)
-                Spacer()
-                HStack(spacing: 5) {
-                    MixerToggle(title: "M", isOn: $track.isMuted, tint: LYLLTHTheme.purple)
-                    MixerToggle(title: "S", isOn: $track.isSolo, tint: LYLLTHTheme.teal)
-                }
-                Text(String(format: "%+.1f dB", track.volumeDB))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Text(String(format: "%02d", number))
                     .font(LYLLTHTheme.value(9))
-                    .foregroundStyle(LYLLTHTheme.metadata)
+                    .foregroundStyle(accent)
+                    .frame(width: 20, height: 20)
+                    .overlay(Rectangle().stroke(accent.opacity(isSelected ? 1 : 0.6), lineWidth: 1))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(track.name)
+                        .font(LYLLTHTheme.label(9.5, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundStyle(LYLLTHTheme.text)
+                        .lineLimit(1)
+                    Text(track.kind.label)
+                        .font(LYLLTHTheme.label(6.5, weight: .bold))
+                        .tracking(1.2)
+                        .foregroundStyle(LYLLTHTheme.dim)
+                        .lineLimit(1)
+                }
             }
-            .frame(width: 74, alignment: .leading)
 
-            StereoMeter(level: meterLevel)
-                .frame(width: 10, height: 82)
+            HStack(alignment: .bottom, spacing: 10) {
+                VStack(spacing: 4) {
+                    LYClipIndicator(reading: reading, reset: resetClip)
+                        .frame(width: 34)
+                    LYStripMeter(reading: reading, tint: accent)
+                        .frame(width: 8)
+                }
+                .frame(width: 34)
+                LYVerticalFader(value: $track.volumeDB, range: -48...6, accent: accent)
+                    .frame(width: 26)
+                VStack(alignment: .leading, spacing: 6) {
+                    Spacer(minLength: 0)
+                    LYTrackToggle(title: "M", isOn: $track.isMuted, tint: LYLLTHTheme.purple)
+                    LYTrackToggle(title: "S", isOn: $track.isSolo, tint: LYLLTHTheme.teal)
+                    if track.kind != .auxiliary {
+                        LYTrackToggle(title: "R", isOn: $track.isArmed, tint: LYLLTHTheme.record)
+                    }
+                }
+            }
+            .frame(maxHeight: .infinity)
 
-            LYVerticalFader(value: $track.volumeDB, range: -48...6)
-                .frame(width: 28, height: 91)
+            Text(track.volumeDB <= -47.9 ? "−∞" : String(format: "%+.1f", track.volumeDB))
+                .font(LYLLTHTheme.value(11))
+                .foregroundStyle(LYLLTHTheme.text)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .frame(width: 156)
-        .background(isSelected ? LYLLTHTheme.panelRaised : LYLLTHTheme.panel)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(isSelected ? LYLLTHTheme.accent(track.accent) : .clear)
-                .frame(height: 1)
+        .frame(width: 124)
+        .background(isSelected ? LYLLTHTheme.panel : Color.clear)
+        .lyRisingBloom(accent, isOn: isSelected, strength: 0.7)
+        .overlay(alignment: .top) {
+            Rectangle().fill(isSelected ? accent : .clear).frame(height: 2).lyBloom(accent, isOn: isSelected)
         }
         .overlay(alignment: .trailing) { Rectangle().fill(LYLLTHTheme.line).frame(width: 1) }
-    }
-
-    private var meterLevel: Double {
-        min(max((track.volumeDB + 48) / 54 * 0.7, 0.08), 0.78)
+        .contentShape(Rectangle())
     }
 }
 
 private struct MainChannel: View {
+    let reading: LYMeterStore.Reading?
+    let resetClip: () -> Void
+    let isSelected: Bool
+
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("MAIN")
-                    .font(LYLLTHTheme.label(10, weight: .bold))
+                    .font(LYLLTHTheme.label(10.5, weight: .bold))
+                    .tracking(1.5)
                     .foregroundStyle(LYLLTHTheme.text)
-                Text("MASTER")
-                    .font(LYLLTHTheme.label(7))
-                    .tracking(1)
-                    .foregroundStyle(LYLLTHTheme.teal)
-                Spacer()
-                Text("−6.2 dB")
-                    .font(LYLLTHTheme.value(9))
-                    .foregroundStyle(LYLLTHTheme.metadata)
+                Text("ELASTIC LIMITER")
+                    .font(LYLLTHTheme.label(6.5, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(LYLLTHTheme.dim)
             }
-            StereoMeter(level: 0.68, tint: LYLLTHTheme.teal)
-                .frame(width: 18, height: 88)
+            LYClipIndicator(reading: reading, reset: resetClip)
+                .frame(width: 60)
+            LYStripMeter(reading: reading, tint: LYLLTHTheme.teal)
+                .frame(width: 16)
+                .frame(maxHeight: .infinity)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .frame(width: 124)
-        .background(LYLLTHTheme.background)
-        .overlay(alignment: .leading) { Rectangle().fill(LYLLTHTheme.teal.opacity(0.65)).frame(width: 1) }
+        .frame(width: 118, alignment: .leading)
+        .background(isSelected ? LYLLTHTheme.panel : LYLLTHTheme.background)
+        .lyRisingBloom(LYLLTHTheme.teal, isOn: isSelected, strength: 0.6)
+        .contentShape(Rectangle())
+        .help("MAIN: click to open its effects in the inspector")
+        .overlay(alignment: .leading) { Rectangle().fill(LYLLTHTheme.teal.opacity(0.7)).frame(width: 1) }
     }
 }
 
-private struct MixerToggle: View {
-    let title: String
-    @Binding var isOn: Bool
-    let tint: Color
 
-    var body: some View {
-        Button(title) { isOn.toggle() }
-            .buttonStyle(.plain)
-            .font(LYLLTHTheme.label(8, weight: .bold))
-            .foregroundStyle(isOn ? tint : LYLLTHTheme.dim)
-            .frame(width: 24, height: 21)
-            .overlay(Rectangle().stroke(isOn ? tint.opacity(0.8) : LYLLTHTheme.lineStrong, lineWidth: 1))
-    }
-}
-
-private struct StereoMeter: View {
-    let level: Double
-    var tint = LYLLTHTheme.indigo
-
-    var body: some View {
-        GeometryReader { geometry in
-            HStack(alignment: .bottom, spacing: 2) {
-                ForEach([0.93, 1.0], id: \.self) { multiplier in
-                    ZStack(alignment: .bottom) {
-                        Rectangle().fill(LYLLTHTheme.off.opacity(0.7))
-                        Rectangle()
-                            .fill(tint.opacity(0.88))
-                            .frame(height: geometry.size.height * min(level * multiplier, 1))
-                    }
-                }
-            }
-        }
-    }
-}
-
+/// A fader drawn like DrumKit's: hairline rail, the level filled in the
+/// track colour, a chrome cap with a single accent line.
 private struct LYVerticalFader: View {
     @Binding var value: Double
     let range: ClosedRange<Double>
+    var accent = LYLLTHTheme.teal
+    @State private var origin: Double?
 
     var body: some View {
         GeometryReader { geometry in
             let fraction = (value - range.lowerBound) / (range.upperBound - range.lowerBound)
-            let y = (1 - fraction) * (geometry.size.height - 14) + 7
+            let travel = geometry.size.height - 12
+            let y = (1 - fraction) * travel + 6
+            let zeroY = (1 - (0 - range.lowerBound) / (range.upperBound - range.lowerBound)) * travel + 6
 
-            ZStack {
+            ZStack(alignment: .top) {
+                Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1)
                 Rectangle()
-                    .fill(LYLLTHTheme.lineStrong)
-                    .frame(width: 1)
-                Rectangle()
-                    .fill(LYLLTHTheme.chrome)
-                    .frame(width: 18, height: 5)
-                    .overlay(Rectangle().stroke(LYLLTHTheme.lineFocused, lineWidth: 1))
-                    .position(x: geometry.size.width / 2, y: y)
+                    .fill(accent.opacity(0.7))
+                    .frame(width: 1, height: max(0, geometry.size.height - y))
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                Rectangle().fill(LYLLTHTheme.dim).frame(width: 9, height: 1).offset(y: zeroY)
+                ZStack {
+                    Rectangle().fill(LYLLTHTheme.chrome)
+                    Rectangle().fill(accent).frame(height: 1.5)
+                }
+                .frame(width: 22, height: 9)
+                .offset(y: y - 4.5)
             }
+            .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
             .gesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 1)
                     .onChanged { gesture in
-                        let normalized = min(max(1 - gesture.location.y / geometry.size.height, 0), 1)
-                        value = range.lowerBound + normalized * (range.upperBound - range.lowerBound)
+                        let start = origin ?? value
+                        if origin == nil { origin = value }
+                        let span = range.upperBound - range.lowerBound
+                        let scale = NSEvent.modifierFlags.contains(.option) ? 0.2 : 1.0
+                        value = min(max(start - Double(gesture.translation.height / max(travel, 1)) * span * scale, range.lowerBound), range.upperBound)
                     }
+                    .onEnded { _ in origin = nil }
             )
+            .onTapGesture(count: 2) { value = 0 }
+            .help("Drag for level. Option for fine. Double-click for 0 dB.")
         }
     }
 }
 
 // MARK: - Inspector
 
-private struct InspectorPanel: View {
-    var track: Binding<LYTrack>?
-    let close: () -> Void
 
-    var body: some View {
-        VStack(spacing: 0) {
-            LYPanelHeader(title: "INSPECT", actionIcon: "xmark", action: close)
-            if let track {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(track.wrappedValue.name)
-                                .font(LYLLTHTheme.label(22, weight: .light))
-                                .tracking(0.8)
-                                .foregroundStyle(LYLLTHTheme.text)
-                            HStack(spacing: 8) {
-                                LYLED(color: LYLLTHTheme.accent(track.wrappedValue.accent), size: 4)
-                                Text(track.wrappedValue.kind.label)
-                                    .font(LYLLTHTheme.label(8, weight: .bold))
-                                    .tracking(1.4)
-                                    .foregroundStyle(LYLLTHTheme.metadata)
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16)
-                        .padding(.bottom, 15)
 
-                        LYHairline()
-
-                        HStack(spacing: 24) {
-                            LYKnob(
-                                value: track.volumeDB,
-                                range: -48...6,
-                                title: "LEVEL",
-                                valueText: String(format: "%+.1f", track.wrappedValue.volumeDB),
-                                tint: LYLLTHTheme.teal
-                            )
-                            LYKnob(
-                                value: track.pan,
-                                range: -1...1,
-                                title: "PAN",
-                                valueText: panText(track.wrappedValue.pan),
-                                tint: LYLLTHTheme.indigo
-                            )
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-
-                        LYHairline()
-
-                        VStack(alignment: .leading, spacing: 0) {
-                            HStack {
-                                Text("SIGNAL CHAIN")
-                                    .font(LYLLTHTheme.label(9, weight: .bold))
-                                    .tracking(1.5)
-                                    .foregroundStyle(LYLLTHTheme.secondary)
-                                Spacer()
-                                Text("PRE FADER")
-                                    .font(LYLLTHTheme.label(7))
-                                    .tracking(0.8)
-                                    .foregroundStyle(LYLLTHTheme.dim)
-                            }
-                            .padding(.horizontal, 16)
-                            .frame(height: 38)
-
-                            if track.wrappedValue.inserts.isEmpty {
-                                EmptyInsertRow()
-                            } else {
-                                ForEach(Array(track.wrappedValue.inserts.enumerated()), id: \.element.id) { index, insert in
-                                    InsertRow(slot: insert, number: index + 1)
-                                }
-                            }
-
-                            EmptyInsertRow()
-                        }
-
-                        LYHairline()
-
-                        VStack(alignment: .leading, spacing: 12) {
-                            InspectorMetric(title: "INPUT", value: track.wrappedValue.inputName ?? "INTERNAL")
-                            InspectorMetric(title: "OUTPUT", value: "MAIN")
-                            InspectorMetric(title: "CHANNEL", value: "STEREO")
-                        }
-                        .padding(16)
-                    }
-                }
-            } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "waveform")
-                        .font(.system(size: 24, weight: .ultraLight))
-                    Text("SELECT A TRACK")
-                        .font(LYLLTHTheme.label(9, weight: .bold))
-                        .tracking(1.4)
-                }
-                .foregroundStyle(LYLLTHTheme.dim)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .background(LYLLTHTheme.panel)
-        .overlay(alignment: .leading) { Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1) }
-    }
-
-    private func panText(_ pan: Double) -> String {
-        if abs(pan) < 0.01 { return "C" }
-        return pan < 0 ? "L\(Int(abs(pan) * 100))" : "R\(Int(abs(pan) * 100))"
-    }
-}
 
 private struct LYKnob: View {
     @Binding var value: Double
@@ -3368,70 +2873,8 @@ private struct LYKnob: View {
     }
 }
 
-private struct InsertRow: View {
-    let slot: LYPluginSlot
-    let number: Int
 
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(String(format: "%02d", number))
-                .font(LYLLTHTheme.value(8))
-                .foregroundStyle(LYLLTHTheme.dim)
-            LYLED(color: LYLLTHTheme.teal, isOn: !slot.isBypassed, size: 4)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(slot.name)
-                    .font(LYLLTHTheme.label(10, weight: .bold))
-                    .foregroundStyle(slot.isBypassed ? LYLLTHTheme.dim : LYLLTHTheme.secondary)
-                    .lineLimit(1)
-                Text(slot.manufacturer)
-                    .font(LYLLTHTheme.label(7))
-                    .tracking(0.8)
-                    .foregroundStyle(LYLLTHTheme.dim)
-            }
-            Spacer()
-            Text(slot.isBypassed ? "OFF" : "ON")
-                .font(LYLLTHTheme.label(7, weight: .bold))
-                .foregroundStyle(slot.isBypassed ? LYLLTHTheme.dim : LYLLTHTheme.teal)
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 47)
-        .background(LYLLTHTheme.deck.opacity(0.52))
-        .overlay(alignment: .bottom) { LYHairline() }
-    }
-}
 
-private struct EmptyInsertRow: View {
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "plus")
-                .font(.system(size: 8, weight: .medium))
-            Text("ADD INSERT")
-                .font(LYLLTHTheme.label(8, weight: .bold))
-                .tracking(1.1)
-        }
-        .foregroundStyle(LYLLTHTheme.dim)
-        .padding(.horizontal, 16)
-        .frame(height: 39, alignment: .leading)
-    }
-}
-
-private struct InspectorMetric: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Text(title)
-                .font(LYLLTHTheme.label(8, weight: .bold))
-                .tracking(1)
-                .foregroundStyle(LYLLTHTheme.dim)
-            Spacer()
-            Text(value)
-                .font(LYLLTHTheme.label(9, weight: .bold))
-                .foregroundStyle(LYLLTHTheme.metadata)
-        }
-    }
-}
 
 // MARK: - Status
 
@@ -3501,6 +2944,105 @@ private struct LYWordmarkTieDye: View {
                 }
             }
             .drawingGroup()
+        }
+    }
+}
+
+
+/// MIDI IN light: lit while notes arrive, with how many devices are seen.
+private struct LYMIDIIndicator: View {
+    @ObservedObject var midi: LYMIDIInput
+    @State private var lit = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Rectangle()
+                .fill(lit ? LYLLTHTheme.teal : LYLLTHTheme.off)
+                .frame(width: 6, height: 6)
+            Text(midi.sourceNames.isEmpty ? "NO MIDI" : "MIDI · \(midi.sourceNames.count)")
+                .font(LYLLTHTheme.label(7.5, weight: .bold))
+                .tracking(1.2)
+                .foregroundStyle(LYLLTHTheme.dim)
+        }
+        .help(midi.sourceNames.isEmpty ? "No MIDI devices connected" : "MIDI in: " + midi.sourceNames.joined(separator: ", ") + ". Plays the selected synth track.")
+        .onChange(of: midi.activity) { _, _ in
+            lit = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { lit = false }
+        }
+    }
+}
+
+/// Progress for a bounce, then where the file went.
+private struct LYBounceOverlay: View {
+    @ObservedObject var bounce: LYBounce
+    let cancel: () -> Void
+
+    var body: some View {
+        switch bounce.phase {
+        case .idle:
+            EmptyView()
+        case .running(let elapsed, let total):
+            panel {
+                Text("EXPORTING").font(LYLLTHTheme.label(11, weight: .bold)).tracking(2).foregroundStyle(LYLLTHTheme.teal)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(LYLLTHTheme.lineStrong).frame(height: 2)
+                        Rectangle().fill(LYLLTHTheme.teal).frame(width: geo.size.width * CGFloat(elapsed / max(total, 0.001)), height: 2)
+                    }
+                    .frame(maxHeight: .infinity)
+                }
+                .frame(height: 10)
+                Text(String(format: "%02d:%02d / %02d:%02d", Int(elapsed) / 60, Int(elapsed) % 60, Int(total) / 60, Int(total) % 60))
+                    .font(LYLLTHTheme.value(14)).foregroundStyle(LYLLTHTheme.text)
+                Text("RECORDING THE MAIN MIX IN REAL TIME, SO IT SOUNDS EXACTLY AS IT PLAYS")
+                    .font(LYLLTHTheme.label(7, weight: .bold)).tracking(0.9).foregroundStyle(LYLLTHTheme.dim)
+                Button("CANCEL", action: cancel).buttonStyle(LYChromeButtonStyle(compact: true))
+            }
+        case .finished(let url):
+            panel {
+                Text("EXPORTED").font(LYLLTHTheme.label(11, weight: .bold)).tracking(2).foregroundStyle(LYLLTHTheme.teal)
+                Text(url.lastPathComponent.uppercased()).font(LYLLTHTheme.label(10, weight: .bold)).foregroundStyle(LYLLTHTheme.text)
+                HStack {
+                    Button("SHOW IN FINDER") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                        .buttonStyle(LYChromeButtonStyle(compact: true))
+                    Button("DONE") { bounce.dismiss() }.buttonStyle(LYChromeButtonStyle(active: true, compact: true))
+                }
+            }
+        case .failed(let message):
+            panel {
+                Text("EXPORT FAILED").font(LYLLTHTheme.label(11, weight: .bold)).tracking(2).foregroundStyle(LYLLTHTheme.record)
+                Text(message).font(LYLLTHTheme.label(8, weight: .bold)).foregroundStyle(LYLLTHTheme.text)
+                Button("DONE") { bounce.dismiss() }.buttonStyle(LYChromeButtonStyle(compact: true))
+            }
+        }
+    }
+
+    private func panel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        ZStack {
+            Color.black.opacity(0.6).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 12) { content() }
+                .padding(20)
+                .frame(width: 440)
+                .background(Color(hex: 0x07080D))
+                .overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.6), lineWidth: 1))
+        }
+    }
+}
+
+
+/// Runs the latest scheduled work once, on the next main-queue turn. Held in
+/// @State as a plain reference so scheduling never re-renders the workspace.
+final class LYCoalescedSync {
+    private var pending: (() -> Void)?
+
+    func schedule(_ work: @escaping () -> Void) {
+        let isFirst = pending == nil
+        pending = work
+        guard isFirst else { return }
+        DispatchQueue.main.async { [weak self] in
+            let work = self?.pending
+            self?.pending = nil
+            work?()
         }
     }
 }
