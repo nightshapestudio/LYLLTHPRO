@@ -1004,6 +1004,9 @@ struct LYLLTHSession: Codable, Equatable {
     var mainVolumeDB: Double? = nil
     var reverb: ReverbState? = nil
     var tracks: [LYTrack]
+    /// DrumKit's song FX lane: filter sweeps and FRACTURE moves on a track
+    /// or MAIN. Optional preserves older documents.
+    var songFX: [LYSongFXBlock]? = nil
 
     var isLoopActive: Bool { (isLoopEnabled ?? true) && loopRange != nil }
 

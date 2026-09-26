@@ -124,6 +124,8 @@ private enum LYWorkspaceMenu: Equatable {
     case arrangementSnap
     /// Pick what a lane moves: (track, lane), lane nil to add one.
     case automation(UUID, UUID?)
+    /// Edit one song FX move.
+    case songFX(UUID)
 }
 
 private struct LYAudioImportTarget {
@@ -446,7 +448,8 @@ struct WorkspaceView: View {
             openNotes: { openNotes(trackID: $0, clipID: $1) },
             openAutomationMenu: { trackID, laneID in
                 presentMenu(.automation(trackID, laneID), from: laneID.map { "auto.\($0)" } ?? "auto.add.\(trackID)")
-            }
+            },
+            openSongFXMenu: { presentMenu(.songFX($0), from: "songfx") }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1114,6 +1117,25 @@ struct WorkspaceView: View {
                         ),
                         close: dismissMenu
                     )
+                case .songFX(let blockID):
+                    if (document.session.songFX ?? []).contains(where: { $0.id == blockID }) {
+                        LYSongFXPanel(
+                            block: Binding(
+                                get: { document.session.songFX?.first { $0.id == blockID } ?? LYSongFXBlock(move: .open, trackID: nil, startBeat: 0, lengthBeats: 4) },
+                                set: { value in
+                                    guard let index = document.session.songFX?.firstIndex(where: { $0.id == blockID }) else { return }
+                                    document.session.songFX?[index] = value
+                                }
+                            ),
+                            targets: document.session.tracks,
+                            remove: {
+                                document.session.songFX?.removeAll { $0.id == blockID }
+                                if document.session.songFX?.isEmpty == true { document.session.songFX = nil }
+                                dismissMenu()
+                            },
+                            close: dismissMenu
+                        )
+                    }
                 case .automation(let trackID, let laneID):
                     if let track = document.session.tracks.first(where: { $0.id == trackID }) {
                         LYAutomationTargetPanel(

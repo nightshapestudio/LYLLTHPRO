@@ -60,6 +60,8 @@ final class AudioEngineController: ObservableObject {
         var window: LYSongWindow
         var numerator: Int
         var denominator: Int
+        var songFX: [LYSongFXBlock]
+        var channels: [UUID]
     }
     private var sentPatterns: [Int: SentPattern] = [:]
     private var sentMix: [Int: SentMix] = [:]
@@ -233,7 +235,9 @@ final class AudioEngineController: ObservableObject {
                 key: key,
                 window: window,
                 numerator: session.numerator,
-                denominator: session.denominator
+                denominator: session.denominator,
+                songFX: session.songFX ?? [],
+                channels: LYChannelMap.channels(in: session).map(\.trackID)
             )
             if inputs != sentSong {
             sentSong = inputs

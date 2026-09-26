@@ -196,8 +196,24 @@ enum LYFKit {
                 tracks[row].clips[patternIndex].isOffTimeline = nil
             }
         }
-        if !(snapshot.songFXBlocks ?? []).isEmpty {
-            notes.append("the song's FX lane (filter and FRACTURE moves) is not in LYLLTH yet")
+        // The song FX lane: DrumKit's slots become the tracks made from them.
+        var songFX: [LYSongFXBlock] = []
+        for block in snapshot.songFXBlocks ?? [] {
+            let trackID: UUID?
+            if block.target == SongFXBlock.mainTarget {
+                trackID = nil
+            } else if tracks.indices.contains(block.target) {
+                trackID = tracks[block.target].id
+            } else {
+                continue
+            }
+            var moved = LYSongFXBlock(move: block.move, trackID: trackID,
+                                      startBeat: Double(block.startStep) * lyBeatsPerStep,
+                                      lengthBeats: Double(block.lengthSteps) * lyBeatsPerStep, row: block.row)
+            moved.startLevel = block.startLevel
+            moved.endLevel = block.endLevel
+            moved.resonance = block.resonance
+            songFX.append(moved)
         }
 
         var session = LYLLTHSession.starter()
@@ -215,6 +231,7 @@ enum LYFKit {
         session.isLoopEnabled = false
         session.mainVolumeDB = snapshot.mainOutputVolume
         session.tracks = tracks
+        session.songFX = songFX.isEmpty ? nil : songFX
         if let effects = snapshot.effects {
             session.mainFX = mainRack(from: effects)
             session.reverb = effects.reverb
@@ -271,6 +288,12 @@ enum LYFKit {
         if musical.count > rowCount { notes.append("DrumKit has 16 rows; only the first 16 sequencer tracks are saved") }
         let others = session.tracks.filter { $0.kind == .audio || $0.kind == .auxiliary }
         if !others.isEmpty { notes.append("audio tracks and buses do not exist in DrumKit and are left out") }
+        if musical.contains(where: { $0.clips.contains(where: \.isNoteClip) }) {
+            notes.append("piano-roll note clips do not exist in DrumKit and are left out")
+        }
+        if session.tracks.contains(where: { !($0.automation ?? []).isEmpty }) {
+            notes.append("automation lanes do not exist in DrumKit and are left out")
+        }
         let rows = Array(musical.prefix(rowCount))
         let meter: TimeSignature
         switch (session.numerator, session.denominator) {
@@ -428,7 +451,7 @@ enum LYFKit {
         effects.managesPresetSends = true
 
         let name = String(session.name.uppercased().prefix(24))
-        let snapshot = ProjectSnapshot(
+        var snapshot = ProjectSnapshot(
             id: UUID(),
             name: name,
             savedAt: Date(),
@@ -448,6 +471,28 @@ enum LYFKit {
             swing: session.swing,
             trackChokeGroups: rows.map { $0.chokeGroup ?? 0 } + Array(repeating: 0, count: rowCount - rows.count)
         )
+
+        // The song FX lane, on the rows the tracks became.
+        var fxBlocks: [SongFXBlock] = []
+        var droppedFX = 0
+        for block in session.songFX ?? [] {
+            let target: Int
+            if let id = block.trackID {
+                guard let row = rows.firstIndex(where: { $0.id == id }) else { droppedFX += 1; continue }
+                target = row
+            } else {
+                target = SongFXBlock.mainTarget
+            }
+            var converted = SongFXBlock(move: block.move, target: target,
+                                        startStep: Int((block.startBeat / lyBeatsPerStep).rounded()),
+                                        lengthSteps: max(1, Int((block.lengthBeats / lyBeatsPerStep).rounded())), row: block.row)
+            converted.startLevel = block.startLevel
+            converted.endLevel = block.endLevel
+            converted.resonance = block.resonance
+            fxBlocks.append(converted)
+        }
+        if droppedFX > 0 { notes.append("\(droppedFX) song FX move\(droppedFX == 1 ? " is" : "s are") on tracks DrumKit does not have and \(droppedFX == 1 ? "is" : "are") left out") }
+        snapshot.songFXBlocks = fxBlocks.isEmpty ? nil : fxBlocks
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

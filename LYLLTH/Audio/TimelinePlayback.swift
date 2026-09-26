@@ -83,6 +83,7 @@ enum LYSongCompiler {
             }
         }
 
+        let channels = Dictionary(uniqueKeysWithValues: LYChannelMap.channels(in: session).map { ($0.trackID, $0.index) })
         return (0..<window.barCount).map { barOffset in
             let barStart = Double(window.startBar + barOffset) * window.beatsPerBar
             let songTracks: [SongPatternTrack] = tracks.map { track in
@@ -118,7 +119,8 @@ enum LYSongCompiler {
                     noteLengths: locks.map { min(max(Int($0.noteLength.rounded()), 1), 64) }
                 )
             }
-            return SongPatternFrame(stepCount: stepsPerBar, tracks: songTracks)
+            let fx = LYSongFXCompiler.lanes(session.songFX ?? [], barStartBeat: barStart, stepsPerBar: stepsPerBar, channels: channels)
+            return SongPatternFrame(stepCount: stepsPerBar, tracks: songTracks, filterLanes: fx.filter, fractureLanes: fx.fracture)
         }
     }
 }

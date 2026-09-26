@@ -23,6 +23,8 @@ struct ArrangementView: View {
     var openNotes: (UUID, UUID) -> Void = { _, _ in }
     /// Opens the automation target menu: (track id, lane id or nil to add one).
     var openAutomationMenu: (UUID, UUID?) -> Void = { _, _ in }
+    /// Opens a song FX move's editor.
+    var openSongFXMenu: (UUID) -> Void = { _ in }
 
     @EnvironmentObject private var audio: AudioEngineController
 
@@ -76,6 +78,16 @@ struct ArrangementView: View {
                 ScrollView([.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 0) {
                         ruler
+                        LYSongFXLane(
+                            blocks: Binding(get: { session.songFX ?? [] }, set: { session.songFX = $0.isEmpty ? nil : $0 }),
+                            tracks: session.tracks,
+                            headerWidth: headerWidth,
+                            beatWidth: beatWidth,
+                            beats: beats,
+                            beatsPerBar: beatsPerBar,
+                            snap: { snapBeat($0, $0) },
+                            openEditor: openSongFXMenu
+                        )
                         ForEach(Array(session.tracks.indices), id: \.self) { index in
                             trackLane(index: index)
                             AnyView(automationRows(index: index))
