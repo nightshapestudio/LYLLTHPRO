@@ -695,7 +695,8 @@ struct LYSynthKeyMonitor: NSViewRepresentable {
 
 // MARK: - Browsers
 
-/// FACTORY and USER sounds side by side. User sounds can be deleted here.
+/// The factory bank by category, the originals and the user's own sounds.
+/// Hovering a sound shows what it is for and how to sit it in a mix.
 struct LYPresetBrowser: View {
     let current: String
     let user: [LYSynthPatch]
@@ -703,10 +704,34 @@ struct LYPresetBrowser: View {
     let delete: (String) -> Void
     let close: () -> Void
 
+    @State private var category: String?
+    @State private var hovered: LYSynthPatch?
+
+    private var groups: [String] {
+        LYSynthFactoryBank.categories.filter { c in LYSynthPatch.factory.contains { $0.category == c } } + ["ORIGINAL", "USER"]
+    }
+
+    private var selected: String {
+        if let category { return category }
+        if user.contains(where: { $0.name == current }) { return "USER" }
+        return LYSynthPatch.factory.first { $0.name == current }?.category ?? groups.first ?? "USER"
+    }
+
+    private var items: [LYSynthPatch] {
+        if selected == "USER" { return user }
+        return LYSynthPatch.factory.filter { $0.category == selected }
+    }
+
+    private var shown: LYSynthPatch? {
+        hovered ?? LYSynthPatch.factory.first { $0.name == current } ?? user.first { $0.name == current }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("SOUNDS").font(LYLLTHTheme.label(9, weight: .bold)).tracking(1.8).foregroundStyle(LYLLTHTheme.teal)
+                Text("\(LYSynthFactoryBank.presets.count) FACTORY · \(user.count) USER")
+                    .font(LYLLTHTheme.label(7, weight: .bold)).tracking(1.2).foregroundStyle(LYLLTHTheme.dim)
                 Spacer()
                 Button(action: close) {
                     Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(LYLLTHTheme.chromeText)
@@ -714,53 +739,94 @@ struct LYPresetBrowser: View {
                 }.buttonStyle(.plain)
             }
             HStack(alignment: .top, spacing: 10) {
-                column("FACTORY", LYSynthPatch.factory, deletable: false)
-                column("USER", user, deletable: true)
+                VStack(spacing: 3) {
+                    ForEach(groups, id: \.self) { group in
+                        Button { category = group; hovered = nil } label: {
+                            HStack {
+                                Text(group).font(LYLLTHTheme.label(8, weight: .bold)).tracking(1.1)
+                                    .foregroundStyle(group == selected ? LYLLTHTheme.teal : LYLLTHTheme.text)
+                                Spacer()
+                                Text("\(group == "USER" ? user.count : LYSynthPatch.factory.filter { $0.category == group }.count)")
+                                    .font(LYLLTHTheme.value(8)).foregroundStyle(LYLLTHTheme.dim)
+                            }
+                            .padding(.horizontal, 8)
+                            .frame(height: 24)
+                            .background(LYLLTHTheme.teal.opacity(group == selected ? 0.1 : 0))
+                            .overlay(Rectangle().stroke(group == selected ? LYLLTHTheme.teal : LYLLTHTheme.lineStrong, lineWidth: 1))
+                            .contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(width: 120)
+
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)], spacing: 4) {
+                        if items.isEmpty {
+                            Text("SAVE A SOUND TO SEE IT HERE")
+                                .font(LYLLTHTheme.label(7, weight: .bold)).tracking(1).foregroundStyle(LYLLTHTheme.dim)
+                                .frame(maxWidth: .infinity).padding(.top, 20)
+                        }
+                        ForEach(items, id: \.name) { item in
+                            HStack(spacing: 0) {
+                                Button { choose(item) } label: {
+                                    Text(item.name)
+                                        .font(LYLLTHTheme.label(8.5, weight: .bold)).tracking(0.8)
+                                        .foregroundStyle(item.name == current ? LYLLTHTheme.teal : LYLLTHTheme.text)
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
+                                        .padding(.leading, 8)
+                                        .contentShape(Rectangle())
+                                }.buttonStyle(.plain)
+                                if selected == "USER" {
+                                    Button { delete(item.name) } label: {
+                                        Image(systemName: "xmark").font(.system(size: 7, weight: .bold)).foregroundStyle(LYLLTHTheme.dim)
+                                            .frame(width: 22, height: 26).contentShape(Rectangle())
+                                    }.buttonStyle(.plain).help("Delete this preset")
+                                }
+                            }
+                            .background(LYLLTHTheme.teal.opacity(item.name == current ? 0.1 : (hovered?.name == item.name ? 0.05 : 0)))
+                            .overlay(Rectangle().stroke(item.name == current ? LYLLTHTheme.teal : LYLLTHTheme.lineStrong, lineWidth: 1))
+                            .onHover { inside in hovered = inside ? item : (hovered?.name == item.name ? nil : hovered) }
+                        }
+                    }
+                }
+                .lyScrollers()
             }
+            infoStrip
         }
         .padding(10)
         .background(Color(hex: 0x07080D).opacity(0.98))
         .overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.6), lineWidth: 1))
     }
 
-    private func column(_ title: String, _ patches: [LYSynthPatch], deletable: Bool) -> some View {
+    @ViewBuilder
+    private var infoStrip: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.6).foregroundStyle(LYLLTHTheme.dim)
-            ScrollView {
-                VStack(spacing: 3) {
-                    if patches.isEmpty {
-                        Text("SAVE A SOUND TO SEE IT HERE")
-                            .font(LYLLTHTheme.label(7, weight: .bold)).tracking(1).foregroundStyle(LYLLTHTheme.dim)
-                            .frame(maxWidth: .infinity).padding(.top, 20)
-                    }
-                    ForEach(patches, id: \.name) { item in
-                        HStack(spacing: 0) {
-                            Button { choose(item) } label: {
-                                Text(item.name)
-                                    .font(LYLLTHTheme.label(8.5, weight: .bold)).tracking(0.8)
-                                    .foregroundStyle(item.name == current ? LYLLTHTheme.teal : LYLLTHTheme.text)
-                                    .lineLimit(1)
-                                    .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-                                    .padding(.leading, 8)
-                                    .contentShape(Rectangle())
-                            }.buttonStyle(.plain)
-                            if deletable {
-                                Button { delete(item.name) } label: {
-                                    Image(systemName: "xmark").font(.system(size: 7, weight: .bold)).foregroundStyle(LYLLTHTheme.dim)
-                                        .frame(width: 22, height: 24).contentShape(Rectangle())
-                                }.buttonStyle(.plain).help("Delete this preset")
-                            }
-                        }
-                        .background(LYLLTHTheme.teal.opacity(item.name == current ? 0.1 : 0))
-                        .overlay(Rectangle().stroke(item.name == current ? LYLLTHTheme.teal : LYLLTHTheme.lineStrong, lineWidth: 1))
-                    }
+            if let patch = shown, let info = patch.info {
+                HStack(spacing: 8) {
+                    Text(patch.name).font(LYLLTHTheme.label(9, weight: .bold)).tracking(1).foregroundStyle(LYLLTHTheme.text)
+                    Text(info.layer).font(LYLLTHTheme.label(7, weight: .bold)).tracking(1.2).foregroundStyle(LYLLTHTheme.teal)
+                        .padding(.horizontal, 5).overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.6), lineWidth: 1))
+                    Text(info.register.uppercased()).font(LYLLTHTheme.label(7, weight: .bold)).tracking(1).foregroundStyle(LYLLTHTheme.dim)
+                    Spacer(minLength: 0)
                 }
+                Text(info.role.uppercased()).font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(0.8).foregroundStyle(LYLLTHTheme.text)
+                    .lineLimit(1)
+                Text(("PLAY: " + info.playing + "  ·  MIX: " + info.mix).uppercased())
+                    .font(LYLLTHTheme.label(7, weight: .bold)).tracking(0.6).foregroundStyle(LYLLTHTheme.dim)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("MACROS ON EVERY FACTORY SOUND: 1 TONE · 2 MOTION · 3 SPACE · 4 GRIT")
+                    .font(LYLLTHTheme.label(7, weight: .bold)).tracking(1).foregroundStyle(LYLLTHTheme.dim)
             }
-            .lyScrollers()
         }
-        .frame(maxWidth: .infinity)
+        .padding(8)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
     }
 }
+
 
 /// Factory tables, the user's own tables, and IMPORT / EDIT.
 struct LYTableBrowser: View {

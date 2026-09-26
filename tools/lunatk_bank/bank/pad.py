@@ -23,10 +23,10 @@ def presets():
     out = []
 
     p = P("ASH VEIL", "ANALOG", "ANALOG")
-    p.osc(0, level=0.65, wt=0.55, unison=5, detune=0.22, width=0.7)
-    p.osc(1, level=0.4, wt=0.4, octave=-1, unison=3, detune=0.15, width=0.5)
+    p.osc(0, level=0.65, wt=0.55, unison=5, detune=0.22, width=0.4)
+    p.osc(1, level=0.4, wt=0.4, octave=-1, unison=3, detune=0.15, width=0.0)
     p.filter("LP24", hz=1300, res=0.15, keytrack=0.4, env=0.1)
-    keep_low_clear(p)
+    keep_low_clear(p, 170)
     p.env(1, a=0.9, d=1.5, s=0.9, r=1.6)
     p.env(2, a=1.5, d=2.5, s=0.6, r=1.6)
     pad_voice(p)
@@ -38,6 +38,7 @@ def presets():
     p.motion("LFO2", "A_WTPOS", 0.1)
     p.chorus(mix=0.25, rate=0.15, depth=0.4)
     pad_space(p)
+    p.set("reverb.width", 0.6)
     grit(p, mode="TUBE", drive=0.35, tone=0.5, amount=0.5)
     p.master(0.6)
     p.doc("Warm, dark analog pad that breathes slowly", "C3–C5", "Film, ambient, darkwave, cinematic pop",
@@ -314,10 +315,10 @@ def presets():
     out.append(p)
 
     p = P("UNDERCURRENT", "ANALOG", "GROWL")
-    p.osc(0, level=0.6, wt=0.4, unison=3, detune=0.15, width=0.55)
+    p.osc(0, level=0.6, wt=0.4, unison=3, detune=0.15, width=0.1)
     p.osc(1, level=0.3, wt=0.15)
     p.filter("LP24", hz=900, res=0.18, keytrack=0.4)
-    keep_low_clear(p, 130)
+    keep_low_clear(p, 150)
     p.env(1, a=0.9, d=1.5, s=0.9, r=1.5)
     pad_voice(p)
     velocity(p, 0.35, 0.05)
@@ -327,6 +328,7 @@ def presets():
     p.phaser(mix=0.35, rate=0.06, depth=0.6, freq=0.35)
     p.mod("MACRO2", "PHASER_MIX", 0.2)
     pad_space(p, mix=0.24)
+    p.set("reverb.width", 0.5)
     grit(p, mode="DIODE", drive=0.3, tone=0.45, amount=0.4)
     p.master(0.62)
     p.doc("Low, dark, phasing pad for tension under a scene", "C2–C4", "Thriller score, dark techno, drone-pop",

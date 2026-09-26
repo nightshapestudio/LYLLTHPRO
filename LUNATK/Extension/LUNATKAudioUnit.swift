@@ -283,7 +283,7 @@ final class LUNATKAudioUnit: AUAudioUnit {
         LYSynthPatch.factory.enumerated().map { index, patch in
             let preset = AUAudioUnitPreset()
             preset.number = index
-            preset.name = patch.name
+            preset.name = patch.category.map { "\($0) / \(patch.name)" } ?? patch.name
             return preset
         }
     }

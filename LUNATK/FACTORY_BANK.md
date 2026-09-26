@@ -1,0 +1,215 @@
+# LUNATK factory bank
+
+160 presets. Every one is rendered through the engine in a musical phrase and mixed against a reference arrangement, then gated on loudness, headroom, low end, top end, width, mono fold-down, tails, tuning, macro range, MOTION, velocity and CPU (`tools/lunatk_bank/build.py`).
+
+## Macros (every preset)
+
+- **MACRO 1 TONE**: darker below its default, brighter above.
+- **MACRO 2 MOTION**: scales all movement; at 0 the sound stands still.
+- **MACRO 3 SPACE**: drier below its default, wetter above.
+- **MACRO 4 GRIT**: 0 is the designed tone; up adds drive and damage.
+
+## BASS (24)
+
+| Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
+|---|---|---|---|---|---|---|
+| **IRON SUB** | Clean sine sub under a mid bass or a kick-led groove | E0–E2 | SUPPORT | Techno, trap, cinematic, pop | Mono lines and held roots; glides only between held notes | Keep it mono and give the kick 50–60 Hz; MOTION adds a tempo pump if you have no sidechain |
+| **VELVET SUB** | Round, warm sub-and-a-bit that still reads on small speakers | C1–C3 | SUPPORT | R&B, pop, neo-soul, lo-fi | Legato lines with slides; plays well under chords | The triangle overtone carries on phones; if it crowds a male vocal, pull TONE down a notch |
+| **BRAKE 808** | Long-decay 808 with a click of pitch at the front; slides into held notes | C1–G2 | FOREGROUND | Trap, drill, hip-hop, phonk | One note per hit; overlap notes to slide (mono legato) | Tune it to the key and keep kick and 808 from hitting together, or shorten with a release cut |
+| **PISTON** | Tight, punchy saw bass for 8th and 16th sequences | E1–E2 | RHYTHM | Techno, EBM, industrial, synthwave | Staccato 16ths; accent with velocity | Sidechain lightly to the kick; TONE up for a busier arrangement, down under a vocal |
+| **RUST PULSE** | Nasal pulse-width bass with a slowly breathing width | E1–A2 | RHYTHM | EBM, darkwave, industrial pop | Driving 8ths and syncopated lines | Its body sits at 200–500 Hz: leave that room in pads or scoop them there |
+| **CORROSION ACID** | Squelching resonant line; TONE is the cutoff knob you ride | C1–C3 | FOREGROUND | Acid, techno, electro, breaks | 16ths with overlapping notes to slide; accent with velocity | Automate TONE across the drop; keep the snare's 1–3 kHz clear or tame RES with a high cut |
+| **WIRE FUNK** | Envelope-filter funk bass that barks harder the harder you play | E1–E3 | RHYTHM | Funk, disco, pop, boogie | Syncopated 16ths, ghost notes at low velocity | Velocity is the tone control: play it rather than EQ it |
+| **TAPE BASS** | Muted, round, slightly unsteady bass like a dampened old synth | E1–E3 | SUPPORT | Indie, lo-fi, bedroom pop, soul | Quarter and 8th notes; lets rests breathe | It is soft on purpose: add GRIT before adding EQ if it vanishes in a dense mix |
+| **CORRODED REESE** | Slow-phasing detuned reese for drops and dark verses | E1–E2 | FOREGROUND | DnB, dubstep, dark techno, trailer | Long held notes and slides; let the phasing breathe over bars | The sub is clean and centered; MOTION sets how much it phases, so pull it down under busy drums |
+| **SLAB** | Wide supersaw top over a mono sine sub, for big drops | E1–A2 | FOREGROUND | EDM, future bass, big room, pop drops | Stabs and held roots on the downbeat | The width lives an octave up, the sub stays mono; MOTION adds a 1/4 pump if the track has no sidechain |
+| **DRIFT MONO** | Two drifting saws in a mono voice: warm, analog-feeling lead-bass | E1–E3 | FOREGROUND | Synthwave, retro pop, soundtrack | Legato lines with glide | Sits naturally; if it clashes with a pad's low mids, lower TONE rather than EQ |
+| **GRINDER** | Ring-modulated metal over a clean sub: machinery with a floor | E1–D2 | FOREGROUND | Industrial, EBM, dark techno, trailer | Held notes and slow 8ths | The metal is in 300 Hz–2 kHz: keep guitars or pads out of that band while it plays |
+| **FOLDBACK** | Wavefolded sine: harder notes fold brighter, like bending sheet metal | E1–A2 | FOREGROUND | Industrial techno, hybrid trap, game score | Velocity-sensitive 8ths; accents fold harder | TONE sets the fold depth; darker for verses, brighter for the drop |
+| **CABLE GROWL** | Controlled 1/8 growl over a clean sub; MOTION is the wobble depth | E1–G2 | FOREGROUND | Dubstep, riddim-lite, hybrid trap | Held notes; ride MOTION for the wobble, TONE for the vowel | At MOTION 0 it is a steady growl you can sequence; keep drums' 1–3 kHz clear |
+| **SYNC SNARL** | Hard-sync bark that opens on each note, over a clean sub | E1–A2 | FOREGROUND | Electro, midtempo, industrial, breaks | Punchy 8ths; accents snarl harder | Its bite is 1–3 kHz: give it that space from snares or push it back with TONE |
+| **SIGNAL FM** | Clean FM bass with a woody attack, like a digital upright | E1–E3 | SUPPORT | House, garage, city pop, jazz-funk | Walking lines and syncopation; velocity sets the attack | Very little low mud: it can sit louder than a saw bass under the same kick |
+| **HOLLOW PULSE** | Hollow square bass with a scooped middle that leaves room for vocals | E1–E3 | SUPPORT | Synth-pop, indie, electro-pop | 8ths and offbeats | Already scooped around 900 Hz: it sits under a vocal without EQ |
+| **ORGAN FLOOR** | Drawbar organ bass with a clean fundamental | C1–C3 | SUPPORT | Deep house, gospel-house, garage | Short offbeat notes and walking lines | Works as the only bass; MOTION adds chorus shimmer to the upper drawbars |
+| **CATHEDRAL LOW** | Soft-attack orchestral-weight low end for scores | C1–C3 | SUPPORT | Film, trailer, ambient, post-rock | Long held roots; octaves | Slow attack keeps it off the kick; for trailer hits layer it with a short BASS or PERC |
+| **DARK MATTER** | Swelling low growl that opens over a bar: tension under a scene | C1–G2 | TEXTURE | Trailer, horror, dark ambient, industrial | Whole notes and slow slides; hold for the swell | Everything above the sub moves slowly; MOTION 0 freezes it for dialogue-heavy moments |
+| **MACHINE HEART** | Pulsing quarter-note sub that breathes with the kick | E1–D2 | RHYTHM | Cinematic pulse, techno, ambient techno | Hold one note for a bar or more; the pulse is tempo-synced | Lock the kick on the beat; the dip already makes room for it. MOTION 0 turns the pulse off |
+| **GLASS FLOOR** | Bell-edged FM bass: a glassy attack on a solid sub | E1–A2 | FOREGROUND | UK garage, future garage, liquid DnB | Syncopated 8ths and offbeats | The attack cuts at 1–2 kHz; with a busy top line, pull TONE down |
+| **DIESEL** | Overdriven saw bass with weight and a controlled edge | E1–A2 | FOREGROUND | Industrial rock, EBM, trap metal, midtempo | Power-bass 8ths, held roots | Distortion is moderate by default; GRIT takes it to full. Let a guitar own 2–4 kHz if one is playing |
+| **NEEDLE LAYER** | Buzzy mid-bass with no sub, made to layer over IRON SUB or an 808 | E1–E3 | SUPPORT | Trap, industrial, EBM, hyperpop | Same notes as the sub layer | No low end by design: pair it with a sub on another track and bus them together |
+
+## LEAD (18)
+
+| Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
+|---|---|---|---|---|---|---|
+| **SEARING WIRE** | Hard-sync lead that snarls on each note and cuts through guitars | C4–C6 | FOREGROUND | Industrial rock, synth-rock, EBM, trailer | Monophonic lines with slides; mod wheel for vibrato, pressure opens the sync | Give it 2–4 kHz and pull guitars back there; TONE is the brightness ride |
+| **GLASS VOICE** | Soft, breathy, glass-toned lead that sits like a voice | C4–C6 | FOREGROUND | Pop, ambient pop, R&B, film | Slow melodies and long notes; up to four notes of harmony | Duck it under the real vocal or play it in the gaps; TONE sets how glassy it is |
+| **SHATTERED WHISTLE** | Clean whistle that degrades into stepped digital grit | C4–C7 | FOREGROUND | Glitch pop, hyperpop, game music, IDM | Simple hooks; MOTION adds 1/16 digital stutter | A narrow sound: it cuts through at low level, so start quieter than you think |
+| **FORMANT CRY** | Vowel-shaped lead that sings between A and O | C4–C6 | FOREGROUND | Future bass, melodic dubstep, synth-pop | Expressive held notes; MOTION sweeps the vowel in half notes, TONE picks it | Vowels overlap a singer's: use it in instrumental sections or pan it off the vocal |
+| **PRESSURE LINE** | Classic two-saw ladder lead built for expression: pressure opens it, timbre adds bite | C3–C6 | FOREGROUND | Synthwave, prog, jazz-fusion, film | Play it like an instrument: aftertouch or MPE pressure, wheel vibrato | On a plain keyboard, ride TONE instead of pressure; it answers the same way |
+| **HOLLOW REED** | Woody square-wave reed with a breath edge; MOTION adds a player's tremolo | C4–C6 | FOREGROUND | Film, folk-electronic, ambient, game | Legato phrases with breaths between them | Mid-focused and narrow: it reads over strings and pads without EQ |
+| **LUNAR SUPERLEAD** | Big unison saw lead for hooks and drops | C4–C6 | FOREGROUND | Trance, EDM, big-room, future rave | Hooks and stabs; chords of two or three notes | High-passed at 200 Hz already; if it fights the vocal, pull SPACE down before cutting it |
+| **SIGNAL HORN** | Brassy synth lead with a swelling filter, polyphonic for section lines | C3–C5 | FOREGROUND | Synthwave, funk, city pop, film | Short swells and chordal stabs; accents open the brass | Its swell lives at 700 Hz–2 kHz: thin that range in keys while it plays |
+| **NEON PULSE** | Two pulse waves with moving widths: a bright retro solo voice | C4–C6 | FOREGROUND | Synthwave, outrun, 80s pop, game | Fast runs and held notes with glide | MOTION is the pulse-width sweep; at 0 it holds still for dense mixes |
+| **FURNACE SCREAM** | Distorted sync lead that screams without turning to fizz | C4–C6 | FOREGROUND | Industrial metal, trailer, hard techno | Held notes with bends; MOTION is automatic vibrato | It already carries distortion: don't add more, sit it with a high cut near 8 kHz if the cymbals are bright |
+| **FRAGILE SINE** | Almost-pure sine lead with a faint glass overtone; intimate and exposed | C4–C6 | FOREGROUND | Ambient, piano-led pop, film, lullaby | Slow, sparse melodies; leave space around it | It is quiet in energy: low-cut everything else under 200 Hz rather than boosting it |
+| **RUST THEREMIN** | Gliding, wavering sine that slides into every note | C4–C6 | FOREGROUND | Horror, sci-fi score, dark pop, lounge | Slow lines; every note glides, so write the slide in | MOTION sets the waver; keep it low when doubling a vocal line |
+| **DEGRADED LOOP** | Worn-tape lead: warped pitch, dull top, a little unstable | C4–C6 | FOREGROUND | Lo-fi, chillwave, bedroom pop, vaporwave | Lazy melodies and short hooks | MOTION is the tape wow; at 0 it plays straight and in tune |
+| **BIT RELIC** | Square-wave chip lead; MOTION flips it into octave arpeggio | C4–C6 | FOREGROUND | Chiptune, hyperpop, game, indie-electronic | Fast melodies; MOTION up for classic octave trills | Very bright by nature: the high shelf is already down 4 dB; pull TONE down under a vocal |
+| **STEEL FLUTE** | Breathy FM flute with a metallic overtone on the attack | C4–C6 | FOREGROUND | Film, world-electronic, ambient, game | Legato phrases; wheel or MOTION for vibrato | The breath adds air at 6–8 kHz: pull SPACE down in dense mixes before EQ |
+| **GHOST VOWEL** | Wordless synthetic voice for lines and harmony | C4–C6 | FOREGROUND | Dark pop, film, ambient, witch house | Slow melodies and two- or three-part lines | Occupies the vocal range: use it where the singer rests |
+| **CORROSION LEAD** | Resonant acid lead that squelches above the bass | C3–C5 | FOREGROUND | Acid, techno, electro, breakbeat | Overlapping 16ths to slide; accent with velocity | Ride TONE through the section; if the resonance bites the snare, lower MOTION first |
+| **OCTAVE PUNCH** | Octave-stacked saw hook: punchy, simple, big | C4–C6 | FOREGROUND | House, electro-pop, hyperpop, future bounce | Short hooks and stabs; MOTION adds 1/8 filter chops | Its punch is the filter envelope: shorter notes read louder, so level it on the hook, not a held note |
+
+## PAD (22)
+
+| Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
+|---|---|---|---|---|---|---|
+| **ASH VEIL** | Warm, dark analog pad that breathes slowly | C3–C5 | SUPPORT | Film, ambient, darkwave, cinematic pop | Sustained chords, change every bar or two | High-passed at 140 Hz: it will not fight the bass. Lower SPACE before lowering the fader |
+| **GLASS CATHEDRAL** | Shimmering glass partials in a large hall | C3–C6 | SUPPORT | Ambient, post-rock, worship, film | Open voicings, long holds | The shimmer is 2–6 kHz: keep hi-hats darker or pull TONE down under them |
+| **CORRODED HALO** | Beautiful chord pad with a corroded, sample-rate-reduced edge | C3–C5 | TEXTURE | Industrial ambient, dark pop, trailer | Slow chords; let the damage drift in and out | The grit lives above 3 kHz: GRIT 0 and MOTION 0 give you the clean pad underneath |
+| **SUSPENDED BREATH** | Pitched breath over a soft sine: air with a note in it | C3–C6 | TEXTURE | Ambient, singer-songwriter, neo-classical, film | Sparse chords, long notes | Sits behind a vocal almost by itself; TONE trades breath for tone |
+| **IRON LUNG** | Metal-tinged pad that inhales and exhales in half notes | C3–C5 | TEXTURE | Industrial, dark techno breakdowns, horror | Hold chords across bars; the breathing is tempo-synced | MOTION is the breath depth: 0 for a steady bed. Start chords on a beat so the breath lines up |
+| **NIGHT CHOIR** | Wordless choir that drifts slowly between vowels | C3–C5 | SUPPORT | Film, sacred-ambient, dark pop, game | Slow chords; voice-lead them like a choir | It shares the vocal range: carve 1–3 kHz under a lead singer or use it between lines |
+| **WARM TAPE BED** | Warm, slightly warped chord bed like a worn cassette | C3–C5 | SUPPORT | Lo-fi hip-hop, bedroom pop, chillwave | Chords on the bar; works for 7ths and 9ths | The top is already rolled off: it sits behind drums without EQ. MOTION 0 plays in tune |
+| **SPECTRAL TIDE** | Comb-filtered harmonics that roll in and out over bars | C3–C5 | TEXTURE | Ambient techno, progressive, film | Hold a chord for 4–8 bars and let it evolve | Its movement is tempo-synced: it rises into bar 3 of every 4. Pull MOTION down in busy sections |
+| **FROZEN STRINGS** | Synth string ensemble with a slow bow and gentle vibrato | C3–C6 | SUPPORT | Film, synthwave, pop ballad, trailer | Legato chords; velocity sets the bow pressure | Layer under real strings for size, or alone as a warm bed; TONE darkens it behind vocals |
+| **DUST HARMONICS** | Pure harmonics that open slowly over three seconds | C3–C6 | SUPPORT | Ambient, neo-classical, meditation, film | Hold chords; the longer you hold, the more partials appear | Starts nearly pure: great under piano. TONE sets how far it opens |
+| **FAULT LINE** | Chord pad whose voices drift slightly apart and back: uneasy, never wrong | C3–C5 | TEXTURE | Horror, psychological thriller, dark ambient | Sustained chords, especially minor and suspended | MOTION is how far it drifts; at 0 it is a stable dark pad for dialogue scenes |
+| **HALOGEN** | Bright supersaw chord pad for builds and drops | C3–C6 | FOREGROUND | EDM, trance, future bass, pop drops | Full chords; MOTION adds a 1/4 pump for tracks without sidechain | High-passed at 180 Hz: stack it over a bass freely. Start chords on the beat when pumping |
+| **VELVET CHORDS** | Soft, warm chord pad with a quick-enough attack to play rhythms | C3–C5 | SUPPORT | Pop, R&B, gospel-pop, indie | Chords on the beat or the bar | A do-everything bed: put it 3–6 dB under the vocal and it will not need EQ |
+| **UNDERCURRENT** | Low, dark, phasing pad for tension under a scene | C2–C4 | SUPPORT | Thriller score, dark techno, drone-pop | Low chords and open fifths | It sits in 200–800 Hz: keep the bass simple under it and let this carry the harmony |
+| **PULSE CLOUD** | Classic PWM string pad with two widths drifting against each other | C3–C5 | SUPPORT | Synthwave, 80s pop, new wave, retro score | Chords, octaves, slow melodies | Its movement is the pulse width; MOTION 0 leaves a still, clean pulse pad |
+| **FM MIST** | Soft FM bell partials blurred into a pad | C3–C6 | SUPPORT | Ambient, lo-fi, new age, film | Open chords and slow melodies | Glassy but gentle: it layers under piano or guitar without masking them |
+| **VOID BLOOM** | Pad that blooms from sine into folded harmonics as you hold it | C3–C5 | TEXTURE | Dark ambient, industrial, sci-fi score | Hold chords for two bars or more | The bloom is the point: short chords stay soft. TONE darkens the folded top |
+| **RUINED ORGAN** | Drawbar organ chords through a tired rotary and warped tape | C3–C5 | SUPPORT | Gothic pop, indie, psych, film | Sustained chords and slow changes | MOTION is the rotary and tape wear: 0 gives a clean organ bed |
+| **HOLLOW SKY** | Hollow, notched pad with an open sky above it | C3–C6 | SUPPORT | Post-rock, ambient pop, shoegaze, film | Wide voicings and pedal tones | Scooped at 1 kHz already: it leaves the middle to vocals and guitars |
+| **TENSION FIELD** | Slowly rising, flanging pad that builds unease over six seconds | C3–C5 | TRANSITION | Thriller, horror, trailer build | Hold one chord across a build; retrigger to restart the rise | It rises on its own: automate TONE down to hold it back, or MOTION 0 for a flat bed |
+| **LUMEN** | Glassy key-pad: a soft strike that blooms into a sustained glow | C3–C6 | SUPPORT | Ambient pop, lo-fi, piano-led film cues | Arpeggiated chords or held voicings | Pairs with a real piano: pan them apart and let this fill the sustain |
+| **SEAFLOOR** | Submerged, muffled pad with a slow comb shimmer | C3–C5 | TEXTURE | Deep ambient, dub techno, underwater cues | Long chords; dub-style chord stabs with SPACE up | Almost no top end: it can be loud without masking anything above 1 kHz |
+
+## KEYS (16)
+
+| Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
+|---|---|---|---|---|---|---|
+| **EMBER EP** | Tine electric piano: bell-bright when struck hard, round when soft | C2–C6 | SUPPORT | Neo-soul, R&B, jazz-pop, lo-fi | Comping chords; dynamics matter, play it with velocity | MOTION is tremolo and autopan; at 0 it sits dead-centre for dense mixes |
+| **WURLI RUST** | Reedy electric piano that growls when you dig in | C2–C5 | SUPPORT | Soul, indie, gospel, blues-rock | Chords and bluesy fills; accents bark | Its growl is 1–2 kHz: pull the guitar there, not this |
+| **GLASS KEYS** | Crystalline digital keys with a hard FM strike | C3–C6 | FOREGROUND | Pop, city pop, 80s ballad, future funk | Chords and fast right-hand figures | Bright attack: in a busy chorus, drop TONE a little rather than EQ-ing the top |
+| **FELT UPRIGHT** | Muted felt piano: soft hammers, short sustain, intimate | C2–C6 | SUPPORT | Neo-classical, lo-fi, indie folk, film | Quiet chords and simple melodies; play soft | Very little above 3 kHz: sit it close and dry with SPACE down for intimacy |
+| **FACTORY KEYS** | Metallic ring-mod keys: struck machinery with a pitch | C3–C5 | FOREGROUND | Industrial, EBM, dark electro, game | Short chords and ostinatos; accents ring harder | Inharmonic by design: keep chords to three notes so it stays readable |
+| **SOFT DIGITAL** | Soft, slightly stepped digital keys, like a cheap 90s module in a good room | C3–C5 | SUPPORT | Lo-fi, vaporwave, bedroom pop, game | Chords and simple toplines | Gentle and narrow: it fits under a vocal at almost any level |
+| **CLAV WIRE** | Snappy clavinet-style keys with an envelope filter | C3–C5 | RHYTHM | Funk, disco, P-funk, pop-funk | Staccato 16ths, muted comping, ghost notes | Already high-passed at 220 Hz; MOTION turns it into an auto-wah |
+| **CHAPEL DRAWBARS** | Drawbar organ with a rotary shimmer on MOTION and tube overdrive on GRIT | C2–C6 | SUPPORT | Gospel, soul, rock, house | Sustained chords, stabs, glissandos | No release tail: it stops dead, so it can sit loud without smearing the groove |
+| **HOLLOW CELESTE** | Celeste-like bell keys, clean and hollow | C4–C7 | FOREGROUND | Film, lullaby, Christmas, fairy-tale score | Simple high melodies and broken chords | Lives above 1 kHz: it can double a melody without muddying anything |
+| **TAPE PIANO** | Piano-ish keys played back from a warped cassette | C2–C6 | SUPPORT | Lo-fi hip-hop, chillhop, bedroom pop | Jazz chords, 7ths and 9ths, lazy timing | The top is gone on purpose: pair with a crisp drum loop. MOTION 0 plays straight |
+| **NIGHT STAB** | Short filtered chord stab with a dotted echo | C3–C5 | RHYTHM | House, deep house, UK garage, rave | Off-beat stabs and syncopated chord hits | The echo is dotted-1/8; SPACE takes it from dry to dub. MOTION slowly sweeps the filter over 2 bars |
+| **VAPOR EP** | Chorused digital EP with a glassy strike, the 80s ballad sound | C3–C5 | SUPPORT | City pop, future funk, vaporwave, AOR | Lush 7th and 9th chords | Wide from the chorus: SPACE and MOTION down if it crowds the stereo field |
+| **IRON VIBES** | Vibraphone-like bars with a motor tremolo on MOTION | C3–C6 | SUPPORT | Jazz, trip-hop, lounge, noir score | Four-note chords, sparse melodies | MOTION is the vibes motor speed setting; at 0 the motor is off |
+| **GRAIN KEYS** | Keys through a damaged sampler: grain drops in and out in 1/8s | C3–C5 | TEXTURE | Glitch hop, IDM, experimental pop | Chords and repeated figures | MOTION is the 1/8 damage; GRIT is how damaged. Both at 0 give clean keys |
+| **POLY WARMTH** | Classic analog poly-synth keys with ensemble chorus | C2–C5 | SUPPORT | Synth-pop, disco, 80s, indie | Chords, octave lines, arpeggios | The bread-and-butter synth: TONE for brightness, SPACE for size |
+| **HARMONIUM** | Reed organ with a breathing bellows on MOTION | C2–C5 | SUPPORT | Folk, chamber pop, film, drone-folk | Held chords and drones; the bellows breathe on MOTION | Mid-heavy and narrow: place it under acoustic guitar or voice without EQ |
+
+## PLUCK (16)
+
+| Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
+|---|---|---|---|---|---|---|
+| **TIGHT PLUCK** | Classic filter-envelope saw pluck for chords and arpeggios | C3–C6 | RHYTHM | House, EDM, pop, tropical | 16th arpeggios and off-beat chords | TONE also lengthens the pluck; the dotted echo sits right at 110–128 BPM |
+| **RESIN STRING** | A plucked string made from a noise burst and a tuned comb | C3–C6 | RHYTHM | Folk-electronic, ambient, world, film | Arpeggios and picked melodies; soft velocity for a nylon feel | Physical and dry: SPACE for size, TONE for how bright the pick is |
+| **COPPER RING** | Metallic, slightly inharmonic pluck like struck copper | C4–C6 | FOREGROUND | Industrial pop, dark electro, game | Sparse figures; accents ring harder | Keep lines simple so the inharmonic ring stays musical |
+| **GLASS DROP** | Clean glass pluck with a ping-pong echo | C4–C7 | FOREGROUND | Future garage, ambient pop, lo-fi, film | Sparse melodies and 8th-note figures | Very little below 300 Hz: it floats over any mix; SPACE sets the echo |
+| **SYNTH HARP** | Synthetic harp: bright pluck, long soft ring | C3–C6 | SUPPORT | Film, fantasy score, ambient, ballad | Glissandos and broken chords | Lets ring: in a dense track, TONE down and SPACE down |
+| **TINE DROP** | Thumb-piano pluck with a metallic tine click | C4–C6 | RHYTHM | Afro-house, organic house, lo-fi, children's score | Syncopated ostinatos | The click is 2–4 kHz: under a busy hi-hat, pull TONE down a notch |
+| **WOOD MALLET** | Warm wooden mallet, marimba-adjacent | C3–C6 | RHYTHM | Tropical house, afrobeats, pop, minimal | Syncopated patterns and rolls | Short and dry: it can sit loud; MOTION varies each hit slightly for a played feel |
+| **NYLON HINT** | Soft, dark plucked string with a nylon-like thumb attack | C3–C6 | SUPPORT | Bossa-electronic, chill, lo-fi, folk | Fingerpicked chords and melodies at modest velocity | Dark by design: it sits under a vocal like an acoustic guitar would |
+| **STAB DUST** | Wide supersaw pluck for chord stabs | C3–C6 | RHYTHM | Future bass, melodic EDM, hyperpop | Chord stabs on the grid | Wide top, clean bottom (HP 200 Hz). MOTION adds a 1/4 pump from each note |
+| **BIT PLUCK** | Chiptune pluck; MOTION randomizes the pulse width per note | C4–C6 | RHYTHM | Chiptune, hyperpop, game, glitch | Fast arpeggios | The top is already shelved down: still, keep it under the lead in level |
+| **RUST PICK** | Distorted, rusty-string pluck with a metal pick | C3–C5 | RHYTHM | Industrial, dark electro, cyberpunk score | Muted riffs and repeated notes | Already driven: sit it like a distorted guitar, 2–4 kHz forward, lows cut |
+| **MUTED PLUCK** | Short, palm-muted synth pluck | C3–C5 | RHYTHM | Tropical house, deep house, pop | Off-beat patterns and 8ths | Tiny and dry: great doubled with a bass line an octave up |
+| **PIZZ ENSEMBLE** | Synthetic pizzicato string section | C3–C6 | RHYTHM | Film, trailer ostinato, pop, game | Ostinatos and staccato chords | Plays the role of real pizz in a mockup: add SPACE for the hall, keep it dry for pop |
+| **DATA RAIN** | Digital pluck where each note lands on a different timbre | C4–C6 | TEXTURE | IDM, glitch, ambient techno, game UI | Fast 16ths and random-feeling arpeggios | MOTION sets how different each note is; at 0 every note matches |
+| **CHIME RIG** | Bright FM chime with a long, clean ring | C4–C7 | FOREGROUND | Pop, holiday, ambient, film | Sparse high notes | Rings long: leave space after each note or shorten with a lower TONE |
+| **HOLLOW PICK** | Hollow square pluck with a moving notch | C3–C6 | RHYTHM | Synth-pop, indie-electronic, game | Arpeggios and riffs | Its notch leaves the vocal band open; MOTION moves the notch |
+
+## MOTION (18)
+
+| Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
+|---|---|---|---|---|---|---|
+| **GATE CATHEDRAL** | Supersaw chords chopped by a 16-step gate | C3–C5 | RHYTHM | Trance, progressive, big-room breakdowns | Hold chords for a bar or more; start them on the downbeat | The gate restarts with each chord, so play on the bar line. MOTION is gate depth; 0 is a plain pad |
+| **PISTON FIELD** | Chords driven through a 16-step filter sequence, like a mechanical press | C3–C5 | RHYTHM | Industrial techno, EBM, midtempo, cyberpunk | Hold chords a bar at a time | The accents land on 1, 2.1 and 3: keep your hats off them or embrace the push. MOTION 0 stops the sequence |
+| **RUST CONVEYOR** | Tuned metal rhythm, like a conveyor belt in the key of your chord | C3–C5 | RHYTHM | Industrial, techno, horror pulse | Hold a chord; it clanks in time | Band-passed around 1.6 kHz: it sits between the snare and the hats. MOTION 0 is a steady metallic drone |
+| **ARP CIRCUIT** | Up-down 1/16 arpeggio over two octaves of whatever chord you hold | C3–C5 | RHYTHM | Synthwave, techno, trance, game | Hold chords; the arp plays them. Turn ARP off for a plain pluck | MOTION sweeps its filter over 2 bars; at 0 the arp stays at one brightness |
+| **GHOST ARP** | Glass notes picked at random from your chord, trailing echoes | C4–C6 | TEXTURE | Ambient, film, lo-fi, downtempo | Hold a chord and let it wander; never the same twice, always in key | Sits high and sparse; SPACE sets how far the echoes trail |
+| **PULSE BED** | Soft pad pulsing in 1/8s: a cinematic heartbeat bed | C3–C5 | SUPPORT | Film, trailer, ambient techno, documentary | Hold chords; start on the beat | Makes an arrangement feel like it is moving without adding drums; MOTION 0 is a still pad |
+| **TIDAL SWELL** | Chords that swell up through each bar like a reversed note | C3–C5 | RHYTHM | Future garage, ambient, chillwave, film | Hold chords across bars; start on the downbeat | The swell peaks at the end of the bar, leading into the next downbeat. MOTION 0 is a flat pad |
+| **MORSE DATA** | Irregular digital blips in the key of your chord, like a transmission | C4–C6 | RHYTHM | IDM, sci-fi score, minimal techno | Hold a chord; the rhythm repeats every bar | Keep it quieter than you think: a little goes a long way. MOTION 0 is a still digital pad |
+| **TRIPLET ENGINE** | Chords gated in a rolling triplet pattern | C3–C5 | RHYTHM | Trap soul, afro-house, cinematic hip-hop | Hold chords on the downbeat | The triplet pushes against straight drums: great under a 4/4 groove. MOTION is gate depth |
+| **HEARTBEAT** | A low double-pulse like a heartbeat, every half note | C2–C4 | RHYTHM | Thriller, horror, trailer, dark ambient | Hold one low note or a fifth | It is a clock for tension: works at 60–100 BPM. MOTION 0 is a steady dark drone |
+| **SPIRAL FILTER** | A 2-bar filter spiral with a soft quarter-note push | C3–C5 | RHYTHM | Progressive house, melodic techno, ambient | Hold chords for two bars at a time | The sweep opens across bar 1 and closes across bar 2; MOTION 0 stops both movements |
+| **CLOCKWORK** | Swung 1/16 glass arpeggio in the order you play the notes | C4–C6 | RHYTHM | Downtempo, lo-fi house, UK garage, film | Play the chord note by note in the order you want it arpeggiated | Swing is built in (35%); line your hats' swing up with it |
+| **CHOPPED TAPE** | Chords chopped and dropping an octave twice a bar, like a sliced sample | C3–C5 | RHYTHM | Lo-fi, hip-hop, future beat, glitch pop | Hold chords a bar at a time | The octave drops on steps 7 and 14 give it a sampled-and-chopped feel; MOTION 0 is plain chords |
+| **OCEAN MACHINE** | Slow 2-bar tide with a quick 1/8 stereo shimmer on top | C3–C5 | TEXTURE | Ambient, chillout, deep house breakdowns | Long chords | The 1/8 panning adds life without rhythm clutter; MOTION 0 centres and stills it |
+| **VOLTAGE STEPS** | Resonant chord sequence: 16 filter steps with 8th-note gates | C3–C4 | RHYTHM | Acid house, electro, techno | Hold chords low; the sequence plays them | TONE rides the whole sequence brighter or darker; MOTION 0 is held chords |
+| **SHIMMER TICKS** | High glass shimmer flickering in 1/32s, like a hi-hat made of light | C4–C7 | TEXTURE | Pop, EDM, ambient, trap | Hold high chords over the drop or verse | High-passed at 400 Hz: it never touches the low mids. MOTION 0 is a static shimmer pad |
+| **IRON RAIN** | Tuned metallic 16ths with accents, a percussive bed in the key | C4–C6 | RHYTHM | Industrial, dark techno, action score | Hold one note or a fifth; it ticks in time | Replaces a shaker or hat loop with something pitched; keep it under the real hats |
+| **CHORD STABBER** | Holds your chord and restrikes it in swung 1/8 stabs | C3–C5 | RHYTHM | House, disco, UK garage, funk | Hold chords; the arp restrikes them in time | Turn ARP off to play the stabs yourself; MOTION sweeps the filter over each bar |
+
+## DRONE (18)
+
+| Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
+|---|---|---|---|---|---|---|
+| **TURBINE HALL** | A tuned machine hum with metal overtones spinning up and down | C1–C3 | TEXTURE | Industrial, sci-fi, horror, documentary | Hold the root under a scene or a breakdown | Tuned to the note you hold, so it can sit under harmony; MOTION 0 is a steady hum |
+| **DREAD CURRENT** | A dark, slowly beating low drone for dread | C1–C2 | SUPPORT | Horror, thriller, dark ambient, industrial | One note, or root and fifth, for as long as the tension lasts | The low end is mono and beats slowly; MOTION sets how much it churns |
+| **CATHEDRAL AIR** | Luminous choir-and-glass drone: beauty with space around it | C3–C5 | TEXTURE | Film, sacred-ambient, post-rock, meditation | Hold one or two notes for a long time | High-passed at 200 Hz: it floats over everything; SPACE sets the size of the room |
+| **POWER LINE** | Electrical hum with crackle, tuned to the note you hold | C1–C3 | TEXTURE | Industrial, horror, found-sound ambient, film | Hold the root; use it as a bed under dialogue or between cues | Narrow and mid-focused: it sits under anything; MOTION adds flicker |
+| **DEEP WATER** | Muffled low drone with slow swells, as if heard underwater | C1–C3 | TEXTURE | Ambient, dub, nature doc, underwater cues | Hold a low note; let the swells move on their own | Almost nothing above 1 kHz: it can be loud without masking anything |
+| **RADIO STATIC** | Tuned radio static that searches around the note | C3–C5 | TEXTURE | Sci-fi, glitch, found-sound, transitions | Hold a note as a bed, or sweep TONE for a tuning-dial move | Band-passed and tamed at the top; bring it in under a breakdown |
+| **GLASS HORIZON** | High shimmering partials drifting like light on a horizon | C4–C6 | TEXTURE | Ambient, film, post-rock, worship | Hold high notes above the harmony | Lives above 500 Hz: it adds air to a mix without touching the body of it |
+| **CORRODED TONE** | A pure tone that breathes in and out of digital decay | C2–C4 | TEXTURE | Industrial ambient, glitch, dark pop intros | Hold one note; let it decay and recover | MOTION is the breathing damage, GRIT the ceiling; both at 0 is a clean tone |
+| **MONOLITH** | A huge stacked-fifth drone that slowly opens over eight seconds | C1–C3 | SUPPORT | Trailer, epic score, doom, post-metal | One low note; hold it for the whole build | The octave-and-fifth stack is built in: hold one note, not a chord. Low end stays centred |
+| **WIND TUNNEL** | Wind that whistles around the note you hold | C3–C5 | TEXTURE | Film, game ambience, winter, desolate cues | Hold a note; gusts come and go on their own | Faintly pitched: it fits the key while reading as weather |
+| **HOLLOW EARTH** | A hollow, cavernous low drone with a slow comb sweep | C1–C3 | TEXTURE | Cave and tomb cues, dark ambient, doom | One low note | The comb scoops the middle: it leaves room for voices above it |
+| **SIGNAL DECAY** | An FM drone whose overtones drift in and out like a fading signal | C2–C4 | TEXTURE | Sci-fi, IDM, experimental score | One note or a fifth | The FM index moves slowly; MOTION 0 gives a steady metallic tone |
+| **FROZEN CHOIR** | A choir holding one vowel forever, slowly shifting | C2–C4 | SUPPORT | Film, sacred, dark ambient, game | Hold one note or a fifth | Occupies 300 Hz–3 kHz: keep other sustained parts out of it |
+| **NIGHT FIELD** | Crackling night air with a faint flickering tone, like insects and wires | C4–C6 | TEXTURE | Film, horror, found-sound ambient, game night scenes | Hold a high note; it sits as ambience | All above 1.5 kHz: a background layer that never clouds the mix |
+| **VOID ENGINE** | Wavefolding engine drone that revs slowly in time | C1–C3 | TEXTURE | Sci-fi, cyberpunk, industrial, game | One note; the folding revs over two bars | Tempo-synced movement: useful as a groove-aware bed under a breakdown |
+| **SLOW BURN** | A drone that burns from dark to bright over ten seconds | C2–C4 | TRANSITION | Trailer build, thriller, post-rock swell | Hold one note through a build; retrigger to start again | It builds on its own: use it for the last 4–8 bars before a drop or reveal |
+| **ASH FALL** | Soft tone under vinyl crackle, like ash drifting in still air | C3–C5 | TEXTURE | Lo-fi, film, ambient, spoken-word beds | Hold a note or chord as a bed | The crackle is always there, the tone breathes; MOTION 0 holds both still |
+| **ORGAN PEDAL** | A church-organ pedal note in a big room | C1–C3 | SUPPORT | Sacred, film, gothic, post-rock | Hold the bass note for as long as the harmony above it lasts | A pedal point: the low end is mono and steady, so it can sit under a whole choir |
+
+## PERC (12)
+
+| Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
+|---|---|---|---|---|---|---|
+| **IRON KICK** | Punchy, tuned electronic kick with a clean click | Tune to the song's key around C1–G1 | RHYTHM | Techno, house, pop, hip-hop | Play one note per hit; the note you play sets the tuning | MOTION is the pitch-drop depth (punch), TONE the click; keep the bass out of its 50–70 Hz or sidechain it |
+| **DEEP KICK** | Long, round sub kick with a soft attack | Tune around C1–G1 | RHYTHM | Deep techno, dub techno, trap, ambient techno | Quarter notes, or sparse hits with room to ring | It rings long: this is the bass in sparse tracks. Shorter release by playing shorter notes |
+| **FURNACE KICK** | Overdriven industrial kick: hard, but still tuned and punchy | Tune around C1–G1 | RHYTHM | Industrial techno, hard techno, EBM, trap metal | Four-on-the-floor or broken patterns | Already distorted: it takes the place of a clean kick, not a layer; GRIT takes it further |
+| **SNARE PLATE** | Tight synthetic snare: a tuned body under a bright crack | Body tuned around G2–D3 | RHYTHM | Pop, techno, electro, synthwave | Backbeats and ghost notes at low velocity | The crack sits at 2–3 kHz; SPACE for a bigger room, TONE to darken it under a vocal |
+| **CLAP RUST** | Three-strike hand clap with a rough edge | Unpitched | RHYTHM | House, trap, pop, techno | Backbeats; layer with a snare | MOTION gives each clap a slightly different colour, like real hands |
+| **RIM SPARK** | Short woody rimshot click | Tuned around C4 | RHYTHM | Deep house, reggaeton, minimal, lo-fi | Syncopated clicks and off-beats | Tiny and bright: it cuts through at low level |
+| **STEEL HAT** | Closed metallic hat; harder hits ring a little longer | Unpitched | RHYTHM | Techno, house, trap, electro | 8ths and 16ths with velocity accents | MOTION varies each hit so rolls sound played, not looped |
+| **OPEN STEEL** | Open metallic hat that the next closed hit chokes (mono voice) | Unpitched | RHYTHM | House, disco, techno, garage | Off-beat opens; play STEEL HAT on the same track to choke it | Mono by design: any new note cuts the ring, like a real hi-hat pedal |
+| **GRAIN SHAKER** | Soft grainy shaker with a swell on each hit | Unpitched | RHYTHM | Afro-house, reggaeton, pop, lo-fi | 16ths with accents on the off-beats | Sits under hats; MOTION humanizes every hit |
+| **BRASS TOM** | Tuned synth tom: play it melodically across an octave | C2–C4 | RHYTHM | Synthwave, 80s pop, cinematic drums, electro | Fills down the keyboard; tuned to the note | MOTION is the pitch bend on each hit; tune fills to the key |
+| **ANVIL STRIKE** | Metal-on-metal strike, inharmonic and bright | Unpitched | RHYTHM | Industrial, EBM, trailer percussion, game | Accents on 2 and 4, or sparse hits in a groove | Inharmonic by design, so it never clashes with the key; keep it sparse |
+| **ZAP BLIP** | Electronic zap: a fast downward sweep | C3–C5 | RHYTHM | Electro, IDM, trap, video-game | Fills and accents; pitch it for melodic zaps | MOTION sets the sweep depth; short enough to sit between any drums |
+
+## FX (16)
+
+| Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
+|---|---|---|---|---|---|---|
+| **CORRODED RISER** | Two-bar tempo-synced riser: saws and noise climbing into a drop | Trigger on C3–C4 | TRANSITION | EDM, trailer, techno, pop builds | Hold one note for the two bars before the drop; release on the downbeat | It always lasts two bars at any tempo; MOTION sets how far it climbs |
+| **DOWNLIFTER** | One-bar falling sweep for the moment after a drop or into a breakdown | Trigger on C4 | TRANSITION | EDM, house, trap, pop | One note on the downbeat you are leaving | Tempo-synced to one bar; SPACE sets how long the tail hangs |
+| **FORGE IMPACT** | A heavy impact: a falling sub boom and a crash of noise into a hall | Trigger around C1–C2 | TRANSITION | Trailer, cinematic, EDM drops, game | One note on the downbeat of the drop or cut | Its low boom is mono; layer it once, on the downbeat, and duck the bass under it |
+| **SUB DIVE** | A sub-bass pitch dive over one bar | Trigger on C2–C3 | TRANSITION | Trap, dubstep, EDM, trailer | One note into the drop or a stop | Mono sub: treat it like the bass for that bar, not a layer on top of it |
+| **WHOOSH** | A half-bar whoosh past the listener | Trigger anywhere | TRANSITION | Pop, EDM, trailer, video edits | One note, starting half a bar before the hit | Tempo-synced: it peaks on the next downbeat when started half a bar early |
+| **REVERSE SWELL** | Reverse-cymbal swell that snaps off at the bar line | Trigger anywhere | TRANSITION | Pop, rock, EDM, film | Start one bar before the downbeat and release on it | Stops dead on release: time the note-off to the downbeat |
+| **TAPE STOP** | Play a chord and it slows to a stop over half a bar, like a tape machine | C3–C5 | TRANSITION | Hip-hop, EDM, pop, lo-fi | Hold a chord from the last half bar before a break | MOTION sets how far it falls; release when you want the stop to end |
+| **GLITCH BURST** | A short burst of stuttering digital debris | Trigger anywhere | TRANSITION | Glitch, IDM, hyperpop, trap fills | Single hits at the end of a phrase | Short and bright: tuck it in the gap before a downbeat |
+| **METAL SCRAPE** | Metal dragged across metal, rising over two bars | Trigger C3–C5 | TRANSITION | Industrial, horror, trailer, game | Hold for a build; the pitch tracks the note | Band-limited to 1–4 kHz: it cuts through without covering drums |
+| **DARK SIREN** | A slow, minor-third siren that rises and falls each bar | C3–C5 | TEXTURE | Industrial, horror, dystopian score, techno | Hold under a breakdown or a scene change | Sits in the mids: keep it quieter than the lead. MOTION 0 is a still, uneasy interval |
+| **SPACE DEBRIS** | Scattered sci-fi blips drifting through space | Trigger C4–C6 | TEXTURE | Sci-fi, IDM, ambient techno, game | Hold in intros and breakdowns | Sparse and high: it decorates without clutter; MOTION 0 turns it into a steady tone |
+| **TENSION CLUSTER** | A semitone cluster that rises in pitch and brightness over four bars | Trigger C3–C4 | TRANSITION | Thriller, horror, trailer build | Hold for the whole four-bar build | Dissonant on purpose, and it ends: cut it hard on the downbeat of the release |
+| **LASER FALL** | A falling hard-sync laser with a dotted echo | Trigger C4–C6 | TRANSITION | Electro, synthwave, EDM, game | Single hits as fills or accents | MOTION sets how far it falls; SPACE how far it echoes |
+| **ACCELERATOR** | A pulse that speeds up from quarters toward sixteenths over two bars | Trigger C3–C4 | TRANSITION | EDM builds, trailer, techno | Hold for the two bars before a drop | The acceleration is tempo-locked: start it exactly two bars before the drop |
+| **AIR PASS** | A soft breath of air sweeping across the stereo field | Trigger anywhere | TRANSITION | Pop, ambient, acoustic-electronic, film | Gentle transitions between sections | Quiet and airy: for soft songs where a riser would be too much |
+| **SHATTER HIT** | Glass breaking into crackle, with a long bright tail | Trigger C4–C6 | TRANSITION | Trailer, pop drops, film cuts | One hit on a cut or reveal | Above 700 Hz only: it layers over a low impact without muddying it |

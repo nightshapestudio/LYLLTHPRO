@@ -259,10 +259,10 @@ def presets():
     out.append(p)
 
     p = K("NIGHT STAB", "ANALOG", "ANALOG")
-    p.osc(0, level=0.65, wt=0.9, unison=3, detune=0.12, width=0.5)
+    p.osc(0, level=0.65, wt=0.9, unison=3, detune=0.12, width=0.2)
     p.osc(1, level=0.35, wt=0.8, octave=1)
     p.filter("LP24", hz=900, res=0.2, keytrack=0.4, env=0.35)
-    low_clear(p, 160)
+    low_clear(p, 200)
     p.env(1, a=0.001, d=0.45, s=0.0, r=0.2)
     p.env(2, a=0.001, d=0.25, s=0.0, r=0.2)
     keys_voice(p)

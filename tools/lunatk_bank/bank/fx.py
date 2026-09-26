@@ -1,0 +1,381 @@
+from lunatk import Preset
+from bank._common import echo, grit, space
+
+
+def F(name, a="ANALOG", b="BASIC"):
+    return Preset(name, "FX", a, b)
+
+
+def fx_voice(p, voices=4, vel=0.5):
+    return p.voice(voices=voices, glide=0.0, vel=vel, bend=2)
+
+
+def hall(p, mix=0.28, decay=0.45, amount=0.2, width=0.85):
+    return space(p, mix, mode="HALL", size=0.7, decay=decay, damp=0.55, predelay=0.1, width=width, amount=amount)
+
+
+RAMP_UP = [-1 + 2 * (i / 31.0) for i in range(32)]
+RAMP_UP_CURVED = [-1 + 2 * (i / 31.0) ** 2 for i in range(32)]
+RAMP_DOWN = [1 - 2 * (i / 31.0) for i in range(32)]
+
+
+def sweep(p, lfo, bars="2 BAR", points=RAMP_UP):
+    """A one-shot, tempo-synced ramp: risers stay in time at any BPM."""
+    return p.lfo(lfo, "CUSTOM", sync=bars, mode="ENV", smooth=True, points=points)
+
+
+def presets():
+    out = []
+
+    p = F("CORRODED RISER", "ANALOG", "ANALOG")
+    p.osc(0, level=0.5, wt=0.9, unison=5, detune=0.3, width=0.6)
+    p.noise(0.4, "WHITE", color=0.3, keytrack=False)
+    p.filter("LP24", hz=400, res=0.25, keytrack=0.2)
+    p.filter2("HP12", hz=200)
+    p.env(1, a=0.05, d=1.0, s=1.0, r=0.6)
+    fx_voice(p)
+    p.set("macro2", 0.7)
+    sweep(p, 1, "2 BAR", RAMP_UP_CURVED)
+    p.motion("LFO1", "CUTOFF", 0.35)
+    p.motion("LFO1", "PITCH", 0.25)
+    p.motion("LFO1", "NOISE_LEVEL", 0.2)
+    p.tone("NOISE_LEVEL", 0.2)
+    hall(p, mix=0.24)
+    grit(p, mode="DOWNSAMPLE", drive=0.3, tone=0.5, amount=0.4)
+    p.eq(high=-4, high_hz=9000)
+    p.master(0.55)
+    p.doc("Two-bar tempo-synced riser: saws and noise climbing into a drop", "Trigger on C3–C4", "EDM, trailer, techno, pop builds",
+          "Hold one note for the two bars before the drop; release on the downbeat", "TRANSITION",
+          "It always lasts two bars at any tempo; MOTION sets how far it climbs")
+    p.context(hold=8, unpitched=True)
+    out.append(p)
+
+    p = F("DOWNLIFTER", "ANALOG", "BASIC")
+    p.osc(0, level=0.4, wt=0.8, unison=3, detune=0.2, width=0.0)
+    p.noise(0.5, "PINK", color=0.35, keytrack=False)
+    p.filter("LP24", hz=6000, res=0.15)
+    p.filter2("HP12", hz=200)
+    p.env(1, a=0.005, d=1.5, s=0.0, r=0.8, dcurve=0.3)
+    fx_voice(p)
+    p.set("macro2", 0.7)
+    sweep(p, 1, "1 BAR", RAMP_UP)
+    p.motion("LFO1", "CUTOFF", -0.4)
+    p.motion("LFO1", "PITCH", -0.3)
+    p.tone("CUTOFF", 0.15)
+    hall(p, mix=0.28, width=0.15)
+    grit(p, mode="SOFT", drive=0.3, tone=0.5, amount=0.35)
+    p.master(0.55)
+    p.doc("One-bar falling sweep for the moment after a drop or into a breakdown", "Trigger on C4", "EDM, house, trap, pop",
+          "One note on the downbeat you are leaving", "TRANSITION",
+          "Tempo-synced to one bar; SPACE sets how long the tail hangs")
+    p.context(hold=4, unpitched=True)
+    out.append(p)
+
+    p = F("FORGE IMPACT", "BASIC", "BASIC")
+    p.osc(0, level=0.8, wt=0.0)
+    p.noise(0.0, "WHITE", color=0.4, keytrack=False)
+    p.env(3, a=0.0005, d=0.25, s=0.0, r=0.25)
+    p.mod("ENV3", "NOISE_LEVEL", 0.6)
+    p.filter("LP24", hz=4000, res=0.05)
+    p.env(1, a=0.0005, d=1.4, s=0.0, r=1.4, dcurve=-0.5, rcurve=-0.5)
+    p.env(4, a=0.0005, d=0.5, s=0.0, r=0.3)
+    p.set("macro2", 0.5)
+    p.mod("ENV4", "PITCH", 0.8, aux="MACRO2")
+    fx_voice(p, voices=2)
+    p.tone("NOISE_LEVEL", 0.25)
+    hall(p, mix=0.3, decay=0.45, width=0.12)
+    grit(p, mode="TUBE", drive=0.4, tone=0.45, amount=0.5)
+    p.master(0.6)
+    p.doc("A heavy impact: a falling sub boom and a crash of noise into a hall", "Trigger around C1–C2", "Trailer, cinematic, EDM drops, game",
+          "One note on the downbeat of the drop or cut", "TRANSITION",
+          "Its low boom is mono; layer it once, on the downbeat, and duck the bass under it")
+    p.context(note=31, hold=2, tail=6.0, unpitched=True, allow_low=True)
+    out.append(p)
+
+    p = F("SUB DIVE", "BASIC", "BASIC")
+    p.osc(0, level=0.85, wt=0.05)
+    p.filter("LP24", hz=1500, res=0.05)
+    p.env(1, a=0.002, d=2.0, s=0.0, r=1.0, dcurve=-0.3)
+    p.set("macro2", 0.6)
+    sweep(p, 1, "1 BAR", RAMP_UP)
+    p.motion("LFO1", "PITCH", -0.5)
+    fx_voice(p, voices=1)
+    p.tone("A_WTPOS", 0.2)
+    hall(p, mix=0.08, decay=0.3, width=0.2)
+    grit(p, mode="SOFT", drive=0.4, tone=0.5, amount=0.5)
+    p.master(0.65)
+    p.doc("A sub-bass pitch dive over one bar", "Trigger on C2–C3", "Trap, dubstep, EDM, trailer",
+          "One note into the drop or a stop", "TRANSITION",
+          "Mono sub: treat it like the bass for that bar, not a layer on top of it")
+    p.context(note=43, hold=4, unpitched=True, allow_low=True)
+    out.append(p)
+
+    p = F("WHOOSH", "BASIC", "BASIC")
+    p.set("a.on", 0)
+    p.noise(0.8, "PINK", color=0.3, keytrack=False)
+    p.filter("BP", hz=800, res=0.3)
+    p.filter2("HP12", hz=200)
+    swell = [(-1 + 2 * (1 - abs(i - 20) / 20.0)) if i <= 31 else -1 for i in range(32)]
+    p.env(1, a=0.002, d=2.0, s=1.0, r=0.8)
+    p.set("macro2", 0.7)
+    p.lfo(1, "CUSTOM", sync="1/2", mode="ENV", smooth=True, points=swell)
+    p.mod("LFO1", "AMP", 0.9)
+    p.motion("LFO1", "CUTOFF", 0.3)
+    fx_voice(p)
+    p.tone("CUTOFF", 0.15)
+    hall(p, mix=0.24)
+    grit(p, mode="SOFT", drive=0.3, tone=0.5, amount=0.35)
+    p.eq(high=-4, high_hz=9000)
+    p.master(0.55)
+    p.doc("A half-bar whoosh past the listener", "Trigger anywhere", "Pop, EDM, trailer, video edits",
+          "One note, starting half a bar before the hit", "TRANSITION",
+          "Tempo-synced: it peaks on the next downbeat when started half a bar early")
+    p.context(hold=2, unpitched=True)
+    out.append(p)
+
+    p = F("REVERSE SWELL", "BASIC", "BASIC")
+    p.set("a.on", 0)
+    p.noise(0.8, "METAL", color=0.2, pitch=0.6, keytrack=False)
+    p.filter("HP12", hz=2500, res=0.1)
+    p.env(1, a=0.005, d=2.0, s=1.0, r=0.05)
+    p.set("macro2", 0.7)
+    sweep(p, 1, "1 BAR", [-1 + 2 * (i / 31.0) ** 3 for i in range(32)])
+    p.mod("LFO1", "AMP", 0.95)
+    p.motion("LFO1", "CUTOFF", 0.2)
+    fx_voice(p)
+    p.tone("CUTOFF", 0.1)
+    hall(p, mix=0.2, decay=0.35)
+    grit(p, mode="SOFT", drive=0.3, tone=0.5, amount=0.3)
+    p.eq(high=-6, high_hz=9000)
+    p.master(0.55)
+    p.doc("Reverse-cymbal swell that snaps off at the bar line", "Trigger anywhere", "Pop, rock, EDM, film",
+          "Start one bar before the downbeat and release on it", "TRANSITION",
+          "Stops dead on release: time the note-off to the downbeat")
+    p.context(hold=4, unpitched=True, allow_air=True)
+    out.append(p)
+
+    p = F("TAPE STOP", "ANALOG", "ANALOG")
+    p.osc(0, level=0.6, wt=0.85, unison=3, detune=0.12, width=0.0)
+    p.osc(1, level=0.3, wt=0.6, octave=-1)
+    p.filter("LP24", hz=3000, res=0.1, keytrack=0.3)
+    p.filter2("HP12", hz=150)
+    p.env(1, a=0.01, d=1.0, s=1.0, r=0.15)
+    p.set("macro2", 0.7)
+    sweep(p, 1, "1/2", [-1 + 2 * (i / 31.0) ** 2 for i in range(32)])
+    p.motion("LFO1", "PITCH", -0.5)
+    p.motion("LFO1", "CUTOFF", -0.2)
+    fx_voice(p, voices=6)
+    p.tone("CUTOFF", 0.15)
+    hall(p, mix=0.12, decay=0.3, width=0.35)
+    grit(p, mode="DOWNSAMPLE", drive=0.3, tone=0.45, amount=0.35)
+    p.master(0.55)
+    p.doc("Play a chord and it slows to a stop over half a bar, like a tape machine", "C3–C5", "Hip-hop, EDM, pop, lo-fi",
+          "Hold a chord from the last half bar before a break", "TRANSITION",
+          "MOTION sets how far it falls; release when you want the stop to end")
+    p.context(hold=2, unpitched=True)
+    out.append(p)
+
+    p = F("GLITCH BURST", "DIGITAL", "BASIC")
+    p.osc(0, level=0.5, wt=0.5)
+    p.noise(0.3, "DIGITAL", color=0.3, pitch=0.6, keytrack=True)
+    p.filter("LP12", hz=5000, res=0.15)
+    p.filter2("HP12", hz=200)
+    p.env(1, a=0.001, d=0.6, s=0.0, r=0.2)
+    p.set("macro2", 0.7)
+    p.lfo(1, "SAMPLE_HOLD", sync="1/32", mode="TRIG")
+    p.motion("LFO1", "A_WTPOS", 0.4)
+    p.motion("LFO1", "PITCH", 0.3)
+    p.motion("LFO1", "AMP", 0.4)
+    fx_voice(p)
+    p.tone("CUTOFF", 0.15)
+    echo(p, time="1/16", mix=0.12, feedback=0.25, amount=0.12, pingpong=True)
+    hall(p, mix=0.1)
+    grit(p, mode="BITCRUSH", drive=0.3, tone=0.5, amount=0.35)
+    p.eq(high=-4, high_hz=9000)
+    p.master(0.55)
+    p.doc("A short burst of stuttering digital debris", "Trigger anywhere", "Glitch, IDM, hyperpop, trap fills",
+          "Single hits at the end of a phrase", "TRANSITION",
+          "Short and bright: tuck it in the gap before a downbeat")
+    p.context(hold=1, unpitched=True)
+    out.append(p)
+
+    p = F("METAL SCRAPE", "BASIC", "BASIC")
+    p.set("a.on", 0)
+    p.noise(0.8, "METAL", color=0.35, pitch=0.45, keytrack=True)
+    p.filter("COMB_POS", cut=0.4, res=0.6, keytrack=1.0, mix=0.7)
+    p.filter2("BP", hz=2200, res=0.2)
+    p.env(1, a=0.3, d=1.0, s=0.9, r=0.8)
+    p.set("macro2", 0.7)
+    sweep(p, 1, "2 BAR", RAMP_UP)
+    p.motion("LFO1", "CUTOFF", 0.25)
+    p.lfo(2, "SMOOTH_RANDOM", hz=3.0, mode="TRIG")
+    p.motion("LFO2", "F2_CUTOFF", 0.1)
+    fx_voice(p)
+    p.tone("F2_CUTOFF", 0.15)
+    hall(p, mix=0.24)
+    grit(p, mode="HARD", drive=0.3, tone=0.45, amount=0.35)
+    p.eq(high=-4, high_hz=8000)
+    p.master(0.55)
+    p.doc("Metal dragged across metal, rising over two bars", "Trigger C3–C5", "Industrial, horror, trailer, game",
+          "Hold for a build; the pitch tracks the note", "TRANSITION",
+          "Band-limited to 1–4 kHz: it cuts through without covering drums")
+    p.context(hold=8, unpitched=True)
+    out.append(p)
+
+    p = F("DARK SIREN", "BASIC", "ANALOG")
+    p.osc(0, level=0.6, wt=0.35)
+    p.osc(1, level=0.3, wt=0.6, semi=3)
+    p.filter("LP24", hz=2000, res=0.15, keytrack=0.3)
+    p.filter2("HP12", hz=200)
+    p.env(1, a=0.2, d=1.0, s=1.0, r=0.8)
+    p.set("macro2", 0.6)
+    p.lfo(1, "TRIANGLE", sync="1 BAR", mode="TRIG")
+    p.motion("LFO1", "PITCH", 0.08)
+    fx_voice(p)
+    p.tone("CUTOFF", 0.15)
+    hall(p, mix=0.26)
+    grit(p, mode="DIODE", drive=0.3, tone=0.45, amount=0.35)
+    p.master(0.55)
+    p.doc("A slow, minor-third siren that rises and falls each bar", "C3–C5", "Industrial, horror, dystopian score, techno",
+          "Hold under a breakdown or a scene change", "TEXTURE",
+          "Sits in the mids: keep it quieter than the lead. MOTION 0 is a still, uneasy interval")
+    p.context(hold=8, unpitched=True)
+    out.append(p)
+
+    p = F("SPACE DEBRIS", "GLASS", "FM_BELL")
+    p.osc(0, level=0.5, wt=0.4)
+    p.osc(1, level=0.3, wt=0.7, octave=1)
+    p.filter("LP12", hz=6000, res=0.1)
+    p.filter2("HP12", hz=300)
+    p.env(1, a=0.3, d=1.0, s=0.9, r=1.2)
+    p.set("macro2", 0.6)
+    p.lfo(1, "SAMPLE_HOLD", sync="1/8", mode="TRIG")
+    p.lfo(2, "SMOOTH_RANDOM", hz=0.5, mode="TRIG")
+    p.motion("LFO1", "PITCH", 0.25)
+    p.motion("LFO1", "A_WTPOS", 0.3)
+    p.motion("LFO2", "PAN", 0.3)
+    fx_voice(p)
+    p.tone("A_WTPOS", 0.2)
+    echo(p, time="3/16", mix=0.18, feedback=0.3, amount=0.15, pingpong=True)
+    hall(p, mix=0.24)
+    grit(p, mode="BITCRUSH", drive=0.3, tone=0.5, amount=0.3)
+    p.eq(high=-4, high_hz=9000)
+    p.master(0.55)
+    p.doc("Scattered sci-fi blips drifting through space", "Trigger C4–C6", "Sci-fi, IDM, ambient techno, game",
+          "Hold in intros and breakdowns", "TEXTURE",
+          "Sparse and high: it decorates without clutter; MOTION 0 turns it into a steady tone")
+    p.context(hold=8, unpitched=True)
+    out.append(p)
+
+    p = F("TENSION CLUSTER", "ANALOG", "ANALOG")
+    p.osc(0, level=0.5, wt=0.7, unison=5, detune=0.25, width=0.6)
+    p.osc(1, level=0.4, wt=0.7, semi=1, unison=3, detune=0.2, width=0.5)
+    p.filter("LP24", hz=700, res=0.2, keytrack=0.3)
+    p.filter2("HP12", hz=180)
+    p.env(1, a=1.0, d=1.0, s=1.0, r=1.0)
+    p.set("macro2", 0.7)
+    sweep(p, 1, "4 BAR", RAMP_UP_CURVED)
+    p.motion("LFO1", "PITCH", 0.2)
+    p.motion("LFO1", "CUTOFF", 0.3)
+    fx_voice(p)
+    p.tone("CUTOFF", 0.15)
+    hall(p, mix=0.26)
+    grit(p, mode="DIODE", drive=0.3, tone=0.45, amount=0.35)
+    p.master(0.55)
+    p.doc("A semitone cluster that rises in pitch and brightness over four bars", "Trigger C3–C4", "Thriller, horror, trailer build",
+          "Hold for the whole four-bar build", "TRANSITION",
+          "Dissonant on purpose, and it ends: cut it hard on the downbeat of the release")
+    p.context(hold=16, tail=4.0, unpitched=True)
+    out.append(p)
+
+    p = F("LASER FALL", "BASIC", "BASIC")
+    p.osc(0, level=0.6, wt=0.67, warp="SYNC", warp_amt=0.2)
+    p.filter("LP12", hz=6000, res=0.1)
+    p.filter2("HP12", hz=250)
+    p.env(1, a=0.001, d=0.8, s=0.0, r=0.4)
+    p.env(4, a=0.001, d=0.6, s=0.0, r=0.3)
+    p.set("macro2", 0.6)
+    p.mod("ENV4", "PITCH", 1.0, aux="MACRO2")
+    p.mod("ENV4", "A_WARP", 0.4)
+    fx_voice(p)
+    p.tone("CUTOFF", 0.15)
+    echo(p, time="3/16", mix=0.16, feedback=0.3, amount=0.12, pingpong=True)
+    hall(p, mix=0.14)
+    grit(p, mode="SOFT", drive=0.3, tone=0.5, amount=0.3)
+    p.master(0.55)
+    p.doc("A falling hard-sync laser with a dotted echo", "Trigger C4–C6", "Electro, synthwave, EDM, game",
+          "Single hits as fills or accents", "TRANSITION",
+          "MOTION sets how far it falls; SPACE how far it echoes")
+    p.context(hold=1, unpitched=True)
+    out.append(p)
+
+    p = F("ACCELERATOR", "ANALOG", "BASIC")
+    p.osc(0, level=0.55, wt=0.85, unison=3, detune=0.15, width=0.5)
+    p.noise(0.2, "WHITE", color=0.3, keytrack=False)
+    p.filter("LP24", hz=900, res=0.2, keytrack=0.3)
+    p.filter2("HP12", hz=200)
+    p.env(1, a=0.01, d=1.0, s=1.0, r=0.3)
+    p.set("macro2", 0.7)
+    sweep(p, 1, "2 BAR", RAMP_UP)
+    p.lfo(2, "CUSTOM", sync="1/4", mode="TRIG", smooth=False, points=[0.0] * 10 + [-1.0] * 22)
+    p.mod("LFO1", "LFO2_RATE", 0.9)
+    p.mod("LFO2", "AMP", 1.0, aux="MACRO2")
+    p.motion("LFO1", "CUTOFF", 0.3)
+    fx_voice(p)
+    p.tone("CUTOFF", 0.15)
+    hall(p, mix=0.18)
+    grit(p, mode="SOFT", drive=0.3, tone=0.5, amount=0.35)
+    p.master(0.55)
+    p.doc("A pulse that speeds up from quarters toward sixteenths over two bars", "Trigger C3–C4", "EDM builds, trailer, techno",
+          "Hold for the two bars before a drop", "TRANSITION",
+          "The acceleration is tempo-locked: start it exactly two bars before the drop")
+    p.context(hold=8, unpitched=True)
+    out.append(p)
+
+    p = F("AIR PASS", "BASIC", "BASIC")
+    p.set("a.on", 0)
+    p.noise(0.7, "BREATH", color=0.4, pitch=0.6, keytrack=False)
+    p.filter("BP", hz=1500, res=0.2)
+    p.filter2("HP12", hz=250)
+    p.env(1, a=0.4, d=1.0, s=1.0, r=1.2, acurve=0.3)
+    p.set("macro2", 0.6)
+    sweep(p, 1, "1 BAR", [-1 + 2 * (0.5 - 0.5 * __import__("math").cos(3.14159 * i / 31.0)) for i in range(32)])
+    p.motion("LFO1", "CUTOFF", 0.25)
+    p.lfo(2, "SINE", sync="1 BAR", mode="TRIG")
+    p.motion("LFO2", "PAN", 0.4)
+    fx_voice(p)
+    p.tone("CUTOFF", 0.15)
+    hall(p, mix=0.26)
+    grit(p, mode="SOFT", drive=0.3, tone=0.5, amount=0.3)
+    p.eq(high=-5, high_hz=8000)
+    p.master(0.55)
+    p.doc("A soft breath of air sweeping across the stereo field", "Trigger anywhere", "Pop, ambient, acoustic-electronic, film",
+          "Gentle transitions between sections", "TRANSITION",
+          "Quiet and airy: for soft songs where a riser would be too much")
+    p.context(hold=4, unpitched=True)
+    out.append(p)
+
+    p = F("SHATTER HIT", "GLASS", "BASIC")
+    p.osc(0, level=0.5, wt=0.8)
+    p.noise(0.0, "CRACKLE", color=0.3, pitch=0.7, keytrack=False)
+    p.env(3, a=0.0005, d=1.2, s=0.0, r=1.2)
+    p.mod("ENV3", "NOISE_LEVEL", 0.6)
+    p.filter("HP12", hz=700, res=0.1)
+    p.env(1, a=0.0005, d=1.0, s=0.0, r=1.0, dcurve=-0.6, rcurve=-0.6)
+    p.env(4, a=0.0005, d=0.15, s=0.0, r=0.1)
+    p.set("macro2", 0.5)
+    p.mod("ENV4", "A_WTPOS", 0.3, aux="MACRO2")
+    p.motion("RANDOM", "PITCH", 0.1)
+    fx_voice(p)
+    p.tone("NOISE_LEVEL", 0.2)
+    hall(p, mix=0.28, decay=0.42)
+    grit(p, mode="BITCRUSH", drive=0.3, tone=0.5, amount=0.3)
+    p.eq(high=-5, high_hz=9000)
+    p.master(0.55)
+    p.doc("Glass breaking into crackle, with a long bright tail", "Trigger C4–C6", "Trailer, pop drops, film cuts",
+          "One hit on a cut or reveal", "TRANSITION",
+          "Above 700 Hz only: it layers over a low impact without muddying it")
+    p.context(hold=1, tail=6.0, unpitched=True)
+    out.append(p)
+
+    return out

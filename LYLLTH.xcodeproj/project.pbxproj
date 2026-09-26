@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		00051A108080B257F8B15E38 /* LUNATKAudioUnit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D22B4C169FF849CDE33BC3F /* LUNATKAudioUnit.swift */; };
 		00CD8A9C08C13F42A6624EDB /* SequencerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8658DEE809F98F0303AC07 /* SequencerModels.swift */; };
+		01156E7FA13BE5096D075B31 /* LUNATKFactory.json in Resources */ = {isa = PBXBuildFile; fileRef = 4FBA588A4436C5289B3966DE /* LUNATKFactory.json */; };
 		030D70F445C8B64626C87ACB /* LYSynthCore.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3093988C25143E99CB35645D /* LYSynthCore.cpp */; settings = {COMPILER_FLAGS = "-O3"; }; };
 		03A2D18CC3D75840A1D6AD06 /* LYNotePlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D695E9DF2B63F21EB41F447 /* LYNotePlayer.swift */; };
 		03F2A270049C0F2561F3DDA7 /* ArrangementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0C312174AA965DC7872AAE /* ArrangementView.swift */; };
@@ -16,6 +17,7 @@
 		06A90344846ECDF2291B2B70 /* LYSynthFXPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B03D44787926C50EA6A06C6 /* LYSynthFXPage.swift */; };
 		09898A460ACD50AC69E8AB00 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 44A67A0FF10CBC015DE08F8B /* AudioToolbox.framework */; };
 		09F66C919DE67E346C7C14BA /* LYSynthControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC8025D09EE241120C506F1 /* LYSynthControls.swift */; };
+		0AE3A66A4B0E745106D5B856 /* LUNATKFactory.json in Resources */ = {isa = PBXBuildFile; fileRef = 4FBA588A4436C5289B3966DE /* LUNATKFactory.json */; };
 		0CEC7DBA1215E7248215069A /* LYLLTHTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */; };
 		0F2E7B5C782BAFAFA9C0A000 /* NoteClipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C197A61BD7F9513D6B09D7D3 /* NoteClipTests.swift */; };
 		1100D2673739C29C697A2403 /* LYScroller.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8138DCA1A91395B53951A82 /* LYScroller.swift */; };
@@ -42,7 +44,9 @@
 		2B0E806B86EC35725F476C95 /* LYSynthFXPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B03D44787926C50EA6A06C6 /* LYSynthFXPage.swift */; };
 		2B69B203F6F2D87066F153A6 /* LYSynthVisuals.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD4ACCE1DB809DEB2FD7914 /* LYSynthVisuals.swift */; };
 		2D66F4DD8DA2C43A7B698A1A /* CHARGED COMPANIONS.fkit in Resources */ = {isa = PBXBuildFile; fileRef = C18D89386FBB389F94D73831 /* CHARGED COMPANIONS.fkit */; };
+		2D86B85D88AC3E3368FE7C00 /* LUNATKFactory.json in Resources */ = {isa = PBXBuildFile; fileRef = 4FBA588A4436C5289B3966DE /* LUNATKFactory.json */; };
 		3141C91CDA535DCEB92DDAB9 /* LYWavetableEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0618CFBCAE4DFCA5D4BA204B /* LYWavetableEditor.swift */; };
+		33D122DA12E5EDB99EC07FC3 /* FactoryBankTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6754E858FAFCB69DCFFDB723 /* FactoryBankTests.swift */; };
 		3904B2CD3898D951F670E9ED /* FilterPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DE9E66DC6125448D57721A6 /* FilterPanelView.swift */; };
 		3AC8280BEE1D86A4C7D3A9AF /* Adam-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1703868BDA0F39CBC2D0032D /* Adam-Bold.ttf */; };
 		412158E31F5D815A57A5E577 /* LYSynthInstrument.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9405C470F3A00F3CB1F2855 /* LYSynthInstrument.swift */; };
@@ -219,6 +223,7 @@
 		40ECA3F5DA20294F1EFBCA15 /* LYAutomation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYAutomation.swift; sourceTree = "<group>"; };
 		44A67A0FF10CBC015DE08F8B /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		4DE9E66DC6125448D57721A6 /* FilterPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FilterPanelView.swift; path = "../nightshape-drumkit-ios/Views/Components/FilterPanelView.swift"; sourceTree = "<group>"; };
+		4FBA588A4436C5289B3966DE /* LUNATKFactory.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = LUNATKFactory.json; sourceTree = "<group>"; };
 		513D2E0A410B83980A7B0903 /* ChannelStripInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelStripInspector.swift; sourceTree = "<group>"; };
 		53DEFCF4361EE40F8F34E692 /* CompressorModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompressorModels.swift; path = "../nightshape-drumkit-ios/Models/CompressorModels.swift"; sourceTree = "<group>"; };
 		543A005C681BF5D44EE192DB /* ReverbModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ReverbModels.swift; path = "../nightshape-drumkit-ios/Models/ReverbModels.swift"; sourceTree = "<group>"; };
@@ -231,6 +236,7 @@
 		63BA1223576AF041D954B929 /* DecimatorMotionDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecimatorMotionDisplay.swift; sourceTree = "<group>"; };
 		66DDC1CD43034C66B7DEB682 /* LYLLTH-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "LYLLTH-Bridging-Header.h"; sourceTree = "<group>"; };
 		67535C49D147B10E190ACCD8 /* TimelinePlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelinePlayback.swift; sourceTree = "<group>"; };
+		6754E858FAFCB69DCFFDB723 /* FactoryBankTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactoryBankTests.swift; sourceTree = "<group>"; };
 		67A45FFE78C9215B9D662390 /* BusRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BusRoutingTests.swift; sourceTree = "<group>"; };
 		6917A8C3DCB7971E1B412205 /* LYDrumSounds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYDrumSounds.swift; sourceTree = "<group>"; };
 		6D22B4C169FF849CDE33BC3F /* LUNATKAudioUnit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUNATKAudioUnit.swift; sourceTree = "<group>"; };
@@ -456,6 +462,7 @@
 				E616346F0537A425342E176A /* AutomationTests.swift */,
 				67A45FFE78C9215B9D662390 /* BusRoutingTests.swift */,
 				34B68857B9AC741B4807DC37 /* ExportTests.swift */,
+				6754E858FAFCB69DCFFDB723 /* FactoryBankTests.swift */,
 				6F6FDEB2771DB26C743DA3A2 /* FKitTests.swift */,
 				173F297644479B0758C8F0A2 /* LUNATKBankRenderTests.swift */,
 				84AE0F65DFC17746EDC090A3 /* LUNATKTests.swift */,
@@ -521,6 +528,7 @@
 		D5E05A6C15F402DE2A20B3BB /* Synth */ = {
 			isa = PBXGroup;
 			children = (
+				4FBA588A4436C5289B3966DE /* LUNATKFactory.json */,
 				5EC8025D09EE241120C506F1 /* LYSynthControls.swift */,
 				8E8249E5B5CE85685DDD1A42 /* LYSynthEditor.swift */,
 				2B03D44787926C50EA6A06C6 /* LYSynthFXPage.swift */,
@@ -767,6 +775,7 @@
 				3AC8280BEE1D86A4C7D3A9AF /* Adam-Bold.ttf in Resources */,
 				AD10EC2866EBAE979DBD6128 /* Adam-Light.ttf in Resources */,
 				F2D9DF615E644F09E63100B9 /* Adam-Medium.ttf in Resources */,
+				01156E7FA13BE5096D075B31 /* LUNATKFactory.json in Resources */,
 				CF1C86B0691898B1B5700D03 /* NIGHTSHAPE-Bold_Outline.ttf in Resources */,
 				D080A4732210713E29FE0D56 /* Nightshape-Bold.ttf in Resources */,
 			);
@@ -780,6 +789,7 @@
 				6E98A0974A6201257826EF93 /* Adam-Light.ttf in Resources */,
 				DF259391AE2D20D1A6B9B323 /* Adam-Medium.ttf in Resources */,
 				632CEC6A18455A781C28C16B /* Assets.xcassets in Resources */,
+				0AE3A66A4B0E745106D5B856 /* LUNATKFactory.json in Resources */,
 				86D4A6B8E2C1420D201CD70E /* NIGHTSHAPE-Bold_Outline.ttf in Resources */,
 				A3B2C9A6D7CCF44DEE0683CB /* Nightshape-Bold.ttf in Resources */,
 			);
@@ -792,6 +802,7 @@
 				96D3C183C9CBEADB3627D388 /* Adam-Bold.ttf in Resources */,
 				9BCA75BCE51F5A66F18FEBF7 /* Adam-Light.ttf in Resources */,
 				7791F3145193D193DCC4FD76 /* Adam-Medium.ttf in Resources */,
+				2D86B85D88AC3E3368FE7C00 /* LUNATKFactory.json in Resources */,
 				96152E8EFF72B913A27AEC0F /* NIGHTSHAPE-Bold_Outline.ttf in Resources */,
 				B734AFBF4E89290CBF9041C1 /* Nightshape-Bold.ttf in Resources */,
 			);
@@ -877,6 +888,7 @@
 				4E5DD4763D49716F6035C534 /* BusRoutingTests.swift in Sources */,
 				154CFDC4030483427D92BCE8 /* ExportTests.swift in Sources */,
 				DFCE1678A800ACE606F90D11 /* FKitTests.swift in Sources */,
+				33D122DA12E5EDB99EC07FC3 /* FactoryBankTests.swift in Sources */,
 				6B4BF4D2FD74FB3868170070 /* LUNATKBankRenderTests.swift in Sources */,
 				7759F7B9F7F7186B3C840682 /* LUNATKTests.swift in Sources */,
 				0F2E7B5C782BAFAFA9C0A000 /* NoteClipTests.swift in Sources */,

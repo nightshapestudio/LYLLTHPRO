@@ -368,8 +368,8 @@ struct LYSynthEditor: View {
                     delete: { presetStore.delete($0) },
                     close: { choosingPreset = false }
                 )
-                .frame(width: 440, height: 420)
-                .offset(x: min(frame.minX, frame.maxX - 440), y: frame.maxY + 6)
+                .frame(width: 640, height: 470)
+                .offset(x: max(0, min(frame.minX, frame.maxX - 640)), y: frame.maxY + 6)
                 .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
             }
         }

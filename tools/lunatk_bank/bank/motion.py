@@ -240,7 +240,7 @@ def presets():
     out.append(p)
 
     p = M("HEARTBEAT", "ANALOG", "BASIC")
-    p.osc(0, level=0.6, wt=0.45, unison=2, detune=0.1, width=0.4)
+    p.osc(0, level=0.6, wt=0.45, unison=2, detune=0.1, width=0.05)
     p.osc(1, level=0.35, wt=0.0)
     p.filter("LP24", hz=700, res=0.12, keytrack=0.4)
     p.filter2("HP12", hz=150)
@@ -429,10 +429,10 @@ def presets():
     out.append(p)
 
     p = M("CHORD STABBER", "ANALOG", "PWM")
-    p.osc(0, level=0.6, wt=0.85, unison=2, detune=0.1, width=0.4)
+    p.osc(0, level=0.6, wt=0.85, unison=2, detune=0.1, width=0.15)
     p.osc(1, level=0.35, wt=0.2)
     p.filter("LP24", hz=1100, res=0.15, keytrack=0.4, env=0.3)
-    p.filter2("HP12", hz=170)
+    p.filter2("HP12", hz=200)
     p.env(1, a=0.001, d=0.2, s=0.0, r=0.1)
     p.env(2, a=0.001, d=0.12, s=0.0, r=0.1)
     p.arp("CHORD", rate="1/8", octaves=1, gate=0.4, swing=0.2)

@@ -127,6 +127,11 @@ def evaluate(p, main, timings):
     note = p.test.get("pitch_note", phrases.DEFAULT_PITCH_NOTE[p.category])
     held = r("pitch")
     m["dc"] = float(abs(np.mean(held[int(0.5 * A.SR):int(4.0 * A.SR)])))
+    steady = np.mean(held[int(0.5 * A.SR):int(4.0 * A.SR)], axis=1)
+    rumble, total = A.band_energy(steady, 5, 22)
+    m["rumble_db"] = A.db(rumble) - A.db(total)
+    if m["rumble_db"] > -18 and np.sqrt(np.mean(steady ** 2)) > 1e-3:
+        fails.append(f"sub-rumble {m['rumble_db']:.1f} dB under 22 Hz on a held note")
     if m["dc"] > 0.006:
         fails.append(f"DC {m['dc']:.4f} on a held note")
     pfails, cents = A.pitch_gate(held, note, p.test)
@@ -151,11 +156,16 @@ def evaluate(p, main, timings):
         default = A.motion_index(r("pitch"), w0, w1)
         full = A.motion_index(r("moving"), w0, w1)
         m["motion"] = [round(still, 3), round(default, 3), round(full, 3)]
-        change = A.spectral_difference(r("still"), r("moving"), w0, w1)
+        if p.category in A.PEAK_NORMALIZED:
+            # Hits humanize from note to note: compare whole phrases.
+            change = A.spectral_difference(r("m2_0"), r("m2_1"), 0.0, last_off)
+            default = still + 10.0
+        else:
+            change = A.spectral_difference(r("still"), r("moving"), w0, w1)
         m["motion"].append(round(change, 2))
         if change < 1.0:
             fails.append(f"MOTION changes the sound by only {change:.2f} dB between 0 and 1")
-        if still > default + max(0.4, 0.12 * default):
+        if p.category not in ("FX",) and still > default + max(0.4, 0.12 * default):
             fails.append(f"MOTION at 0 moves more than the default ({still:.3f} vs {default:.3f})")
     if p.category in A.VELOCITY_CATEGORIES and not p.test.get("no_velocity"):
         y = r("soft")
@@ -164,6 +174,12 @@ def evaluate(p, main, timings):
         m["velocity"] = [round(dl, 1), round(dc, 2)]
         if dl > -2 and dc > 0.9:
             fails.append(f"velocity does nothing ({dl:+.1f} dB, brightness x{dc:.2f})")
+    if p.category in A.PEAK_NORMALIZED:
+        # Peak-normalized: the loudest setting (GRIT aside) sits at -1 dBFS.
+        loudest = max([m["peak_db"]] + [v for k, v in m["macros"].items() if k.endswith("peak") and not k.startswith("M4")])
+        fails[:] = [f for f in fails if not f.startswith("peak ")]
+        if not -2.5 <= loudest <= -0.5:
+            fails.append(f"loudest peak {loudest:.1f} dBFS, target -1")
     t = timings.get(f"{safe(p.name)}__main.wav")
     if t:
         m["cpu"] = round(t["renderSeconds"] / t["audioSeconds"], 4)
@@ -244,7 +260,7 @@ def main():
         # 1. The default gain that hits the loudness target without passing
         #    -1 dBFS at any macro position; above 1 goes to the trim stage.
         peaks = [m["peak_db"]] + [v for k, v in m["macros"].items() if k.endswith("peak") and not k.startswith("M4")]
-        gain_db = min(target - m["lufs"], -1.0 - max(peaks))
+        gain_db = (-1.0 - max(peaks)) if p.category in A.PEAK_NORMALIZED else min(target - m["lufs"], -1.0 - max(peaks))
         g_total = total * 10 ** (gain_db / 20)
         uses_comp = p.values.get("comp.on", 0) > 0.5 and not entry0.get("trim")
         if g_total > 1.0 and not uses_comp:

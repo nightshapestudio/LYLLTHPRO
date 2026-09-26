@@ -295,6 +295,9 @@ struct LYSynthPatch: Codable, Equatable {
     /// A user or imported wavetable by name; overrides the factory table.
     var customTableA: String? = nil
     var customTableB: String? = nil
+    /// Factory bank metadata: which category it lives in and how to use it.
+    var category: String? = nil
+    var info: LYSynthPresetInfo? = nil
 
     func tableName(_ oscillator: Int) -> String {
         let custom = oscillator == 0 ? customTableA : customTableB
@@ -381,8 +384,60 @@ struct LYSynthPatch: Codable, Equatable {
 
 // MARK: - Factory sounds
 
+/// What a factory sound is for, shown in the browser.
+struct LYSynthPresetInfo: Codable, Equatable {
+    var role: String
+    var register: String
+    var genres: String
+    var playing: String
+    var layer: String
+    var mix: String
+}
+
+/// The factory bank, shipped as LUNATKFactory.json beside the code (the app,
+/// the Audio Unit and the VST3 each carry a copy). Built and gated by
+/// tools/lunatk_bank.
+enum LYSynthFactoryBank {
+    private final class Token {}
+
+    struct Entry: Decodable {
+        var name: String
+        var category: String
+        var info: LYSynthPresetInfo
+        var patch: LYSynthPatch
+    }
+
+    private struct File: Decodable { var presets: [Entry] }
+
+    static let categories = ["BASS", "LEAD", "PAD", "KEYS", "PLUCK", "MOTION", "DRONE", "PERC", "FX"]
+
+    static let presets: [LYSynthPatch] = {
+        let bundles = [Bundle(for: Token.self), Bundle.main]
+        for bundle in bundles {
+            guard let url = bundle.url(forResource: "LUNATKFactory", withExtension: "json"),
+                  let data = try? Data(contentsOf: url),
+                  let file = try? JSONDecoder().decode(File.self, from: data) else { continue }
+            return file.presets.map { entry in
+                var patch = entry.patch
+                patch.name = entry.name
+                patch.category = entry.category
+                patch.info = entry.info
+                return patch
+            }
+        }
+        return []
+    }()
+}
+
 extension LYSynthPatch {
     static let initPatch = LYSynthPatch(name: "INIT")
+
+    /// Every factory sound: INIT, the bank by category, then the originals.
+    static let factory: [LYSynthPatch] = [initPatch] + LYSynthFactoryBank.presets + original.map { patch in
+        var tagged = patch
+        tagged.category = "ORIGINAL"
+        return tagged
+    }
 
     private static func make(_ name: String, tableA: Int, tableB: Int = LY_TABLE_BASIC, _ build: (inout LYSynthPatch) -> Void) -> LYSynthPatch {
         var patch = LYSynthPatch(name: name, tableA: tableA, tableB: tableB)
@@ -397,8 +452,8 @@ extension LYSynthPatch {
         Float(LYSynthNames.syncDivisions.firstIndex(of: name) ?? 6) / Float(LYSynthNames.syncDivisions.count - 1)
     }
 
-    static let factory: [LYSynthPatch] = [
-        initPatch,
+    /// LUNATK's first factory sounds, kept as they were.
+    static let original: [LYSynthPatch] = [
         make("NIGHT PAD", tableA: LY_TABLE_ANALOG, tableB: LY_TABLE_CHOIR) { p in
             p.set(osc(0, LY_OSC_WTPOS), 0.45); p.set(osc(0, LY_OSC_UNISON), 7); p.set(osc(0, LY_OSC_DETUNE), 0.38); p.set(osc(0, LY_OSC_WIDTH), 0.95)
             p.set(osc(1, LY_OSC_ON), 1); p.set(osc(1, LY_OSC_LEVEL), 0.45); p.set(osc(1, LY_OSC_WTPOS), 0.3); p.set(osc(1, LY_OSC_UNISON), 4); p.set(osc(1, LY_OSC_DETUNE), 0.3)

@@ -19,6 +19,8 @@ TARGET_LUFS = {"BASS": -16, "LEAD": -16, "PAD": -18, "KEYS": -17, "PLUCK": -17, 
 TAIL_LIMIT = {"BASS": 1.2, "LEAD": 3.0, "PAD": 6.5, "KEYS": 3.5, "PLUCK": 3.0, "MOTION": 4.5, "DRONE": 8.0, "PERC": 1.5, "FX": 8.0}
 WIDTH_LIMIT = {"BASS": -10, "LEAD": -5, "PERC": -8}
 LOW_LIMIT = {"PAD": -15, "KEYS": -15, "LEAD": -15, "PLUCK": -15, "MOTION": -14, "FX": -8}
+# Hits are normalized like drum samples: by peak, not loudness.
+PEAK_NORMALIZED = {"PERC"}
 VELOCITY_CATEGORIES = {"BASS", "LEAD", "KEYS", "PLUCK", "PERC"}
 
 
@@ -159,8 +161,11 @@ def analyze_main(x, category, info):
     out["nan"] = bool(not np.all(np.isfinite(x)))
     low, total = band_energy(mono, 20, 80)
     out["low_db"] = db(low) - db(total)
-    rumble, _ = band_energy(mono, 5, 35)
-    out["rumble_db"] = db(rumble) - db(total)
+    low120, _ = band_energy(mono, 20, 120)
+    out["low120_db"] = db(low120) - db(total)
+    s120, _ = band_energy(side, 20, 120)
+    m120, _ = band_energy(mid, 20, 120)
+    out["low120_side_db"] = db(s120) - db(m120)
     low150, _ = band_energy(mono, 20, 150)
     out["low150_db"] = db(low150) - db(total)
     sub_side, _ = band_energy(side, 20, 150)
@@ -199,7 +204,10 @@ def gates(category, m, flags):
     target = TARGET_LUFS[category]
     if m["nan"]:
         fails.append("non-finite samples")
-    if abs(m["lufs"] - target) > 1.5:
+    if category in PEAK_NORMALIZED:
+        if not -2.5 <= m["peak_db"] <= -0.5:
+            fails.append(f"peak {m['peak_db']:.1f} dBFS, target -1")
+    elif abs(m["lufs"] - target) > 1.5:
         fails.append(f"loudness {m['lufs']:.1f} LUFS, target {target}")
     if m["peak_db"] > -0.5:
         fails.append(f"peak {m['peak_db']:.1f} dBFS")
@@ -207,9 +215,12 @@ def gates(category, m, flags):
         fails.append(f"DC {m['dc']:.4f}")
     if category in LOW_LIMIT and not flags.get("allow_low") and m["low_db"] > LOW_LIMIT[category]:
         fails.append(f"low end {m['low_db']:.1f} dB below 80 Hz (limit {LOW_LIMIT[category]})")
-    if m["rumble_db"] > -18:
-        fails.append(f"sub-rumble {m['rumble_db']:.1f} dB under 35 Hz")
-    if m["low150_db"] > -25 and m["low_side_db"] > -18:
+    if m.get("rumble_db", -99) > -18:
+        fails.append(f"sub-rumble {m['rumble_db']:.1f} dB under 22 Hz on a held note")
+    strict = category in ("BASS", "DRONE", "PERC", "FX")
+    if not strict and m["low120_db"] > -25 and m["low120_side_db"] > -10:
+        fails.append(f"wide low end: side {m['low120_side_db']:.1f} dB under 120 Hz")
+    if strict and m["low150_db"] > -25 and m["low_side_db"] > -18:
         fails.append(f"low end not mono: side {m['low_side_db']:.1f} dB under 150 Hz")
     if not flags.get("allow_air") and m["high_db"] > -14:
         fails.append(f"top end {m['high_db']:.1f} dB above 10 kHz")
