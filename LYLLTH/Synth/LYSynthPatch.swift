@@ -409,7 +409,7 @@ enum LYSynthFactoryBank {
 
     private struct File: Decodable { var presets: [Entry] }
 
-    static let categories = ["BASS", "LEAD", "PAD", "KEYS", "PLUCK", "MOTION", "DRONE", "PERC", "FX"]
+    static let categories = ["BASS", "LEAD", "PAD", "KEYS", "PLUCK", "ARP", "MOTION", "DRONE", "PERC", "FX"]
 
     static let presets: [LYSynthPatch] = {
         let bundles = [Bundle(for: Token.self), Bundle.main]

@@ -15,13 +15,13 @@ from scipy import signal
 
 SR = 48000
 
-TARGET_LUFS = {"BASS": -16, "LEAD": -16, "PAD": -18, "KEYS": -17, "PLUCK": -17, "MOTION": -17, "DRONE": -20, "PERC": -15, "FX": -18}
-TAIL_LIMIT = {"BASS": 1.2, "LEAD": 3.0, "PAD": 6.5, "KEYS": 3.5, "PLUCK": 3.0, "MOTION": 4.5, "DRONE": 8.0, "PERC": 1.5, "FX": 8.0}
+TARGET_LUFS = {"BASS": -16, "LEAD": -16, "PAD": -18, "KEYS": -17, "PLUCK": -17, "ARP": -17, "MOTION": -17, "DRONE": -20, "PERC": -15, "FX": -18}
+TAIL_LIMIT = {"BASS": 1.2, "LEAD": 3.0, "PAD": 6.5, "KEYS": 3.5, "PLUCK": 3.0, "ARP": 3.5, "MOTION": 4.5, "DRONE": 8.0, "PERC": 1.5, "FX": 8.0}
 WIDTH_LIMIT = {"BASS": -10, "LEAD": -5, "PERC": -8}
-LOW_LIMIT = {"PAD": -15, "KEYS": -15, "LEAD": -15, "PLUCK": -15, "MOTION": -14, "FX": -8}
+LOW_LIMIT = {"PAD": -15, "KEYS": -15, "LEAD": -15, "PLUCK": -15, "ARP": -14, "MOTION": -14, "FX": -8}
 # Hits are normalized like drum samples: by peak, not loudness.
 PEAK_NORMALIZED = {"PERC"}
-VELOCITY_CATEGORIES = {"BASS", "LEAD", "KEYS", "PLUCK", "PERC"}
+VELOCITY_CATEGORIES = {"BASS", "LEAD", "KEYS", "PLUCK", "ARP", "PERC"}
 
 
 # -- loudness (ITU-R BS.1770-4) -------------------------------------------

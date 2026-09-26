@@ -7,7 +7,8 @@ import SwiftUI
 /// record while recording.
 ///
 ///   A W S E D F T G Y H U J K O L P ; '   notes, C to F an octave up
-///   Z / X  octave down / up      C / V  velocity down / up
+///   Z / X  or  − / +  octave down / up (keypad too)
+///   C / V  velocity down / up
 ///   TAB    sustain               1 / 2  pitch bend down / up (held)
 ///   3–8    mod wheel, off to full
 @MainActor
@@ -37,6 +38,9 @@ final class LYMusicalTyping: ObservableObject {
         12: "K", 13: "O", 14: "L", 15: "P", 16: ";", 17: "'",
     ]
     private static let modKeys: [UInt16: Int] = [20: 0, 21: 1, 23: 2, 22: 3, 26: 4, 28: 5]
+    /// Z, - and keypad - go down an octave; X, = (+) and keypad + go up.
+    private static let octaveKeys: [UInt16: Int] = [6: -1, 27: -1, 78: -1, 7: 1, 24: 1, 69: 1]
+    private static let controlKeys: Set<UInt16> = Set([8, 9, 48, 18, 19]).union(modKeys.keys).union(octaveKeys.keys)
 
     var baseNote: Int { (octave + 1) * 12 }
 
@@ -44,7 +48,7 @@ final class LYMusicalTyping: ObservableObject {
     nonisolated static func claims(_ event: NSEvent) -> Bool {
         guard isOpen, event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
         if event.window?.firstResponder is NSTextView { return false }
-        return noteKeys[event.keyCode] != nil || [6, 7, 8, 9, 48, 18, 19, 20, 21, 23, 22, 26, 28].contains(event.keyCode)
+        return noteKeys[event.keyCode] != nil || controlKeys.contains(event.keyCode)
     }
     var rangeName: String { LYPianoRoll.name(baseNote) + "–" + LYPianoRoll.name(min(127, baseNote + 17)) }
 
@@ -99,13 +103,14 @@ final class LYMusicalTyping: ObservableObject {
             }
             return true
         }
-        let controls: Set<UInt16> = Set([6, 7, 8, 9, 48, 18, 19]).union(Self.modKeys.keys)
-        guard controls.contains(code) else { return false }
+        guard Self.controlKeys.contains(code) else { return false }
         // Only sustain and bend act on release; the rest act on press.
         if !down && ![48, 18, 19].contains(code) { return true }
+        if let step = Self.octaveKeys[code] {
+            if !event.isARepeat { shiftOctave(step) }
+            return true
+        }
         switch code {
-        case 6: if !event.isARepeat { shiftOctave(-1) }
-        case 7: if !event.isARepeat { shiftOctave(1) }
         case 8: shiftVelocity(-1)
         case 9: shiftVelocity(1)
         case 48:
@@ -161,7 +166,7 @@ struct LYMusicalTypingPanel: View {
                     Text(target).font(LYLLTHTheme.label(10, weight: .bold)).tracking(1).foregroundStyle(accent).lineLimit(1)
                 }
                 .frame(width: 190, alignment: .leading)
-                readout("OCTAVE", typing.rangeName, keys: "Z  X")
+                readout("OCTAVE", typing.rangeName, keys: "Z X  − +")
                 readout("VELOCITY", "\(typing.velocity)", keys: "C  V")
                 light("SUSTAIN", typing.sustain, keys: "TAB")
                 light(typing.bend < 0 ? "BEND ↓" : (typing.bend > 0 ? "BEND ↑" : "BEND"), typing.bend != 0, keys: "1  2")

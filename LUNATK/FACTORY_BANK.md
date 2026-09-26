@@ -1,6 +1,6 @@
 # LUNATK factory bank
 
-160 presets. Every one is rendered through the engine in a musical phrase and mixed against a reference arrangement, then gated on loudness, headroom, low end, top end, width, mono fold-down, tails, tuning, macro range, MOTION, velocity and CPU (`tools/lunatk_bank/build.py`).
+176 presets. Every one is rendered through the engine in a musical phrase and mixed against a reference arrangement, then gated on loudness, headroom, low end, top end, width, mono fold-down, tails, tuning, macro range, MOTION, velocity and CPU (`tools/lunatk_bank/build.py`).
 
 ## Macros (every preset)
 
@@ -129,6 +129,27 @@
 | **DATA RAIN** | Digital pluck where each note lands on a different timbre | C4–C6 | TEXTURE | IDM, glitch, ambient techno, game UI | Fast 16ths and random-feeling arpeggios | MOTION sets how different each note is; at 0 every note matches |
 | **CHIME RIG** | Bright FM chime with a long, clean ring | C4–C7 | FOREGROUND | Pop, holiday, ambient, film | Sparse high notes | Rings long: leave space after each note or shorten with a lower TONE |
 | **HOLLOW PICK** | Hollow square pluck with a moving notch | C3–C6 | RHYTHM | Synth-pop, indie-electronic, game | Arpeggios and riffs | Its notch leaves the vocal band open; MOTION moves the notch |
+
+## ARP (16)
+
+| Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
+|---|---|---|---|---|---|---|
+| **RUST LADDER** | Rising 1/16 saw arpeggio over two octaves with a squelchy filter | C3–C5 | RHYTHM | Techno, industrial, EBM, synthwave | Hold three- or four-note chords, a bar each | The filter climbs over two bars at default MOTION; pull MOTION to 0 for a steady line under a vocal |
+| **SIGNAL DESCENT** | Falling pulse-wave 1/16 arpeggio, hollow and nasal | C3–C5 | RHYTHM | Synthwave, darkwave, electro, film | Hold chords; the notes fall from the top of the chord | Pulse width moves once a bar; MOTION 0 fixes it. Cut 2–3 kHz a touch if it fights a vocal |
+| **GLASS STAIRWELL** | Glass bells climbing and falling across three octaves in eighths | C3–C4 (it climbs from there) | TEXTURE | Cinematic, ambient, downtempo, game menus | Hold small chords low; three octaves climb fast | The top octave gets bright: TONE down or play lower if it pokes above the hats |
+| **THIRD RAIL** | Dotted-eighth arpeggio that rolls across the bar line against a straight beat | C3–C5 | RHYTHM | Progressive house, melodic techno, synthwave | Hold chords for a bar or two; the 3-against-4 does the work | The filter opens across each bar; MOTION 0 stops it. Keep the delay short so the dots stay clear |
+| **CORRODED CLOCK** | Downsampled digital arpeggio with a stepped timbre per eighth | C3–C5 | RHYTHM | IDM, industrial, glitch, lo-fi electronica | Play the chord a note at a time, in the order you want it | The timbre jumps in time with the song, not at random rates; MOTION 0 holds one tone. GRIT crunches it further |
+| **NEON SPINE** | Supersaw 1/16 arpeggio that opens and spreads over two bars | C3–C5 | RHYTHM | Trance, big-room, progressive, synthwave | Hold chords on the downbeat | Sidechain it to the kick for the classic pump. MOTION 0 stops the sweep; high-pass it higher under a busy top line |
+| **BELL DIVISION** | Whole-chord bell stabs in eighths, jumping an octave every other hit | C3–C5 | RHYTHM | Future garage, cinematic, pop, game | Hold chords; each hit plays the whole chord | Chords are dense: voice them in three notes. The bell tone moves over two bars; MOTION 0 fixes it |
+| **VOID STEPS** | Wavefolded eighth-note arpeggio walking down two octaves | C3–C5 | RHYTHM | Dark techno, industrial, horror scores | Hold minor chords for a bar | The fold grows and shrinks each bar; MOTION 0 holds it. It's mid-heavy, so carve 400 Hz if the mix clouds |
+| **COPPER SPARKS** | Fast 1/32 shimmer: the chord blurs into a bright metallic ripple | C3–C5 | TEXTURE | Trance breakdowns, cinematic, ambient pop | Hold chords under a slower part; it reads as texture, not notes | Sits above the hats; TONE down or high-shelf it if it crowds the cymbals |
+| **SLOW HALO** | Slow quarter-note arpeggio of breathy voices, somewhere between a pad and a melody | C3–C5 | SUPPORT | Film, ambient, post-rock, slow pop | Hold chords for a bar or more | Long release overlaps the notes into a pad; shorten SPACE if it smears the downbeat |
+| **DUST CYCLE** | Swung, dusty 1/16 arpeggio with slight tape wobble | C3–C5 | RHYTHM | Lo-fi hip-hop, downtempo, UK garage, bedroom pop | Play chords note by note in the order you want them | The wobble is gentle and MOTION 0 removes it. Swing is 30%; set your drums to match |
+| **WIRE HARP** | Steely harp runs up three octaves in sixteenths | C3–C4 (it climbs from there) | FOREGROUND | Cinematic, fantasy, game, ambient | Hold small chords low | A three-octave run covers a lot of range: hold two- or three-note chords and TONE down if the top gets glassy |
+| **STATIC ORACLE** | Vowel-filtered notes in a random order, each with its own mouth shape | C3–C5 | TEXTURE | Glitch, IDM, experimental pop, sci-fi | Hold a chord; only its own notes play, in a random order | The random order stays inside your chord and the vowel steps in time. MOTION 0 fixes the vowel |
+| **ROLLING STOCK** | Rolling 1/16 bass arpeggio: root, third and fifth under the chord | C2–C4, sub an octave under | RHYTHM | Techno, synthwave, electro, trance | Hold two- or three-note shapes in the bass register | Dry and mono in the lows; sidechain it to the kick, or play only the root for a plain rolling bass |
+| **HAZARD LIGHTS** | Short chord stabs repeating in swung sixteenths | C3–C5 | RHYTHM | Industrial techno, breaks, electro, drum and bass | Hold chords; the whole chord stutters | Each beat opens the filter and lets it fall; MOTION 0 leaves flat stabs. Voice chords narrow so the stabs stay tight |
+| **CATHEDRAL MOTOR** | Organ and voices cycling in eighths, like a machine playing a hymn | C3–C5 | FOREGROUND | Cinematic, darkwave, post-rock, trailer builds | Hold chords for a bar; minor chords suit it | The organ octave swells over two bars; MOTION 0 fixes it. Trim SPACE when the arrangement gets dense |
 
 ## MOTION (18)
 

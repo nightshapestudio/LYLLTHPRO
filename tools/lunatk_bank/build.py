@@ -55,7 +55,10 @@ def run_renders():
 
 def load_bank():
     presets = []
-    for path in sorted(glob.glob(os.path.join(HERE, "bank", "*.py"))):
+    # ARP was added after the rest; it goes last so the plug-ins' factory
+    # preset numbers for the other categories stay where they were.
+    paths = sorted(glob.glob(os.path.join(HERE, "bank", "*.py")), key=lambda path: (path.endswith("/arp.py"), path))
+    for path in paths:
         name = os.path.splitext(os.path.basename(path))[0]
         if name.startswith("_"):
             continue

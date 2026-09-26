@@ -29,6 +29,10 @@
   "grit": -0.0904,
   "master": 0.46
  },
+ "BELL DIVISION": {
+  "grit": -0.0182,
+  "master": 0.5364
+ },
  "BIT PLUCK": {
   "grit": 0.0,
   "master": 1.0,
@@ -59,6 +63,11 @@
   "grit": -0.2456,
   "master": 0.891,
   "trim": 0.0689
+ },
+ "CATHEDRAL MOTOR": {
+  "grit": -0.2414,
+  "master": 1.0,
+  "trim": 0.1527
  },
  "CHAPEL DRAWBARS": {
   "grit": -0.1017,
@@ -93,6 +102,16 @@
  "COPPER RING": {
   "grit": -0.1378,
   "master": 0.7752
+ },
+ "COPPER SPARKS": {
+  "grit": -0.2326,
+  "master": 1.0,
+  "trim": 0.2581
+ },
+ "CORRODED CLOCK": {
+  "grit": 0.0,
+  "master": 1.0,
+  "trim": 0.1199
  },
  "CORRODED HALO": {
   "grit": 0.0,
@@ -162,6 +181,11 @@
  "DRIFT MONO": {
   "grit": -0.2455,
   "master": 0.7766
+ },
+ "DUST CYCLE": {
+  "grit": -0.2921,
+  "master": 1.0,
+  "trim": 0.1531
  },
  "DUST HARMONICS": {
   "grit": -0.0924,
@@ -258,6 +282,11 @@
   "grit": -0.0073,
   "master": 0.3192
  },
+ "GLASS STAIRWELL": {
+  "grit": -0.0984,
+  "master": 1.0,
+  "trim": 0.0409
+ },
  "GLASS VOICE": {
   "grit": -0.1754,
   "master": 0.6366
@@ -287,6 +316,10 @@
  "HARMONIUM": {
   "grit": -0.1024,
   "master": 0.5761
+ },
+ "HAZARD LIGHTS": {
+  "grit": -0.2832,
+  "master": 0.9193
  },
  "HEARTBEAT": {
   "grit": -0.3438,
@@ -391,6 +424,11 @@
   "grit": -0.2742,
   "master": 0.8083
  },
+ "NEON SPINE": {
+  "grit": -0.2839,
+  "master": 1.0,
+  "trim": 0.0562
+ },
  "NIGHT CHOIR": {
   "grit": -0.0314,
   "master": 0.4055
@@ -483,6 +521,10 @@
   "master": 1.0,
   "trim": 0.3302
  },
+ "ROLLING STOCK": {
+  "grit": -0.2686,
+  "master": 0.8292
+ },
  "RUINED ORGAN": {
   "grit": -0.1317,
   "master": 0.613
@@ -491,6 +533,11 @@
   "grit": -0.2165,
   "master": 0.5803,
   "motion": 0.3067
+ },
+ "RUST LADDER": {
+  "grit": -0.4312,
+  "master": 1.0,
+  "trim": 0.0748
  },
  "RUST PICK": {
   "grit": -0.1338,
@@ -532,6 +579,11 @@
   "grit": -0.0321,
   "master": 0.3636
  },
+ "SIGNAL DESCENT": {
+  "grit": -0.3161,
+  "master": 1.0,
+  "trim": 0.097
+ },
  "SIGNAL FM": {
   "grit": -0.2911,
   "master": 0.665
@@ -548,6 +600,11 @@
  "SLOW BURN": {
   "grit": -0.1289,
   "master": 0.6563
+ },
+ "SLOW HALO": {
+  "grit": -0.2326,
+  "master": 1.0,
+  "trim": 0.1542
  },
  "SNARE PLATE": {
   "grit": -0.5045,
@@ -574,6 +631,11 @@
  "STAB DUST": {
   "grit": -0.3149,
   "master": 0.8886
+ },
+ "STATIC ORACLE": {
+  "grit": 0.0,
+  "master": 1.0,
+  "trim": 0.3295
  },
  "STEEL FLUTE": {
   "grit": -0.1083,
@@ -622,6 +684,11 @@
   "grit": 0.0,
   "master": 0.4962
  },
+ "THIRD RAIL": {
+  "grit": -0.3002,
+  "master": 1.0,
+  "trim": 0.1008
+ },
  "TIDAL SWELL": {
   "grit": -0.0777,
   "master": 0.5589
@@ -669,6 +736,11 @@
   "grit": -0.0775,
   "master": 0.4362
  },
+ "VOID STEPS": {
+  "grit": -0.2672,
+  "master": 1.0,
+  "trim": 0.065
+ },
  "VOLTAGE STEPS": {
   "grit": 0.0,
   "master": 0.3782,
@@ -691,6 +763,11 @@
   "grit": -0.3381,
   "master": 0.8821,
   "trim": 0.0969
+ },
+ "WIRE HARP": {
+  "grit": -0.1586,
+  "master": 1.0,
+  "trim": 0.1509
  },
  "WOOD MALLET": {
   "grit": -0.227,

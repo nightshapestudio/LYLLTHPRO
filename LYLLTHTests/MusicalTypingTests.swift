@@ -76,4 +76,23 @@ final class MusicalTypingTests: XCTestCase {
         XCTAssertEqual(Set(sent.filter { $0.0 == 0x80 }.map(\.1)), [60, 62])
         XCTAssertFalse(LYMusicalTyping.isOpen)
     }
+
+    func testMinusAndPlusChangeTheOctave() {
+        let typing = LYMusicalTyping.shared
+        typing.open()
+        let start = typing.octave
+        XCTAssertTrue(key(24))                      // = / +
+        XCTAssertEqual(typing.octave, start + 1)
+        XCTAssertTrue(key(24, repeat: true))
+        XCTAssertEqual(typing.octave, start + 1, "holding + moves one octave")
+        XCTAssertTrue(key(27)); XCTAssertTrue(key(27))   // -
+        XCTAssertEqual(typing.octave, start - 1)
+        XCTAssertTrue(key(69))                      // keypad +
+        XCTAssertTrue(key(78)); XCTAssertTrue(key(78))   // keypad -
+        XCTAssertEqual(typing.octave, start - 2)
+        XCTAssertTrue(key(27, down: false), "the key-up is swallowed too")
+        XCTAssertFalse(key(27, flags: .command), "⌘- stays a shortcut")
+        XCTAssertTrue(sent.isEmpty, "octave keys send no MIDI")
+        typing.shiftOctave(start - typing.octave)
+    }
 }

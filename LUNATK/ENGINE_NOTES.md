@@ -14,6 +14,7 @@ were changed in the engine. Each one lists what the bank does about it.
 | Comb-filter feedback is capped at 0.96. | A noise-excited "string" dies in about 0.25 s at middle C, too short to be a string. | Plucked strings use an oscillator body with the comb as colour. |
 | The QUANTIZE warp is nearly transparent below 0.6. | Small amounts do nothing audible. | Presets that use it run from 0.3 up, with MOTION taking it past 0.6. |
 | Wavetable mipmaps band-limit table-based "digital" steps at high notes. | Crunch drawn into a table disappears in a lead's register. | Digital damage at high pitches uses the sample-level QUANTIZE warp or the distortion. |
+| Every arpeggiator step starts a new voice, so a TRIG LFO restarts on each step. | A 2-bar filter sweep on an arp never gets past its first sixteenth; the sound doesn't move. | ARP presets run every LFO FREE. |
 | MASTER plus modulation is clamped to 1. | Level compensation can't push past full MASTER. | The leveler adds clean makeup gain with the compressor at a 0 dBFS threshold. |
 
 Worth fixing in the engine when you decide to: the `1/12` division, the DRIFT

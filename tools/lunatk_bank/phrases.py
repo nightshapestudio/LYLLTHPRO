@@ -68,6 +68,16 @@ def pluck(bpm=120, shift=12):
     return {"bpm": bpm, "seconds": beats * 60 / bpm + 2.5, "notes": _notes(bpm, notes), "last_off_beat": beats}
 
 
+def arp(bpm=122, shift=0, notes=3, bars=1):
+    """Chords held for a bar each; the arpeggiator plays them."""
+    out = []
+    for i, chord in enumerate(PROGRESSION):
+        for n in sorted(chord)[-notes:]:
+            out.append((i * 4 * bars, n + shift, 100, 4 * bars - 0.05))
+    beats = len(PROGRESSION) * 4 * bars
+    return {"bpm": bpm, "seconds": beats * 60 / bpm + 3, "notes": _notes(bpm, out), "last_off_beat": beats}
+
+
 def motion(bpm=120, shift=0):
     notes = []
     for i, chord in enumerate(PROGRESSION[:2]):
@@ -97,7 +107,7 @@ def held(note, seconds=2.5, bpm=120):
     return {"bpm": bpm, "seconds": seconds + 1.0, "notes": [[0.0, note, 100, seconds]], "last_off_beat": seconds * bpm / 60}
 
 
-DEFAULT_PITCH_NOTE = {"BASS": 40, "LEAD": 69, "PAD": 60, "KEYS": 60, "PLUCK": 72, "MOTION": 60, "DRONE": 45, "PERC": 48, "FX": 60}
+DEFAULT_PITCH_NOTE = {"BASS": 40, "LEAD": 69, "PAD": 60, "KEYS": 60, "PLUCK": 72, "ARP": 60, "MOTION": 60, "DRONE": 45, "PERC": 48, "FX": 60}
 
 
 def main_phrase(category, test):
@@ -112,6 +122,8 @@ def main_phrase(category, test):
         return keys(t.get("bpm", 96), t.get("shift", 0))
     if category == "PLUCK":
         return pluck(t.get("bpm", 120), t.get("shift", 12))
+    if category == "ARP":
+        return arp(t.get("bpm", 122), t.get("shift", 0), t.get("notes", 3), t.get("bars", 1))
     if category == "MOTION":
         return motion(t.get("bpm", 120), t.get("shift", 0))
     if category == "DRONE":

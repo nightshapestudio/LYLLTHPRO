@@ -95,7 +95,7 @@ def lfo_hz(hz):
     return max(0.0, min(1.0, math.log(hz / 0.02) / math.log(1500.0)))
 
 
-CATEGORIES = ["BASS", "LEAD", "PAD", "KEYS", "PLUCK", "MOTION", "DRONE", "PERC", "FX"]
+CATEGORIES = ["BASS", "LEAD", "PAD", "KEYS", "PLUCK", "ARP", "MOTION", "DRONE", "PERC", "FX"]
 LAYERS = ["FOREGROUND", "SUPPORT", "RHYTHM", "TEXTURE", "TRANSITION"]
 
 
@@ -386,6 +386,8 @@ class Preset:
                 errors.append(f"{key}={value} must be whole")
         if not self.info:
             errors.append("no documentation")
+        if self.category == "ARP" and self.get("arp.on") < 0.5:
+            errors.append("an ARP preset must have the arpeggiator on")
         # Design-time safety: no bare screaming resonance outside the
         # resonant-by-design filters.
         for prefix in ("filter", "filter2"):
