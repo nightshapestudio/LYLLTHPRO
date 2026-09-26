@@ -336,7 +336,8 @@ struct ChannelStripInspector: View {
             meterKey: track.id,
             openFX: { openFX($0, target) },
             toggleFX: { toggleFX($0, target) },
-            openPicker: { openPicker(target) }
+            openPicker: { openPicker(target) },
+            reorder: { reorderInserts($0, target: target) }
         )
     }
 
@@ -364,8 +365,18 @@ struct ChannelStripInspector: View {
             meterKey: LYMeterStore.mainKey,
             openFX: { openFX($0, .main) },
             toggleFX: { toggleFX($0, .main) },
-            openPicker: { openPicker(.main) }
+            openPicker: { openPicker(.main) },
+            reorder: { reorderInserts($0, target: .main) }
         )
+    }
+
+    /// Puts the shown inserts in their new order. EQ (and, on a track, the
+    /// reverb send) keep their places; everything else moves as dragged.
+    private func reorderInserts(_ shown: [FXKind], target: FXTarget) {
+        var rack = LYFXBridge.rack(for: target, in: session)
+        rack.reorderInserts(shown, isMain: target == .main)
+        LYFXBridge.setRack(rack, for: target, in: &session)
+        LYFXBridge.pushRack(target: target, session: session, engine: NightshapeAudioEngine.shared)
     }
 
     private func sourceName(for track: LYTrack) -> String {
@@ -417,6 +428,12 @@ private struct LYChannelStrip: View {
     let openFX: (FXKind) -> Void
     let toggleFX: (FXKind) -> Void
     let openPicker: () -> Void
+    /// Applies a new insert order (the shown slots, top to bottom).
+    var reorder: (([FXKind]) -> Void)? = nil
+
+    @State private var draggingInsert: FXKind?
+    @State private var insertDragOffset: CGFloat = 0
+    private let insertPitch: CGFloat = 20       // slot height plus spacing
 
     var body: some View {
         VStack(spacing: 6) {
@@ -450,9 +467,13 @@ private struct LYChannelStrip: View {
 
             sectionLabel("AUDIO FX")
             if hasChannel {
+                let inserts = shownInserts
                 VStack(spacing: 2) {
-                    ForEach(rack.chain(isMain: isMain).filter { $0 != .eq && !($0 == .reverb && !isMain) }, id: \.self) { kind in
+                    ForEach(Array(inserts.enumerated()), id: \.element) { index, kind in
                         insertSlot(kind)
+                            .offset(y: insertOffset(for: index, in: inserts))
+                            .zIndex(draggingInsert == kind ? 1 : 0)
+                            .gesture(insertDrag(kind, index: index, in: inserts))
                     }
                     Button(action: openPicker) {
                         Text("+")
@@ -590,6 +611,49 @@ private struct LYChannelStrip: View {
             .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
     }
 
+    private var shownInserts: [FXKind] {
+        rack.chain(isMain: isMain).filter { $0 != .eq && !($0 == .reverb && !isMain) }
+    }
+
+    /// Where the dragged slot would land.
+    private func dropIndex(from index: Int, count: Int) -> Int {
+        min(max(index + Int((insertDragOffset / insertPitch).rounded()), 0), count - 1)
+    }
+
+    /// The dragged slot follows the pointer; the others slide out of its way.
+    private func insertOffset(for index: Int, in inserts: [FXKind]) -> CGFloat {
+        guard let dragging = draggingInsert, let from = inserts.firstIndex(of: dragging) else { return 0 }
+        if index == from { return insertDragOffset }
+        let to = dropIndex(from: from, count: inserts.count)
+        if from < to, index > from, index <= to { return -insertPitch }
+        if from > to, index >= to, index < from { return insertPitch }
+        return 0
+    }
+
+    private func insertDrag(_ kind: FXKind, index: Int, in inserts: [FXKind]) -> some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { drag in
+                guard reorder != nil else { return }
+                if draggingInsert == nil { draggingInsert = kind }
+                insertDragOffset = drag.translation.height
+            }
+            .onEnded { _ in
+                defer {
+                    withAnimation(LYLLTHTheme.snap) {
+                        draggingInsert = nil
+                        insertDragOffset = 0
+                    }
+                }
+                guard let reorder, draggingInsert == kind else { return }
+                let to = dropIndex(from: index, count: inserts.count)
+                guard to != index else { return }
+                var next = inserts
+                next.remove(at: index)
+                next.insert(kind, at: to)
+                reorder(next)
+            }
+    }
+
     private func insertSlot(_ kind: FXKind) -> some View {
         let engaged = rack.isEngaged(kind, isMain: isMain, reverb: reverb)
         let color = kind.accent == NightshapeTheme.accentHotPurple ? LYLLTHTheme.purple : kind.accent
@@ -617,7 +681,8 @@ private struct LYChannelStrip: View {
         }
         .background(color.opacity(engaged ? 0.12 : 0.03))
         .overlay(Rectangle().stroke(engaged ? color.opacity(0.75) : LYLLTHTheme.lineStrong, lineWidth: 1))
-        .help("\(kind.title). Click to open.")
+        .shadow(color: draggingInsert == kind ? color.opacity(0.6) : .clear, radius: 6)
+        .help("\(kind.title). Click to open; drag up or down to reorder.")
     }
 
     private func busSendSlot(_ row: BusSendRow) -> some View {

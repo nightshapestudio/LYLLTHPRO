@@ -48,6 +48,16 @@ struct LYFXRack: Codable, Equatable {
 
     var bands: [EQBandState] { eqBands ?? Self.defaultBands }
 
+    /// Puts the given inserts in this order. Effects not listed (EQ, and a
+    /// track's reverb send) keep their places in the chain.
+    mutating func reorderInserts(_ shown: [FXKind], isMain: Bool) {
+        var full = chain(isMain: isMain)
+        let slots = full.indices.filter { shown.contains(full[$0]) }
+        guard slots.count == shown.count else { return }
+        for (slot, kind) in zip(slots, shown) { full[slot] = kind }
+        order = full
+    }
+
     /// Whether an effect in the chain is switched in, the way DrumKit lights
     /// its node. EQ has no bypass; a track's reverb is on while its send is up.
     func isEngaged(_ kind: FXKind, isMain: Bool, reverb: ReverbState) -> Bool {
