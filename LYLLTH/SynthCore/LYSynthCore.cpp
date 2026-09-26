@@ -721,6 +721,7 @@ struct LYSynth {
     lyfx::Flanger flanger;
     lyfx::Phaser phaser;
     lyfx::Chorus chorus;
+    lyfx::JunoChorus junoChorus;
     lyfx::Delay delay;
     lyfx::Compressor compressor;
     lyfx::EQ eq;
@@ -781,6 +782,7 @@ void setDefaults(LYSynth *s) {
     set(LY_ARP_RATE, 10.f / 14.f); set(LY_ARP_OCTAVES, 1); set(LY_ARP_GATE, 0.6f);
 
     set(LY_FB_DRIVE, 0.3f); set(LY_FB_TONE, 0.7f);
+    set(LY_CHORUS_WIDTH, 0.75f);
     for (int k = 0; k < 2; ++k) {
         const int b = LY_INS1_TYPE + k * LY_INS_STRIDE;
         set(b + (LY_INS1_AMOUNT - LY_INS1_TYPE), 0.5f);
@@ -839,7 +841,7 @@ void buildSmoothing(LYSynth *s) {
                     LY_FILTER_PAN, LY_F2_CUTOFF, LY_F2_RES, LY_F2_DRIVE, LY_F2_KEYTRACK, LY_F2_ENVAMT, LY_F2_MIX,
                     LY_MACRO1, LY_MACRO2, LY_MACRO3, LY_MACRO4, LY_MODWHEEL, LY_MASTER, LY_TUNE }) on(id);
     for (int id : { (int)LY_MACRO5, (int)LY_MACRO6, (int)LY_MACRO7, (int)LY_MACRO8,
-                    (int)LY_FB_AMOUNT, (int)LY_FB_DRIVE, (int)LY_FB_TONE }) on(id);
+                    (int)LY_FB_AMOUNT, (int)LY_FB_DRIVE, (int)LY_FB_TONE, (int)LY_CHORUS_WIDTH }) on(id);
     for (int k = 0; k < 2; ++k) {
         const int b = LY_INS1_TYPE + k * LY_INS_STRIDE;
         for (int f : { LY_INS1_AMOUNT, LY_INS1_FREQ, LY_INS1_MIX }) on(b + (f - LY_INS1_TYPE));
@@ -1673,7 +1675,7 @@ int eventOffset(const LYSynth *s, const Event &e, uint64_t blockHost, int frames
 void prepareEffects(LYSynth *s) {
     const float sr = (float)s->sampleRate;
     s->hyper.prepare(sr); s->distortion.prepare(sr); s->flanger.prepare(sr); s->phaser.prepare(sr);
-    s->chorus.prepare(sr); s->delay.prepare(sr); s->compressor.prepare(sr); s->eq.prepare(sr);
+    s->chorus.prepare(sr); s->junoChorus.prepare(sr); s->delay.prepare(sr); s->compressor.prepare(sr); s->eq.prepare(sr);
     s->fxFilter.prepare(sr); s->reverb.prepare(sr);
 }
 
@@ -1683,7 +1685,7 @@ void clearEffect(LYSynth *s, int fx) {
     case LY_FX_DIST: s->distortion.clear(); break;
     case LY_FX_FLANGER: s->flanger.clear(); break;
     case LY_FX_PHASER: s->phaser.clear(); break;
-    case LY_FX_CHORUS: s->chorus.clear(); break;
+    case LY_FX_CHORUS: s->chorus.clear(); s->junoChorus.clear(); break;
     case LY_FX_DELAY: s->delay.clear(); break;
     case LY_FX_COMP: s->compressor.clear(); break;
     case LY_FX_EQ: s->eq.clear(); break;
@@ -1745,10 +1747,17 @@ void processEffects(LYSynth *s, float *L, float *R, int n) {
             s->phaser.process(L, R, n, P(LY_PHASER_RATE), P(LY_PHASER_DEPTH), P(LY_PHASER_FREQ, LY_DST_PHASER_FREQ),
                               P(LY_PHASER_FEEDBACK), P(LY_PHASER_MIX, LY_DST_PHASER_MIX));
             break;
-        case LY_FX_CHORUS:
-            s->chorus.process(L, R, n, P(LY_CHORUS_RATE), P(LY_CHORUS_DELAY), P(LY_CHORUS_DEPTH, LY_DST_CHORUS_DEPTH),
-                              P(LY_CHORUS_FEEDBACK), P(LY_CHORUS_TONE), P(LY_CHORUS_MIX, LY_DST_CHORUS_MIX));
+        case LY_FX_CHORUS: {
+            const int mode = (int)std::lround(s->raw[LY_CHORUS_MODE]);
+            if (mode > LY_CHORUS_CLASSIC && mode < LY_CHORUS_MODE_COUNT) {
+                s->junoChorus.process(L, R, n, mode, 0.05f * std::pow(70.f, P(LY_CHORUS_RATE)), P(LY_CHORUS_DEPTH, LY_DST_CHORUS_DEPTH),
+                                      P(LY_CHORUS_WIDTH), P(LY_CHORUS_MIX, LY_DST_CHORUS_MIX));
+            } else {
+                s->chorus.process(L, R, n, P(LY_CHORUS_RATE), P(LY_CHORUS_DELAY), P(LY_CHORUS_DEPTH, LY_DST_CHORUS_DEPTH),
+                                  P(LY_CHORUS_FEEDBACK), P(LY_CHORUS_TONE), P(LY_CHORUS_MIX, LY_DST_CHORUS_MIX));
+            }
             break;
+        }
         case LY_FX_DELAY: {
             const double seconds = syncBeats(s->raw[LY_DELAY_TIME]) * 60.0 / std::max(20.f, s->raw[LY_BPM]);
             s->delay.process(L, R, n, (float)seconds, P(LY_DELAY_FEEDBACK, LY_DST_DELAY_FEEDBACK), s->raw[LY_DELAY_PINGPONG] > 0.5f,

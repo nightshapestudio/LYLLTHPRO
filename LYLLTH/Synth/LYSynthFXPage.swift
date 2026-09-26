@@ -196,11 +196,22 @@ struct LYSynthFXPage: View {
                 c.knob(LY_PHASER_FEEDBACK, accent: accent, diameter: 34)
                 c.knob(LY_PHASER_MIX, LY_DST_PHASER_MIX, accent: accent, diameter: 38)
             case LY_FX_CHORUS:
-                c.knob(LY_CHORUS_RATE, accent: accent, diameter: 34, format: { String(format: "%.2f HZ", 0.05 + $0 * $0 * 5) })
-                c.knob(LY_CHORUS_DELAY, accent: accent, diameter: 34, format: { String(format: "%.1f MS", 4 + $0 * 26) })
-                c.knob(LY_CHORUS_DEPTH, LY_DST_CHORUS_DEPTH, accent: accent, diameter: 34)
-                c.knob(LY_CHORUS_FEEDBACK, accent: accent, diameter: 34)
-                c.knob(LY_CHORUS_TONE, accent: accent, diameter: 34)
+                // CLASSIC is LUNATK's own chorus; SUBTLE, WIDE and DEEP are the
+                // NIGHTSHAPE track chorus, modelled on the Juno's.
+                let juno = Int(c.value(LY_CHORUS_MODE)) != LY_CHORUS_CLASSIC
+                c.choice(LY_CHORUS_MODE, label: "MODE", names: LYSynthNames.chorusModes, accent: accent, columns: 4, width: 300, anchor: "chorusMode")
+                    .frame(width: 104)
+                if juno {
+                    c.knob(LY_CHORUS_RATE, accent: accent, diameter: 34, format: { String(format: "%.2f HZ", 0.05 * pow(70, $0)) })
+                    c.knob(LY_CHORUS_DEPTH, LY_DST_CHORUS_DEPTH, accent: accent, diameter: 38, format: { String(format: "%.0f%%", $0 * 100) })
+                    c.knob(LY_CHORUS_WIDTH, accent: accent, diameter: 34, format: { String(format: "%.0f%%", $0 * 100) })
+                } else {
+                    c.knob(LY_CHORUS_RATE, accent: accent, diameter: 34, format: { String(format: "%.2f HZ", 0.05 + $0 * $0 * 5) })
+                    c.knob(LY_CHORUS_DELAY, accent: accent, diameter: 34, format: { String(format: "%.1f MS", 4 + $0 * 26) })
+                    c.knob(LY_CHORUS_DEPTH, LY_DST_CHORUS_DEPTH, accent: accent, diameter: 34)
+                    c.knob(LY_CHORUS_FEEDBACK, accent: accent, diameter: 34)
+                    c.knob(LY_CHORUS_TONE, accent: accent, diameter: 34)
+                }
                 c.knob(LY_CHORUS_MIX, LY_DST_CHORUS_MIX, accent: accent, diameter: 38)
             case LY_FX_DELAY:
                 c.knob(LY_DELAY_TIME, accent: accent, diameter: 38, format: { v in
@@ -416,7 +427,8 @@ struct LYFXVisual: View {
             })
         case LY_FX_CHORUS:
             grid(&context, size, logFrequency: false)
-            let hz = 0.05 + p(LY_CHORUS_RATE) * p(LY_CHORUS_RATE) * 5
+            let juno = Int(patch.value(LY_CHORUS_MODE)) != LY_CHORUS_CLASSIC
+            let hz = juno ? 0.05 * pow(70, p(LY_CHORUS_RATE)) : 0.05 + p(LY_CHORUS_RATE) * p(LY_CHORUS_RATE) * 5
             let depth = p(LY_CHORUS_DEPTH)
             for voice in 0..<4 {
                 var path = Path()

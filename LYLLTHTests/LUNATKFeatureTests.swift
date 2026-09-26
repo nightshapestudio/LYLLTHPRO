@@ -289,3 +289,26 @@ final class LUNATKFeatureTests: XCTestCase {
         XCTAssertEqual(LYSynthNames.stepShapes.count, Int(LY_PSTEP_COUNT))
     }
 }
+
+extension LUNATKFeatureTests {
+    func testJunoChorusModesRunAndClassicIsUnchanged() {
+        func out(_ mode: Int?) -> [Float] {
+            let s = LYSynthInstrument()
+            var p = LYSynthPatch.initPatch
+            p.set(LY_CHORUS_ON, 1)
+            if let mode { p.set(LY_CHORUS_MODE, Float(mode)) }
+            s.apply(p, bpm: 120)
+            s.noteOn(48, velocity: 110, atHostTime: 0, cutoff: 1, resonance: 0)
+            var l = [Float](repeating: 0, count: 22_050), r = l
+            lysynth_render(s.core, &l, &r, 22_050, 0)
+            return l + r
+        }
+        XCTAssertEqual(out(nil), out(Int(LY_CHORUS_CLASSIC)))
+        for mode in 1..<Int(LY_CHORUS_MODE_COUNT) {
+            let wet = out(mode)
+            XCTAssertTrue(wet.allSatisfy(\.isFinite), LYSynthNames.chorusModes[mode])
+            XCTAssertNotEqual(wet, out(nil), LYSynthNames.chorusModes[mode])
+            XCTAssertLessThan(wet.map(abs).max()!, 1.2)
+        }
+    }
+}

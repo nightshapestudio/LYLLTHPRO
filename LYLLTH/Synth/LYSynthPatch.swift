@@ -249,6 +249,8 @@ enum LYSynthParameters {
                 add(trackerPoint(t, i), "track\(t + 1).t\(i)", "POINT \(i + 1)", -1...1)
             }
         }
+        add(LY_CHORUS_MODE, "chorus.mode", "MODE", 0...Float(LY_CHORUS_MODE_COUNT - 1), stepped: true)
+        add(LY_CHORUS_WIDTH, "chorus.width", "WIDTH", 0...1)
         return list
     }()
 
@@ -289,6 +291,7 @@ enum LYSynthNames {
     static let subShapes = ["SINE", "TRI", "SQUARE", "SAW"]
     static let noiseTypes = ["WHITE", "PINK", "BROWN", "CRACKLE", "VINYL", "DIGITAL", "METAL", "BREATH"]
     static let arpModes = ["UP", "DOWN", "UP + DOWN", "AS PLAYED", "RANDOM", "CHORD"]
+    static let chorusModes = ["CLASSIC", "SUBTLE", "WIDE", "DEEP"]
     static let inserts = ["OFF", "BITCRUSH", "DECIMATE", "SINE SHAPER", "FOLD", "RECTIFY", "RING MOD", "FREQ SHIFT", "COMB"]
     static let performerModes = ["SONG", "NOTE"]
     static let stepShapes = ["HOLD", "RAMP UP", "RAMP DOWN", "TRIANGLE", "DECAY", "RISE", "PULSE", "GLIDE"]

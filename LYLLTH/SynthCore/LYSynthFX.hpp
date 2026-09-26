@@ -306,6 +306,101 @@ struct Chorus {
     }
 };
 
+/// The NIGHTSHAPE track chorus (DrumKit's CHORUS, modelled on the Juno's
+/// chorus), ported sample for sample: one modulated delay per side, the two
+/// LFOs apart by WIDTH, a dark wet path with a slow drift and soft
+/// saturation, and a little of each side fed to the other. `mode` 1–3 is
+/// SUBTLE, WIDE, DEEP; `rateHz` 0.05–3.5.
+struct JunoChorus {
+    std::vector<float> bufferL, bufferR;
+    int size = 0, writeIndex = 0;
+    double phaseL = 0, phaseR = 0.25, driftPhase = 0;
+    float rate = 0.42f, depth = 0, width = 0, mix = 0;
+    float delayMs = 7, bandwidthHz = 8000, character = 0;
+    float lpL = 0, lpR = 0;
+    float sampleRate = 44100, smoothCoeff = 0;
+
+    void prepare(float sr) {
+        sampleRate = sr;
+        size = (int)(sr * 0.045f) + 8;
+        bufferL.assign(size, 0.f); bufferR.assign(size, 0.f);
+        smoothCoeff = (float)std::exp(-1.0 / (sr * 0.020));
+        clear();
+    }
+    void clear() {
+        std::fill(bufferL.begin(), bufferL.end(), 0.f);
+        std::fill(bufferR.begin(), bufferR.end(), 0.f);
+        writeIndex = 0; lpL = lpR = 0;
+        phaseL = 0; phaseR = 0.25; driftPhase = 0;
+        depth = width = mix = 0;
+    }
+    inline float smooth(float current, float target) const { return flush(smoothCoeff * current + (1.f - smoothCoeff) * target); }
+    inline float readAt(const std::vector<float> &buffer, double delaySamples) const {
+        const double clamped = std::min(std::max(delaySamples, 1.0), (double)(size - 3));
+        const int whole = (int)clamped;
+        const float frac = (float)(clamped - whole);
+        const int index0 = (writeIndex - whole + size * 2) % size;
+        const int index1 = (index0 - 1 + size) % size;
+        return buffer[index0] * (1.f - frac) + buffer[index1] * frac;
+    }
+    static inline float softLimit(float x) { return x / (1.f + std::fabs(x) * 0.35f); }
+
+    void process(float *L, float *R, int n, int mode, float rateHz, float depthTarget, float widthTarget, float mixTarget) {
+        float baseDelay, depthMs, phaseSpread, bandwidth, characterTarget;
+        switch (mode) {
+        case 1: baseDelay = 7.0f; depthMs = 1.1f; phaseSpread = 0.25f; bandwidth = 8400; characterTarget = 0.18f; break;
+        case 2: baseDelay = 8.8f; depthMs = 2.6f; phaseSpread = 0.50f; bandwidth = 7600; characterTarget = 0.34f; break;
+        default: baseDelay = 11.5f; depthMs = 4.2f; phaseSpread = 0.42f; bandwidth = 6900; characterTarget = 0.52f; break;
+        }
+        const double spread = 0.08 + widthTarget * phaseSpread;
+        for (int i = 0; i < n; ++i) {
+            rate = smooth(rate, rateHz);
+            depth = smooth(depth, depthTarget);
+            width = smooth(width, widthTarget);
+            mix = smooth(mix, mixTarget);
+            delayMs = smooth(delayMs, baseDelay);
+            bandwidthHz = smooth(bandwidthHz, bandwidth);
+            character = smooth(character, characterTarget);
+
+            const float dryL = L[i], dryR = R[i];
+            const float mono = (dryL + dryR) * 0.5f;
+            const float writeL = dryL * 0.88f + mono * 0.12f;
+            const float writeR = dryR * 0.88f + mono * 0.12f;
+
+            driftPhase += kTwoPi * 0.031 / sampleRate;
+            if (driftPhase >= kTwoPi) driftPhase -= kTwoPi;
+            const double drift = 1.0 + character * 0.035 * std::sin(driftPhase);
+            const double hz = std::max(0.03, rate * drift);
+            phaseL += hz / sampleRate;
+            phaseR = phaseL + spread;
+            if (phaseL >= 1.0) phaseL -= std::floor(phaseL);
+
+            const double swing = (double)depth * depthMs;
+            const double leftDelay = std::max(0.25, delayMs + std::sin(phaseL * kTwoPi) * swing);
+            const double rightDelay = std::max(0.25, delayMs + std::sin(phaseR * kTwoPi) * swing);
+            float wetL = readAt(bufferL, leftDelay * sampleRate / 1000.0);
+            float wetR = readAt(bufferR, rightDelay * sampleRate / 1000.0);
+
+            const float coef = 1.f - (float)std::exp(-kTwoPi * std::min(std::max(bandwidthHz, 1000.f), 16000.f) / sampleRate);
+            lpL = flush(lpL + coef * (wetL - lpL));
+            lpR = flush(lpR + coef * (wetR - lpR));
+            wetL = softLimit(lpL * (1.f + character * 0.35f));
+            wetR = softLimit(lpR * (1.f + character * 0.35f));
+
+            const float cross = (1.f - width) * 0.18f;
+            const float spreadL = wetL * (1.f - cross) + wetR * cross;
+            const float spreadR = wetR * (1.f - cross) + wetL * cross;
+
+            bufferL[writeIndex] = writeL;
+            bufferR[writeIndex] = writeR;
+            if (++writeIndex >= size) writeIndex = 0;
+
+            L[i] = dryL * (1.f - mix) + spreadL * mix;
+            R[i] = dryR * (1.f - mix) + spreadR * mix;
+        }
+    }
+};
+
 // MARK: - DELAY
 
 struct Delay {
