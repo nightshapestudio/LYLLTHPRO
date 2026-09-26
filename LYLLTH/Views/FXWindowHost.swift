@@ -19,7 +19,8 @@ struct LYFXWindowHost: View {
     let isPlaying: Bool
     let onTransportTap: () -> Void
 
-    private let engine = NightshapeAudioEngine.shared
+    @EnvironmentObject private var audio: AudioEngineController
+    private var engine: NightshapeAudioEngine { audio.engine }
     @State private var parkedReverbSend: Float?
     @State private var mainEQVolume: Double = 0
     @StateObject private var decimatorModel = SonicDecimatorEditorModel()
@@ -364,7 +365,7 @@ struct LYFXWindowHost: View {
                     commitDecimator()
                 }
                 .onChange(of: decimatorModel.isBypassed) { _, _ in commitDecimator() }
-                .background(LYDecimatorMotionFollower(display: decimatorMotion, trackIndex: engineIndex, isPlaying: isPlaying,
+                .background(LYDecimatorMotionFollower(engine: engine, display: decimatorMotion, trackIndex: engineIndex, isPlaying: isPlaying,
                                                        isActive: decimatorModel.motion.isEnabled))
             )
         }
@@ -410,6 +411,7 @@ struct LYFXWindowHost: View {
 /// Asks the engine where MOTION is and shows it on the decimator's XY field,
 /// twenty times a second while the transport runs.
 private struct LYDecimatorMotionFollower: View {
+    let engine: NightshapeAudioEngine
     let display: DecimatorMotionDisplay
     let trackIndex: Int?
     let isPlaying: Bool
@@ -418,7 +420,6 @@ private struct LYDecimatorMotionFollower: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !(isPlaying && isActive))) { context in
             Color.clear.onChange(of: context.date) { _, _ in
-                let engine = NightshapeAudioEngine.shared
                 let point = trackIndex.flatMap { engine.decimatorMotionPosition(trackIndex: $0) } ?? (trackIndex == nil ? engine.mainDecimatorMotionPosition() : nil)
                 if let point {
                     display.setPosition(.init(x: Double(point.x), y: Double(point.y)), for: nil)

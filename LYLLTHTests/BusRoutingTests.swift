@@ -8,6 +8,14 @@ final class BusRoutingTests: XCTestCase {
         LYLLTHSession.starter()
     }
 
+    func testEachDocumentControllerOwnsADifferentEngineGraph() {
+        let first = AudioEngineController()
+        let second = AudioEngineController()
+        XCTAssertFalse(first.engine === second.engine)
+        first.shutdown()
+        second.shutdown()
+    }
+
     func testStarterGivesAudioAndReturnTheirOwnChannels() {
         let session = session()
         XCTAssertEqual(TrackChannel.maxTracks, LYChannelMap.engineChannels)
@@ -17,6 +25,26 @@ final class BusRoutingTests: XCTestCase {
         let audio = session.tracks.first { $0.kind == .audio }!
         XCTAssertEqual(LYFXBridge.engineIndex(for: audio.id, in: session), 16)
         XCTAssertEqual(LYFXBridge.engineIndex(for: bus.id, in: session), 17)
+    }
+
+    func testChannelIdentitySurvivesTrackReorder() {
+        var session = session()
+        let before = Dictionary(uniqueKeysWithValues: LYChannelMap.channels(in: session).map { ($0.trackID, $0.index) })
+        session.tracks.swapAt(0, session.tracks.count - 1)
+        let after = Dictionary(uniqueKeysWithValues: LYChannelMap.channels(in: session).map { ($0.trackID, $0.index) })
+        XCTAssertEqual(after, before)
+    }
+
+    func testDuplicateAndMissingLegacyChannelAssignmentsAreRepaired() {
+        var session = session()
+        session.tracks[0].engineChannelIndex = 7
+        session.tracks[1].engineChannelIndex = 7
+        session.tracks[2].engineChannelIndex = nil
+        session.normalizeEngineChannelIndices()
+        let values = session.tracks.compactMap(\.engineChannelIndex)
+        XCTAssertEqual(values.count, session.tracks.count)
+        XCTAssertEqual(Set(values).count, values.count)
+        XCTAssertEqual(session.tracks[0].engineChannelIndex, 7)
     }
 
     func testSendsAndOutputBecomeEngineRoutes() {

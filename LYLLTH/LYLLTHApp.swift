@@ -3,9 +3,6 @@ import NightshapeAudioEngine
 
 @main
 struct LYLLTHApp: App {
-    @StateObject private var audio = AudioEngineController()
-    @StateObject private var plugins = AudioUnitCatalog()
-
     init() {
         LYChannelMap.configureEngine()
         // A Mac has frames to spare: meters, visualizers and FX windows
@@ -16,21 +13,36 @@ struct LYLLTHApp: App {
 
     var body: some Scene {
         DocumentGroup(newDocument: LYLLTHSessionDocument()) { configuration in
-            WorkspaceView(document: configuration.$document)
-                .environmentObject(audio)
-                .environmentObject(plugins)
-                .preferredColorScheme(.dark)
+            LYDocumentWorkspace(document: configuration.$document)
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
             LYProjectCommands()
-            CommandGroup(after: .toolbar) {
-                Button(audio.isPlaying ? "Stop" : "Play") {
-                    audio.togglePlayback()
-                }
-                .keyboardShortcut(.space, modifiers: [])
-            }
         }
+    }
+}
+
+/// Owns every mutable runtime service for exactly one document window.
+/// Opening a second song therefore creates a second engine, AU host, catalog,
+/// undo history and recovery journal instead of sharing global state.
+private struct LYDocumentWorkspace: View {
+    @Binding var document: LYLLTHSessionDocument
+    @StateObject private var audio: AudioEngineController
+    @StateObject private var plugins = AudioUnitCatalog()
+    @StateObject private var audioUnits = LYAudioUnitHost()
+
+    init(document: Binding<LYLLTHSessionDocument>) {
+        _document = document
+        _audio = StateObject(wrappedValue: AudioEngineController())
+    }
+
+    var body: some View {
+        WorkspaceView(document: $document)
+            .environmentObject(audio)
+            .environmentObject(plugins)
+            .environmentObject(audioUnits)
+            .preferredColorScheme(.dark)
+            .onDisappear { audio.shutdown() }
     }
 }
 
@@ -42,6 +54,7 @@ struct LYWorkspaceActions {
     var saveDrumKitProject: () -> Void
     var exportSong: () -> Void
     var toggleMusicalTyping: () -> Void
+    var togglePlayback: () -> Void
 }
 
 private struct LYWorkspaceActionsKey: FocusedValueKey {
@@ -83,6 +96,11 @@ struct LYProjectCommands: Commands {
                 .keyboardShortcut("k", modifiers: .command)
                 .disabled(workspace == nil)
             Divider()
+        }
+        CommandGroup(after: .toolbar) {
+            Button("Play / Stop") { workspace?.togglePlayback() }
+                .keyboardShortcut(.space, modifiers: [])
+                .disabled(workspace == nil)
         }
     }
 }

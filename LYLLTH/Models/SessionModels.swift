@@ -143,6 +143,39 @@ struct LYPluginSlot: Codable, Identifiable, Equatable {
     var manufacturer: String
     var isBypassed: Bool = false
     var state: Data?
+    var validationError: String?
+    var reportedLatencySeconds: Double?
+    var componentType: UInt32?
+    var componentSubType: UInt32?
+    var componentManufacturer: UInt32?
+}
+
+struct LYAudioTake: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var name: String
+    var sourceRelativePath: String
+    var sourceStartSeconds: Double
+    var durationSeconds: Double
+    var recordedAt = Date()
+}
+
+struct LYCompSegment: Codable, Identifiable, Equatable {
+    var id = UUID()
+    /// Beat range relative to the clip.
+    var startBeat: Double
+    var lengthBeats: Double
+    var takeID: UUID
+}
+
+struct LYRecordingSettings: Codable, Equatable {
+    /// Bars heard before the record downbeat. Zero starts immediately.
+    var preRollBars = 1
+    var punchRange: LYLoopRange?
+    var loopTakes = true
+    var inputChannel = 0
+    var inputMonitoring = false
+    /// Manual converter/interface correction added to measured device latency.
+    var manualLatencyMS: Double = 0
 }
 
 /// Per-step performance locks. Values stay normalized where possible so the
@@ -734,6 +767,11 @@ struct LYClip: Codable, Identifiable, Equatable {
     /// How long a note clip's content is before it repeats. nil: the clip's
     /// length when it was made.
     var noteLoopBeats: Double? = nil
+    /// Non-destructive recording alternatives. The main source fields mirror
+    /// the active take for compatibility with existing playback/export.
+    var takes: [LYAudioTake]? = nil
+    var activeTakeID: UUID? = nil
+    var compSegments: [LYCompSegment]? = nil
 
     var isNoteClip: Bool { kind == .notes }
     /// The repeating length of a note clip.
@@ -803,7 +841,7 @@ extension LYClip {
         case slipOffsetSeconds, eventGainDB
         case pitchSemitones, fadeInSeconds, fadeOutSeconds, fadeCurve, stretchMode
         case sourceBPM, preservePitch, beatMap, isMuted, isLocked, isLooped, loopOffsetBeats, sourceFileDurationSeconds
-        case patternSourceID, isOffTimeline, notes, noteLoopBeats
+        case patternSourceID, isOffTimeline, notes, noteLoopBeats, takes, activeTakeID, compSegments
     }
 
     init(from decoder: Decoder) throws {
@@ -840,6 +878,9 @@ extension LYClip {
         isOffTimeline = try values.decodeIfPresent(Bool.self, forKey: .isOffTimeline)
         notes = try values.decodeIfPresent([LYNote].self, forKey: .notes)
         noteLoopBeats = try values.decodeIfPresent(Double.self, forKey: .noteLoopBeats)
+        takes = try values.decodeIfPresent([LYAudioTake].self, forKey: .takes)
+        activeTakeID = try values.decodeIfPresent(UUID.self, forKey: .activeTakeID)
+        compSegments = try values.decodeIfPresent([LYCompSegment].self, forKey: .compSegments)
         normalizeAudioEvent()
     }
 }
@@ -883,6 +924,9 @@ struct LYTrack: Codable, Identifiable, Equatable {
     }
 
     var id = UUID()
+    /// Stable graph address for this track. Unlike a track-array offset, this
+    /// survives reorder, save/reopen and insertion of other track kinds.
+    var engineChannelIndex: Int? = nil
     var name: String
     var kind: LYTrackKind
     var accent: LYAccent
@@ -899,6 +943,9 @@ struct LYTrack: Codable, Identifiable, Equatable {
     var rootNote: Int? = nil
     var clips: [LYClip] = []
     var inserts: [LYPluginSlot] = []
+    /// Third-party instrument source, separate from audio inserts so its node
+    /// is restored at the beginning of the channel graph.
+    var instrumentPlugin: LYPluginSlot? = nil
     /// NIGHTSHAPE effects on this channel. Optional preserves older documents.
     var fx: LYFXRack? = nil
     /// Set when this track plays LUNATK instead of a DrumKit synth preset.
@@ -966,7 +1013,7 @@ struct LYLoopRange: Codable, Equatable {
 }
 
 struct LYLLTHSession: Codable, Equatable {
-    static let currentSchemaVersion = 4
+    static let currentSchemaVersion = 6
 
     var schemaVersion = currentSchemaVersion
     var id = UUID()
@@ -984,6 +1031,7 @@ struct LYLLTHSession: Codable, Equatable {
     /// Four clicks before recording starts. Optional preserves older
     /// documents; on unless turned off.
     var countIn: Bool? = nil
+    var recordingSettings: LYRecordingSettings? = nil
     /// Sequencer swing, 0.5 straight … 0.75. Optional preserves older documents.
     var swing: Double? = nil
     /// Optional preserves documents created before desktop pattern editing.
@@ -1115,7 +1163,7 @@ struct LYLLTHSession: Codable, Equatable {
         )
         tracks.append(LYTrack(name: "RETURN A", kind: .auxiliary, accent: .teal, volumeDB: -8))
 
-        return LYLLTHSession(
+        var session = LYLLTHSession(
             name: "UNTITLED 01",
             bpm: 118,
             numerator: 4,
@@ -1128,6 +1176,8 @@ struct LYLLTHSession: Codable, Equatable {
             arrangementEditor: .default,
             tracks: tracks
         )
+        session.normalizeEngineChannelIndices()
+        return session
     }
 
     /// Version 1's starter project auto-played one held chord root. Extending
@@ -1136,7 +1186,6 @@ struct LYLLTHSession: Codable, Equatable {
     /// Repair only the recognizable untouched starter scaffold; user-created
     /// chord tracks and renamed/customized projects retain their state.
     func migratedToCurrentSchema() -> LYLLTHSession {
-        guard schemaVersion < Self.currentSchemaVersion else { return self }
         var migrated = self
 
         let starterNames = [
@@ -1185,8 +1234,47 @@ struct LYLLTHSession: Codable, Equatable {
             }
         }
 
+        // Version 5: graph identity belongs to the track, not its current row.
+        // This is also run for newly-created current-version sessions so any
+        // caller that appended a track without assigning a slot is repaired.
+        migrated.normalizeEngineChannelIndices()
+
+        if schemaVersion < 6, migrated.recordingSettings == nil {
+            migrated.recordingSettings = LYRecordingSettings(preRollBars: migrated.countIn == false ? 0 : 1)
+        }
+
         migrated.schemaVersion = Self.currentSchemaVersion
         return migrated
+    }
+
+    /// Preserves valid unique assignments and deterministically fills holes.
+    /// Invalid/duplicate legacy values are repaired without moving any other
+    /// track's established channel.
+    mutating func normalizeEngineChannelIndices(limit: Int = 256) {
+        var used = Set<Int>()
+        for index in tracks.indices {
+            guard let channel = tracks[index].engineChannelIndex,
+                  (0..<limit).contains(channel),
+                  used.insert(channel).inserted else {
+                tracks[index].engineChannelIndex = nil
+                continue
+            }
+        }
+        var candidate = 0
+        for index in tracks.indices where tracks[index].engineChannelIndex == nil {
+            while used.contains(candidate) && candidate < limit { candidate += 1 }
+            guard candidate < limit else { break }
+            tracks[index].engineChannelIndex = candidate
+            used.insert(candidate)
+        }
+    }
+
+    mutating func assignEngineChannel(toTrackAt index: Int, limit: Int = 256) {
+        guard tracks.indices.contains(index) else { return }
+        let used = Set(tracks.enumerated().compactMap { offset, track in
+            offset == index ? nil : track.engineChannelIndex
+        })
+        tracks[index].engineChannelIndex = (0..<limit).first { !used.contains($0) }
     }
 
     private static var nightshapeStarterChain: [LYPluginSlot] {

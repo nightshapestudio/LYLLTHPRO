@@ -13,10 +13,7 @@ enum LYTransportMode: String {
 
 @MainActor
 final class AudioEngineController: ObservableObject {
-    let engine: NightshapeAudioEngine = {
-        LYChannelMap.configureEngine()
-        return NightshapeAudioEngine.shared
-    }()
+    let engine: NightshapeAudioEngine
     private lazy var notePlayer: LYNotePlayer = {
         let player = LYNotePlayer(engine: engine)
         player.instrument = { [weak self] id in self?.instruments[id] }
@@ -34,8 +31,8 @@ final class AudioEngineController: ObservableObject {
         return player
     }()
 
-    /// Transport record enable. Capture is not built yet; this is the state
-    /// the record path will read.
+    /// Transport record enable. The workspace consumes this state to begin
+    /// count-in, input capture, punch and take placement.
     @Published var isRecordEnabled = false
     @Published private(set) var transportMode: LYTransportMode = .song
     /// LUNATK instances by track, and which engine channel each is on.
@@ -74,6 +71,7 @@ final class AudioEngineController: ObservableObject {
     private var sentShaping: [Int: SentShaping] = [:]
     /// The song's audio, for drum tracks that play a sample from it.
     private var sampleAssets: [String: Data] = [:]
+    private var sampleAssetNames = Set<String>()
     private var sentTransport: (bpm: Double, numerator: Int, denominator: Int, length: Int, mode: LYTransportMode)?
 
     /// Drops every cache, for when the engine may have lost state.
@@ -104,21 +102,23 @@ final class AudioEngineController: ObservableObject {
     @Published private(set) var isRenderingAudioEvent = false
 
     private var cancellables = Set<AnyCancellable>()
-    init() {
-        engine.state.$isPlaying
+    init(engine: NightshapeAudioEngine? = nil) {
+        LYChannelMap.configureEngine()
+        self.engine = engine ?? NightshapeAudioEngine()
+        self.engine.state.$isPlaying
             .removeDuplicates()
             .assign(to: &$isPlaying)
-        engine.state.$currentStep
+        self.engine.state.$currentStep
             .removeDuplicates()
             .sink { [weak self] step in
                 self?.currentStep = step
                 self?.stepDisplay.update(step: step)
             }
             .store(in: &cancellables)
-        engine.state.$timecodeText
+        self.engine.state.$timecodeText
             .removeDuplicates()
             .assign(to: &$timecode)
-        engine.state.$isPlaying
+        self.engine.state.$isPlaying
             .removeDuplicates()
             .sink { [weak self] playing in
                 guard let self else { return }
@@ -136,13 +136,23 @@ final class AudioEngineController: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Releases transport/timers owned by this document. The graph instance
+    /// itself dies with the document workspace.
+    func shutdown() {
+        stopSynthClock()
+        timeline.stop()
+        notePlayer.stop()
+        automationPlayer.stop()
+        engine.stop()
+    }
+
     /// Switches between looping the edited pattern and playing the song. A
     /// running transport keeps running; the next bar follows the new mode.
-    func setTransportMode(_ mode: LYTransportMode, session: LYLLTHSession, assets: [String: Data]) {
+    func setTransportMode(_ mode: LYTransportMode, session: LYLLTHSession, media: LYProjectMediaStore) {
         guard mode != transportMode else { return }
         transportMode = mode
         syncSequencer(session)
-        syncTimeline(session, assets: assets)
+        syncTimeline(session, media: media)
         if isPlaying && mode == .song {
             timeline.start()
             notePlayer.start()
@@ -156,16 +166,20 @@ final class AudioEngineController: ObservableObject {
 
     /// Hands the arranged audio events to the timeline player. Cheap to call on
     /// every edit: renders are cached and only timing changes reschedule.
-    func syncTimeline(_ session: LYLLTHSession, assets: [String: Data]) {
-        if assets.keys != sampleAssets.keys {
-            sampleAssets = assets
+    func syncTimeline(_ session: LYLLTHSession, media: LYProjectMediaStore) {
+        let wantedSamples = Set(session.tracks.compactMap(\.samplePath))
+        if wantedSamples != sampleAssetNames {
+            sampleAssetNames = wantedSamples
+            sampleAssets = Dictionary(uniqueKeysWithValues: wantedSamples.compactMap { path in
+                media.data(for: path).map { (path, $0) }
+            })
             // Sample drum tracks may have been waiting for their audio.
             if session.tracks.contains(where: { $0.samplePath != nil }) { syncSequencer(session) }
         }
         let meter = transportMeter(numerator: session.numerator, denominator: session.denominator)
         let window = LYSongWindow.resolve(for: session, stepsPerBar: meter.activeSubdivisionCount)
         if window != songWindow { songWindow = window }
-        timeline.update(session: session, assets: assets, window: window)
+        timeline.update(session: session, media: media, window: window)
         notePlayer.update(session: session, window: window)
         automationPlayer.update(session: session)
     }
@@ -238,6 +252,9 @@ final class AudioEngineController: ObservableObject {
         let selectedPattern = max(0, patternIndex ?? session.activePatternIndex ?? 0)
         let tracks = session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }
         let clips = tracks.map { activeSequencedClip(in: $0, patternIndex: selectedPattern) }
+        let clipByTrack = Dictionary(uniqueKeysWithValues: zip(tracks.map(\.id), clips))
+        let channelByTrack = Dictionary(uniqueKeysWithValues: LYChannelMap.channels(in: session).map { ($0.trackID, $0.index) })
+        let musicalChannels = Set(tracks.compactMap { channelByTrack[$0.id] })
         let stepCount = min(max(clips.compactMap { $0?.steps?.count }.max() ?? 16, 1), 64)
         let meter = transportMeter(numerator: session.numerator, denominator: session.denominator)
 
@@ -290,7 +307,8 @@ final class AudioEngineController: ObservableObject {
             sentSong = nil
         }
 
-        for (trackIndex, track) in tracks.enumerated() {
+        for track in tracks {
+            guard let trackIndex = channelByTrack[track.id] else { continue }
             let fallbackRoot = track.kind == .drumkit ? 36 : 48
             let rootNote = UInt8(clamping: track.rootNote ?? fallbackRoot)
             let preset = track.synthPresetID.flatMap(SynthPreset.init(rawValue:))
@@ -310,7 +328,7 @@ final class AudioEngineController: ObservableObject {
             syncInstrument(track: track, channel: trackIndex, bpm: session.bpm)
             syncShaping(track: track, channel: trackIndex)
 
-            let clip = clips[trackIndex]
+            let clip = clipByTrack[track.id] ?? nil
             let storedSteps = normalizedSteps(clip?.steps, count: stepCount)
             let locks = normalizedLocks(clip?.stepParameters, count: stepCount)
             let rendered = renderedPattern(
@@ -347,11 +365,12 @@ final class AudioEngineController: ObservableObject {
             sentMix[trackIndex] = mix
         }
 
-        // Channels past the sequencer's play audio tracks and AUX RETURNs, or
-        // sit muted. They get no pattern and no instrument.
+        // Every non-musical graph address (including holes between stable
+        // addresses) is silent. This is deliberately not based on track-array
+        // order: a new instrument can occupy channel 19 while audio remains 16.
         let byChannel = Dictionary(uniqueKeysWithValues: LYChannelMap.channels(in: session).map { ($0.index, $0.trackID) })
         do {
-            for trackIndex in min(tracks.count, engine.trackChannelCount)..<engine.trackChannelCount {
+            for trackIndex in 0..<engine.trackChannelCount where !musicalChannels.contains(trackIndex) {
                 let silent = SentPattern(steps: Array(repeating: false, count: stepCount), locks: [])
                 if sentPatterns[trackIndex] != silent {
                     sentPatterns[trackIndex] = silent
@@ -479,6 +498,12 @@ final class AudioEngineController: ObservableObject {
     // MARK: - LUNATK
 
     private func syncInstrument(track: LYTrack, channel: Int, bpm: Double) {
+        // The document AU host owns this source node. Never replace it with a
+        // LUNATK instance during an unrelated sequencer or mixer sync.
+        if track.instrumentPlugin != nil {
+            instrumentOnChannel[channel] = nil
+            return
+        }
         guard let patch = track.synth else {
             if instrumentOnChannel[channel] != nil {
                 engine.setTrackInstrument(trackIndex: channel, instrument: nil)

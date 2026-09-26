@@ -86,7 +86,7 @@ enum LYSongCompiler {
         let channels = Dictionary(uniqueKeysWithValues: LYChannelMap.channels(in: session).map { ($0.trackID, $0.index) })
         return (0..<window.barCount).map { barOffset in
             let barStart = Double(window.startBar + barOffset) * window.beatsPerBar
-            let songTracks: [SongPatternTrack] = tracks.map { track in
+            let renderedTracks: [UUID: SongPatternTrack] = Dictionary(uniqueKeysWithValues: tracks.map { track in
                 var active = Array(repeating: false, count: stepsPerBar)
                 var locks = Array(repeating: LYStepParameters.default, count: stepsPerBar)
                 let regions = track.songRegions
@@ -106,7 +106,7 @@ enum LYSongCompiler {
                         sawRegion = true
                     }
                 }
-                return SongPatternTrack(
+                return (track.id, SongPatternTrack(
                     activeSteps: active,
                     flamSteps: locks.map { $0.flam == true },
                     velocities: locks.map { min(max($0.velocity, 0), 1) },
@@ -117,8 +117,27 @@ enum LYSongCompiler {
                     pans: locks.map { min(max($0.pan, -1), 1) },
                     pitches: locks.map { min(max(Int($0.pitch.rounded()), -24), 24) },
                     noteLengths: locks.map { min(max(Int($0.noteLength.rounded()), 1), 64) }
-                )
-            }
+                ))
+            })
+            let channelMap = Dictionary(uniqueKeysWithValues: LYChannelMap.channels(in: session).map { ($0.index, $0.trackID) })
+            let highestMusicalChannel = tracks.compactMap { track in
+                channels[track.id]
+            }.max() ?? -1
+            let silent = SongPatternTrack(
+                activeSteps: Array(repeating: false, count: stepsPerBar),
+                flamSteps: Array(repeating: false, count: stepsPerBar),
+                velocities: Array(repeating: 0, count: stepsPerBar),
+                volumes: Array(repeating: 0, count: stepsPerBar),
+                cutoffs: Array(repeating: 0.7, count: stepsPerBar),
+                resonances: Array(repeating: 0.18, count: stepsPerBar),
+                effects: Array(repeating: 0, count: stepsPerBar),
+                pans: Array(repeating: 0, count: stepsPerBar),
+                pitches: Array(repeating: 0, count: stepsPerBar),
+                noteLengths: Array(repeating: 1, count: stepsPerBar)
+            )
+            let songTracks = highestMusicalChannel >= 0 ? (0...highestMusicalChannel).map { channel in
+                channelMap[channel].flatMap { renderedTracks[$0] } ?? silent
+            } : []
             let fx = LYSongFXCompiler.lanes(session.songFX ?? [], barStartBeat: barStart, stepsPerBar: stepsPerBar, channels: channels)
             return SongPatternFrame(stepCount: stepsPerBar, tracks: songTracks, filterLanes: fx.filter, fractureLanes: fx.fracture)
         }
@@ -158,7 +177,7 @@ final class LYTimelineAudioPlayer {
     private var failed: Set<String> = []
 
     private var session: LYLLTHSession?
-    private var assets: [String: Data] = [:]
+    private var media: LYProjectMediaStore?
     private var window: LYSongWindow?
     private var segments: [LYEventSegment] = []
     /// The engine channel each player feeds; nil is the program mix.
@@ -179,11 +198,11 @@ final class LYTimelineAudioPlayer {
 
     // MARK: Model
 
-    func update(session: LYLLTHSession, assets: [String: Data], window: LYSongWindow) {
+    func update(session: LYLLTHSession, media: LYProjectMediaStore, window: LYSongWindow) {
         LYChannelMap.ensureChannels(for: session, engine: engine)
         let structureChanged = self.window != window || Self.structure(of: session) != Self.structure(of: self.session)
         self.session = session
-        self.assets = assets
+        self.media = media
         self.window = window
         rebuildSegments()
         routeNodes()
@@ -408,7 +427,7 @@ final class LYTimelineAudioPlayer {
         guard let session else { return }
         for track in session.tracks where track.kind == .audio {
             for clip in track.clips where clip.kind == .audio {
-                guard let path = clip.sourceRelativePath, let data = assets[path] else { continue }
+                guard let path = clip.sourceRelativePath, let data = media?.data(for: path) else { continue }
                 let key = Self.renderKey(for: clip, bpm: session.bpm)
                 guard cycles[key] == nil, !rendering.contains(key), !failed.contains(key) else { continue }
                 rendering.insert(key)

@@ -3,6 +3,76 @@ import AppKit
 import AVFoundation
 import NightshapeAudioEngine
 
+@MainActor
+final class LYDocumentHistory: ObservableObject {
+    private var current: LYLLTHSession?
+    private var pendingUndo: LYLLTHSession?
+    private var pendingWork: DispatchWorkItem?
+    private var ignoreNextChange = false
+    private var pendingApply: ((LYLLTHSession) -> Void)?
+    private weak var pendingManager: UndoManager?
+
+    func begin(_ session: LYLLTHSession) {
+        current = session
+    }
+
+    func record(_ next: LYLLTHSession, undoManager: UndoManager?, apply: @escaping (LYLLTHSession) -> Void) {
+        if ignoreNextChange {
+            ignoreNextChange = false
+            current = next
+            return
+        }
+        guard let previous = current, previous != next else { return }
+        if pendingUndo == nil { pendingUndo = previous }
+        current = next
+        pendingApply = apply
+        pendingManager = undoManager
+        pendingWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.flush() }
+        pendingWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    func flush() {
+        pendingWork?.cancel()
+        pendingWork = nil
+        guard let snapshot = pendingUndo,
+              let manager = pendingManager,
+              let apply = pendingApply else {
+            if let current { LYRecoveryJournal.write(current) }
+            return
+        }
+        pendingUndo = nil
+        manager.registerUndo(withTarget: self) { target in
+            target.restore(snapshot, undoManager: manager, apply: apply)
+        }
+        manager.setActionName("Edit Project")
+        if let current { LYRecoveryJournal.write(current) }
+    }
+
+    func replace(with session: LYLLTHSession) {
+        pendingWork?.cancel()
+        pendingWork = nil
+        pendingUndo = nil
+        current = session
+        ignoreNextChange = true
+        LYRecoveryJournal.write(session)
+    }
+
+    private func restore(_ snapshot: LYLLTHSession, undoManager: UndoManager, apply: @escaping (LYLLTHSession) -> Void) {
+        flush()
+        guard let redo = current else { return }
+        ignoreNextChange = true
+        current = snapshot
+        apply(snapshot)
+        undoManager.registerUndo(withTarget: self) { target in
+            target.restore(redo, undoManager: undoManager, apply: apply)
+        }
+        undoManager.setActionName("Edit Project")
+        LYRecoveryJournal.write(snapshot)
+    }
+}
+
 private final class LYAudioOpenPanelDelegate: NSObject, NSOpenSavePanelDelegate {
     private static let supportedExtensions: Set<String> = [
         "wav", "wave", "aif", "aiff", "mp3", "m4a", "mp4", "caf", "flac"
@@ -139,6 +209,9 @@ struct WorkspaceView: View {
     @Binding var document: LYLLTHSessionDocument
     @EnvironmentObject private var audio: AudioEngineController
     @EnvironmentObject private var plugins: AudioUnitCatalog
+    @EnvironmentObject private var audioUnits: LYAudioUnitHost
+    @Environment(\.undoManager) private var undoManager
+    @StateObject private var history = LYDocumentHistory()
 
     @State private var selectedTrackID: UUID?
     @State private var selectedBrowserGroup = "NIGHTSHAPE"
@@ -172,6 +245,7 @@ struct WorkspaceView: View {
     @State private var meters = LYMeterStore()
     /// A passing message for the status bar: what an open or save left out.
     @State private var notice: String?
+    @State private var recoveryCandidate: LYLLTHSession?
     @Environment(\.newDocument) private var newDocument
 
     private var selectedTrackBinding: Binding<LYTrack>? {
@@ -220,9 +294,10 @@ struct WorkspaceView: View {
                         BrowserPanel(
                             selection: $selectedBrowserGroup,
                             selectedItem: $selectedBrowserItem,
-                            projectAudio: Array(document.audioAssets.keys),
+                            projectAudio: document.audioAssetNames,
                             onEffect: { addEffectFromLibrary(named: $0) },
                             onSound: { openSoundFromLibrary($0) },
+                            onAudioUnit: { installAudioUnit($0) },
                             close: { showBrowser = false }
                         )
                         .environmentObject(plugins)
@@ -313,6 +388,12 @@ struct WorkspaceView: View {
                 LYBounceOverlay(bounce: bounce, cancel: { bounce.cancel(audio: audio) })
                     .zIndex(250)
 
+                recoveryOverlay
+                    .zIndex(300)
+
+                audioUnitEditorOverlay
+                    .zIndex(290)
+
                 LYFXWindowHost(
                     session: $document.session,
                     request: $fxRequest,
@@ -329,6 +410,14 @@ struct WorkspaceView: View {
         .frame(minWidth: 960, minHeight: 640)
         .focusedSceneValue(\.lyWorkspace, workspaceActions)
         .onAppear {
+            recoveryCandidate = LYRecoveryJournal.recoverable(
+                projectID: document.session.id,
+                newerThan: document.session.modifiedAt
+            )
+            history.begin(document.session)
+            if let orphan = LYRecordingJournal.recoverable(projectID: document.session.id) {
+                recoverRecording(orphan)
+            }
             if document.isFromDrumKit {
                 notice = (["OPENED FROM DRUMKIT  ·  SAVE KEEPS IT AS A LYLLTH SONG"] + document.importNotes.map { $0.uppercased() })
                     .joined(separator: "  ·  ")
@@ -337,12 +426,15 @@ struct WorkspaceView: View {
             LYWavetableLibrary.shared.register(projectTables: document.wavetables)
             selectedTrackID = selectedTrackID ?? document.session.tracks.first?.id
             audio.prepare(document.session)
+            Task { @MainActor in
+                document.session = await audioUnits.restore(document.session, engine: audio.engine)
+            }
             LYMIDIInput.shared.start()
             DispatchQueue.main.async { updateMIDITarget() }
-            audio.setTransportMode(transportMode, session: document.session, assets: document.audioAssets)
-            audio.syncTimeline(document.session, assets: document.audioAssets)
+            audio.setTransportMode(transportMode, session: document.session, media: document.audioMediaStore)
+            audio.syncTimeline(document.session, media: document.audioMediaStore)
             LYFXBridge.pushAll(document.session, engine: audio.engine)
-            meters.track(document.session)
+            meters.track(document.session, engine: audio.engine)
             audio.engine.setMainOutputVolume(volume: pow(10, (document.session.mainVolumeDB ?? 0) / 20))
             plugins.scan()
             #if DEBUG
@@ -384,24 +476,27 @@ struct WorkspaceView: View {
             DispatchQueue.main.async { updateMIDITarget() }
         }
         .onChange(of: document.session.tracks.map(\.id)) { _, _ in
-            // Engine channels follow track order, so a reorder or a new track
-            // moves every rack onto a different channel.
+            // Track IDs own stable graph channels. New and deleted tracks still
+            // require rack and meter bindings to be refreshed; reorder does not.
             LYFXBridge.pushAll(document.session, engine: audio.engine)
-            meters.track(document.session)
+            meters.track(document.session, engine: audio.engine)
         }
         .onChange(of: document.session.mainVolumeDB) { _, value in
             audio.engine.setMainOutputVolume(volume: pow(10, (value ?? 0) / 20))
         }
         .onChange(of: activeWorkspace) { _, _ in
-            audio.setTransportMode(transportMode, session: document.session, assets: document.audioAssets)
+            audio.setTransportMode(transportMode, session: document.session, media: document.audioMediaStore)
         }
         .onChange(of: document.session) { _, _ in
+            history.record(document.session, undoManager: undoManager) { recovered in
+                document.session = recovered
+            }
             // Arrangement edits have to reach the song frames and the audio
             // players. Deferred to just after this frame and coalesced, so a
             // click shows before the engine work runs.
             engineSync.schedule {
                 audio.syncSequencer(document.session)
-                audio.syncTimeline(document.session, assets: document.audioAssets)
+                audio.syncTimeline(document.session, media: document.audioMediaStore)
             }
         }
         .onChange(of: document.session.bpm) { _, newValue in
@@ -415,6 +510,49 @@ struct WorkspaceView: View {
         }
         .onChange(of: document.session.denominator) { _, _ in
             audio.syncSequencer(document.session)
+        }
+        .onChange(of: audioUnits.stateRevision) { _, _ in
+            document.session = audioUnits.captureStates(in: document.session, engine: audio.engine)
+        }
+        .onDisappear { history.flush() }
+    }
+
+    @ViewBuilder
+    private var recoveryOverlay: some View {
+        if let recovered = recoveryCandidate {
+            Color.black.opacity(0.72).ignoresSafeArea()
+            VStack(spacing: 14) {
+                Text("RECOVER PROJECT")
+                    .font(LYLLTHTheme.label(15, weight: .bold))
+                    .tracking(2)
+                    .foregroundStyle(LYLLTHTheme.text)
+                Text("LYLLTH FOUND NEWER UNSAVED EDITS FOR \(recovered.name.uppercased()).")
+                    .font(LYLLTHTheme.label(9, weight: .bold))
+                    .tracking(1.1)
+                    .foregroundStyle(LYLLTHTheme.secondary)
+                    .multilineTextAlignment(.center)
+                HStack(spacing: 10) {
+                    Button("DISCARD") {
+                        LYRecoveryJournal.discard(projectID: document.session.id)
+                        recoveryCandidate = nil
+                    }
+                    .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.dim))
+                    Button("RECOVER") {
+                        var session = recovered
+                        session.normalizeEngineChannelIndices()
+                        document.session = session
+                        history.replace(with: session)
+                        recoveryCandidate = nil
+                        notice = "RECOVERED UNSAVED PROJECT EDITS"
+                    }
+                    .buttonStyle(LYChromeButtonStyle(active: true, tint: LYLLTHTheme.teal))
+                }
+            }
+            .padding(24)
+            .frame(width: 390)
+            .background(LYLLTHTheme.panel)
+            .overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.7), lineWidth: 1))
+            .shadow(color: LYLLTHTheme.teal.opacity(0.16), radius: 18)
         }
     }
 
@@ -442,7 +580,7 @@ struct WorkspaceView: View {
             },
             previewAudioEvent: { clip in
                 guard let path = clip.sourceRelativePath,
-                      let data = document.audioAssets[path] else {
+                      let data = document.audioData(for: path) else {
                     audioImportError = "This audio event's original file is missing from the project."
                     return
                 }
@@ -565,7 +703,7 @@ struct WorkspaceView: View {
     /// song from bar 1) offline, faster than real time.
     private func bounceSong(_ kind: LYBounce.Kind, to url: URL) {
         let session = document.session
-        let assets = document.audioAssets
+        let media = document.audioMediaStore
         bounce.startOffline(
             kind: kind,
             url: url,
@@ -575,7 +713,7 @@ struct WorkspaceView: View {
                     .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
             },
             readme: { names in offlineStemReadme(window: audio.exportWindow(session), names: names) },
-            prepare: { try await LYOfflineExport.prepare(session: session, assets: assets, audio: audio) },
+            prepare: { try await LYOfflineExport.prepare(session: session, media: media, audio: audio) },
             fallback: { recordSong(kind, to: url) }
         )
     }
@@ -590,9 +728,9 @@ struct WorkspaceView: View {
         bounce.start(kind: kind, url: url, songSeconds: songSeconds, stems: stems, readme: stemReadme(window: window, stems: stems),
                      audio: audio, prepare: {
             activeWorkspace = "SONG"
-            audio.setTransportMode(.song, session: document.session, assets: document.audioAssets)
+            audio.setTransportMode(.song, session: document.session, media: document.audioMediaStore)
             audio.syncSequencer(document.session)
-            audio.syncTimeline(document.session, assets: document.audioAssets)
+            audio.syncTimeline(document.session, media: document.audioMediaStore)
         }, restore: {
             activeWorkspace = previousWorkspace
         })
@@ -662,10 +800,23 @@ struct WorkspaceView: View {
 
     private func toggleRecording() {
         if recorder.isActive { finishRecording(); return }
-        let armedAudio = document.session.tracks.contains { $0.kind == .audio && $0.isArmed }
+        let audioTargets = document.session.tracks.filter { $0.kind == .audio && $0.isArmed }.map(\.id)
+        let armedAudio = !audioTargets.isEmpty
+        let settings = document.session.recordingSettings ?? LYRecordingSettings(
+            preRollBars: document.session.countIn == false ? 0 : 1
+        )
         let begin = {
-            recorder.start(audio: audio, bpm: document.session.bpm, countIn: document.session.countIn ?? true,
-                           recordAudio: armedAudio, onError: { audioImportError = $0 })
+            recorder.start(
+                audio: audio,
+                bpm: document.session.bpm,
+                preRollBeats: settings.preRollBars * max(document.session.numerator, 1),
+                recordAudio: armedAudio,
+                projectID: document.session.id,
+                targetTrackIDs: audioTargets,
+                inputChannel: settings.inputChannel,
+                inputMonitoring: settings.inputMonitoring,
+                onError: { audioImportError = $0 }
+            )
         }
         guard armedAudio else { begin(); return }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -684,7 +835,7 @@ struct WorkspaceView: View {
     private func finishRecording() {
         recorder.stop(audio: audio) { notes, take in
             writeRecordedNotes(notes)
-            if let take { placeRecordedAudio(take.url, transportBeat: take.startBeat) }
+            if let take { placeRecordedAudio(take) }
         }
     }
 
@@ -781,18 +932,100 @@ struct WorkspaceView: View {
         }
     }
 
-    private func placeRecordedAudio(_ url: URL, transportBeat: Double) {
-        guard let track = document.session.tracks.first(where: { $0.kind == .audio && $0.isArmed }) else { return }
-        let beat = activeWorkspace == "PATTERN" ? 0 : songBeat(forTransportBeat: transportBeat)
+    private func placeRecordedAudio(_ capture: LYRecordedAudioCapture) {
+        let settings = document.session.recordingSettings ?? LYRecordingSettings()
+        let latencySeconds = max(0, capture.measuredLatencySeconds + settings.manualLatencyMS / 1_000)
+        let latencyBeats = latencySeconds * max(document.session.bpm, 1) / 60
+        let correctedTransportBeat = max(0, capture.startBeat - latencyBeats)
+        let beat = activeWorkspace == "PATTERN" ? 0 : songBeat(forTransportBeat: correctedTransportBeat)
         Task { @MainActor in
             do {
-                var imported = try await LYAudioImporter.importFile(at: url)
+                var imported = try await LYAudioImporter.importFile(at: capture.url)
                 imported.displayName = "RECORDING " + String(format: "%02d", document.session.tracks.flatMap(\.clips).filter { $0.name.hasPrefix("RECORDING") }.count + 1)
-                _ = document.addImportedAudio(imported, toTrackID: track.id, atBeat: beat)
+                guard let firstTrack = capture.targetTrackIDs.first else { return }
+                let firstClipID = document.addImportedAudio(imported, toTrackID: firstTrack, atBeat: beat)
+                guard let firstTrackIndex = document.session.tracks.firstIndex(where: { $0.id == firstTrack }),
+                      let firstClipIndex = document.session.tracks[firstTrackIndex].clips.firstIndex(where: { $0.id == firstClipID }) else { return }
+
+                var clip = document.session.tracks[firstTrackIndex].clips[firstClipIndex]
+                configureRecordedTakes(&clip, imported: imported, settings: settings)
+                document.session.tracks[firstTrackIndex].clips[firstClipIndex] = clip
+
+                // Multiple armed tracks receive independent events that refer
+                // to the same immutable captured source instead of duplicating
+                // potentially gigabytes of audio.
+                for trackID in capture.targetTrackIDs.dropFirst() {
+                    guard let target = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { continue }
+                    var copy = clip
+                    copy.id = UUID()
+                    document.session.tracks[target].clips.append(copy)
+                }
+                LYRecordingJournal.complete(projectID: document.session.id)
             } catch {
                 audioImportError = error.localizedDescription
             }
         }
+    }
+
+    private func recoverRecording(_ entry: LYRecordingJournal.Entry) {
+        let targets = entry.targetTrackIDs.filter { id in
+            document.session.tracks.contains { $0.id == id && $0.kind == .audio }
+        }
+        guard !targets.isEmpty else {
+            LYRecordingJournal.complete(projectID: entry.projectID)
+            return
+        }
+        notice = "RECOVERING INTERRUPTED RECORDING"
+        placeRecordedAudio(LYRecordedAudioCapture(
+            url: URL(fileURLWithPath: entry.filePath),
+            startBeat: 0,
+            targetTrackIDs: targets,
+            measuredLatencySeconds: 0
+        ))
+    }
+
+    private func configureRecordedTakes(
+        _ clip: inout LYClip,
+        imported: LYImportedAudio,
+        settings: LYRecordingSettings
+    ) {
+        let secondsPerBeat = 60 / max(document.session.bpm, 1)
+        let takeLengthBeats: Double
+        if settings.loopTakes, document.session.isLoopActive, let loop = document.session.loopRange {
+            takeLengthBeats = max(loop.lengthBeats, lyBeatsPerStep)
+            clip.startBeat = loop.startBeat
+            clip.lengthBeats = takeLengthBeats
+        } else {
+            takeLengthBeats = clip.lengthBeats
+        }
+        let takeSeconds = takeLengthBeats * secondsPerBeat
+        let count = settings.loopTakes ? max(1, Int(imported.duration / max(takeSeconds, 0.001))) : 1
+        let path = clip.sourceRelativePath ?? imported.fileName
+        clip.takes = (0..<count).map { index in
+            LYAudioTake(
+                name: "TAKE " + String(format: "%02d", index + 1),
+                sourceRelativePath: path,
+                sourceStartSeconds: Double(index) * takeSeconds,
+                durationSeconds: min(takeSeconds, max(0.001, imported.duration - Double(index) * takeSeconds))
+            )
+        }
+        if let active = clip.takes?.last {
+            clip.activeTakeID = active.id
+            clip.sourceStartSeconds = active.sourceStartSeconds
+            clip.sourceDurationSeconds = active.durationSeconds
+        }
+        if let punch = settings.punchRange {
+            let trimStartBeats = max(0, punch.startBeat - clip.startBeat)
+            let available = max(lyBeatsPerStep, clip.lengthBeats - trimStartBeats)
+            clip.startBeat = max(clip.startBeat, punch.startBeat)
+            clip.sourceStartSeconds += trimStartBeats * secondsPerBeat
+            clip.lengthBeats = min(available, punch.lengthBeats)
+            clip.sourceDurationSeconds = clip.lengthBeats * secondsPerBeat
+        }
+        clip.compSegments = clip.activeTakeID.map {
+            [LYCompSegment(startBeat: 0, lengthBeats: clip.lengthBeats, takeID: $0)]
+        }
+        clip.normalizeAudioEvent()
     }
 
     /// LUNATK or DRUM SYNTH clicked in the library: open it on the
@@ -819,6 +1052,49 @@ struct WorkspaceView: View {
             }
         default:
             break
+        }
+    }
+
+    private func installAudioUnit(_ descriptor: LYAudioUnitDescriptor) {
+        guard let trackID = selectedTrackID else {
+            audioImportError = "SELECT A TRACK BEFORE LOADING AN AUDIO UNIT"
+            return
+        }
+        Task { @MainActor in
+            do {
+                document.session = try await audioUnits.install(
+                    descriptor,
+                    on: trackID,
+                    in: document.session,
+                    engine: audio.engine
+                )
+                let slot = descriptor.isInstrument
+                    ? document.session.tracks.first(where: { $0.id == trackID })?.instrumentPlugin
+                    : document.session.tracks.first(where: { $0.id == trackID })?.inserts.last(where: { $0.identifier == descriptor.id })
+                if let slot { audioUnits.openEditor(slotID: slot.id, title: slot.name) }
+            } catch {
+                audioImportError = "AUDIO UNIT: " + error.localizedDescription.uppercased()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var audioUnitEditorOverlay: some View {
+        if let editor = audioUnits.editor {
+            GeometryReader { geometry in
+                LYFloatingWindow(
+                    id: "audio-unit-\(editor.id)",
+                    title: "AUDIO UNIT  ·  " + editor.title.uppercased(),
+                    accent: LYLLTHTheme.indigo,
+                    size: CGSize(width: min(geometry.size.width - 48, 900), height: min(geometry.size.height - 72, 650)),
+                    close: {
+                        document.session = audioUnits.captureStates(in: document.session, engine: audio.engine)
+                        audioUnits.editor = nil
+                    }
+                ) {
+                    LYAudioUnitEditorView(controller: editor.controller)
+                }
+            }
         }
     }
 
@@ -1075,7 +1351,8 @@ struct WorkspaceView: View {
             openDrumKitProject: openDrumKitProject,
             saveDrumKitProject: saveDrumKitProject,
             exportSong: presentExport,
-            toggleMusicalTyping: toggleMusicalTyping
+            toggleMusicalTyping: toggleMusicalTyping,
+            togglePlayback: { audio.togglePlayback() }
         )
     }
 
@@ -1336,6 +1613,7 @@ struct WorkspaceView: View {
             ]
         }
         document.session.tracks.append(track)
+        document.session.assignEngineChannel(toTrackAt: document.session.tracks.count - 1)
         selectedTrackID = track.id
         audio.syncSequencer(document.session)
     }
@@ -1354,7 +1632,7 @@ private struct TransportBar: View {
     var body: some View {
         HStack(spacing: 0) {
             LYWordmarkLockup()
-                .frame(width: 300, alignment: .leading)
+                .frame(width: 264, alignment: .leading)
 
             divider
 
@@ -1437,10 +1715,65 @@ private struct TransportBar: View {
                     icon: "4.circle",
                     title: "COUNT",
                     tint: LYLLTHTheme.record,
-                    isOn: session.countIn ?? true,
-                    action: { session.countIn = !(session.countIn ?? true) }
+                    isOn: (session.recordingSettings?.preRollBars ?? (session.countIn == false ? 0 : 1)) > 0,
+                    action: {
+                        var settings = session.recordingSettings ?? LYRecordingSettings()
+                        settings.preRollBars = settings.preRollBars > 0 ? 0 : 1
+                        session.recordingSettings = settings
+                        session.countIn = settings.preRollBars > 0
+                    }
                 )
-                .help("Four clicks before recording starts")
+                .help("One-bar pre-roll before recording starts")
+                TransportUtility(
+                    icon: "arrow.triangle.2.circlepath",
+                    title: "TAKES",
+                    tint: LYLLTHTheme.purple,
+                    isOn: session.recordingSettings?.loopTakes ?? true,
+                    action: {
+                        var settings = session.recordingSettings ?? LYRecordingSettings()
+                        settings.loopTakes.toggle()
+                        session.recordingSettings = settings
+                    }
+                )
+                .help("Create a take for every recorded loop pass")
+                TransportUtility(
+                    icon: "scope",
+                    title: "PUNCH",
+                    tint: LYLLTHTheme.record,
+                    isOn: session.recordingSettings?.punchRange != nil,
+                    action: {
+                        var settings = session.recordingSettings ?? LYRecordingSettings()
+                        settings.punchRange = settings.punchRange == nil ? session.loopRange : nil
+                        session.recordingSettings = settings
+                    }
+                )
+                .help("Use the loop range as the punch-in/out range")
+                TransportUtility(
+                    icon: "ear",
+                    title: "MON",
+                    tint: LYLLTHTheme.teal,
+                    isOn: session.recordingSettings?.inputMonitoring ?? false,
+                    action: {
+                        var settings = session.recordingSettings ?? LYRecordingSettings()
+                        settings.inputMonitoring.toggle()
+                        session.recordingSettings = settings
+                    }
+                )
+                .help("Monitor the selected input while recording; use headphones")
+                TransportUtility(
+                    icon: "timer",
+                    title: "LAT " + String(format: "%+.0f", session.recordingSettings?.manualLatencyMS ?? 0),
+                    tint: LYLLTHTheme.indigo,
+                    isOn: abs(session.recordingSettings?.manualLatencyMS ?? 0) > 0.01,
+                    action: {
+                        let choices: [Double] = [-10, -5, -2, 0, 2, 5, 10]
+                        var settings = session.recordingSettings ?? LYRecordingSettings()
+                        let current = choices.firstIndex(of: settings.manualLatencyMS) ?? 3
+                        settings.manualLatencyMS = choices[(current + 1) % choices.count]
+                        session.recordingSettings = settings
+                    }
+                )
+                .help("Manual recording latency correction in milliseconds")
                 TransportUtility(
                     icon: "repeat",
                     title: "LOOP",
@@ -1841,7 +2174,7 @@ private struct TransportUtility: View {
             }
             .foregroundStyle(isOn ? tint : LYLLTHTheme.chromeText)
             .lyBloom(tint, isOn: isOn)
-            .frame(width: 54, height: 46)
+            .frame(width: 50, height: 46)
             .background(tint.opacity(isOn ? LYLLTHTheme.controlFill : 0))
             .overlay(Rectangle().stroke(isOn ? tint.opacity(0.9) : LYLLTHTheme.lineStrong, lineWidth: 1))
             .contentShape(Rectangle())
@@ -2078,6 +2411,7 @@ private struct BrowserPanel: View {
     let projectAudio: [String]
     let onEffect: (String) -> Void
     let onSound: (String) -> Void
+    let onAudioUnit: (LYAudioUnitDescriptor) -> Void
     let close: () -> Void
     @EnvironmentObject private var plugins: AudioUnitCatalog
     @State private var query = ""
@@ -2185,9 +2519,9 @@ private struct BrowserPanel: View {
                 }
             }
         case "AU INST":
-            pluginRows(plugins.instruments.map(\.name), empty: "NO AUDIO UNIT INSTRUMENTS FOUND")
+            pluginRows(plugins.instruments, empty: "NO AUDIO UNIT INSTRUMENTS FOUND")
         case "AU FX":
-            pluginRows(plugins.effects.map(\.name), empty: "NO AUDIO UNIT EFFECTS FOUND")
+            pluginRows(plugins.effects, empty: "NO AUDIO UNIT EFFECTS FOUND")
         default:
             let files = filter(projectAudio.sorted())
             if files.isEmpty {
@@ -2202,13 +2536,15 @@ private struct BrowserPanel: View {
     }
 
     @ViewBuilder
-    private func pluginRows(_ names: [String], empty: String) -> some View {
-        let values = filter(names)
+    private func pluginRows(_ descriptors: [LYAudioUnitDescriptor], empty: String) -> some View {
+        let values = descriptors.filter { matches($0.name) }
         if values.isEmpty {
             emptyNote(plugins.isScanning ? "SCANNING" : empty)
         } else {
-            ForEach(values, id: \.self) { name in
-                row(name.uppercased(), detail: nil, color: LYLLTHTheme.indigo, symbol: "square.stack.3d.up")
+            ForEach(values) { descriptor in
+                row(descriptor.name.uppercased(), detail: descriptor.manufacturer.uppercased(), color: LYLLTHTheme.indigo, symbol: "square.stack.3d.up")
+                    .simultaneousGesture(TapGesture().onEnded { onAudioUnit(descriptor) })
+                    .help("Load \(descriptor.name) on the selected track")
             }
         }
     }

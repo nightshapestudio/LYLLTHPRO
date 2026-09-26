@@ -4,6 +4,28 @@ import AVFoundation
 @testable import LYLLTH
 
 final class SessionDocumentTests: XCTestCase {
+    @MainActor
+    func testDocumentHistoryRegistersUndoAndRedo() {
+        var applied = LYLLTHSession.starter()
+        let projectID = applied.id
+        let history = LYDocumentHistory()
+        let manager = UndoManager()
+        history.begin(applied)
+        var edited = applied
+        edited.bpm = 137
+        history.record(edited, undoManager: manager) { applied = $0 }
+        applied = edited
+        history.flush()
+
+        XCTAssertTrue(manager.canUndo)
+        manager.undo()
+        XCTAssertEqual(applied.bpm, 118)
+        XCTAssertTrue(manager.canRedo)
+        manager.redo()
+        XCTAssertEqual(applied.bpm, 137)
+        LYRecoveryJournal.discard(projectID: projectID)
+    }
+
     func testSessionPackageRoundTrip() throws {
         let source = LYLLTHSessionDocument(session: .starter())
         let wrapper = try source.packageFileWrapper(modifiedAt: source.session.modifiedAt)
@@ -12,6 +34,75 @@ final class SessionDocumentTests: XCTestCase {
         XCTAssertEqual(decoded.session, source.session)
         XCTAssertEqual(wrapper.fileWrappers?["manifest.json"]?.isRegularFile, true)
         XCTAssertEqual(wrapper.fileWrappers?["Audio"]?.isDirectory, true)
+        XCTAssertEqual(wrapper.fileWrappers?["Recovery"]?.isDirectory, true)
+        XCTAssertEqual(wrapper.fileWrappers?["Backups"]?.isDirectory, true)
+    }
+
+    func testCorruptPrimaryFallsBackToPackageRecoveryCopy() throws {
+        let source = LYLLTHSessionDocument(session: .starter())
+        let wrapper = try source.packageFileWrapper()
+        var children = try XCTUnwrap(wrapper.fileWrappers)
+        children["project.json"] = FileWrapper(regularFileWithContents: Data("not json".utf8))
+        let damaged = FileWrapper(directoryWithFileWrappers: children)
+
+        let recovered = try LYLLTHSessionDocument(fileWrapper: damaged)
+
+        XCTAssertEqual(recovered.session.id, source.session.id)
+        XCTAssertEqual(recovered.session.name, source.session.name)
+        XCTAssertEqual(recovered.session.tracks, source.session.tracks)
+    }
+
+    func testMediaStoreIsFileBackedAndPackageRoundTrips() throws {
+        var document = LYLLTHSessionDocument(session: .starter())
+        let imported = LYImportedAudio(
+            fileName: "large-take.wav", displayName: "TAKE", data: Data(repeating: 0x4A, count: 1024),
+            duration: 1, sampleRate: 48_000, channelCount: 1, waveformPeaks: [0.5], sourceBPM: nil, beatMap: nil
+        )
+        _ = document.addImportedAudio(imported, toTrackID: nil, atBeat: 0)
+
+        let workingURL = try XCTUnwrap(document.audioURL(for: "large-take.wav"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: workingURL.path))
+        XCTAssertEqual(document.audioData(for: "large-take.wav"), imported.data)
+
+        let reopened = try LYLLTHSessionDocument(fileWrapper: document.packageFileWrapper())
+        XCTAssertEqual(reopened.audioData(for: "large-take.wav"), imported.data)
+    }
+
+    func testRecordingAndAudioUnitStateRoundTrip() throws {
+        var session = LYLLTHSession.starter()
+        session.recordingSettings = LYRecordingSettings(
+            preRollBars: 2,
+            punchRange: LYLoopRange(startBeat: 8, lengthBeats: 4),
+            loopTakes: true,
+            inputChannel: 1,
+            inputMonitoring: true,
+            manualLatencyMS: 3.5
+        )
+        let take = LYAudioTake(name: "TAKE 01", sourceRelativePath: "take.caf", sourceStartSeconds: 0, durationSeconds: 2)
+        var clip = LYClip(name: "REC", kind: .audio, startBeat: 8, lengthBeats: 4, sourceRelativePath: "take.caf")
+        clip.takes = [take]
+        clip.activeTakeID = take.id
+        clip.compSegments = [LYCompSegment(startBeat: 0, lengthBeats: 4, takeID: take.id)]
+        let audioIndex = try XCTUnwrap(session.tracks.firstIndex(where: { $0.kind == .audio }))
+        session.tracks[audioIndex].clips = [clip]
+        session.tracks[0].inserts.append(LYPluginSlot(
+            format: .audioUnit,
+            identifier: "1635083896-1684234849-1634758764",
+            name: "TEST AU",
+            manufacturer: "TEST",
+            state: Data([1, 2, 3]),
+            reportedLatencySeconds: 0.012,
+            componentType: 1_635_083_896,
+            componentSubType: 1_684_234_849,
+            componentManufacturer: 1_634_758_764
+        ))
+
+        let reopened = try LYLLTHSessionDocument(fileWrapper: LYLLTHSessionDocument(session: session).packageFileWrapper())
+
+        XCTAssertEqual(reopened.session.recordingSettings, session.recordingSettings)
+        XCTAssertEqual(reopened.session.tracks[audioIndex].clips[0].takes, [take])
+        XCTAssertEqual(reopened.session.tracks[0].inserts.last?.state, Data([1, 2, 3]))
+        XCTAssertEqual(reopened.session.tracks[0].inserts.last?.reportedLatencySeconds, 0.012)
     }
 
     func testStarterExposesFullDesktopSequencer() {

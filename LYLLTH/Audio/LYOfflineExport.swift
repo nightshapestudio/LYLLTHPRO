@@ -29,13 +29,22 @@ struct LYOfflineExport {
 
     private var stepSeconds: Double { meter.stepDuration(atBPM: session.bpm) }
     private var secondsPerBeat: Double { stepSeconds / lyBeatsPerStep }
-    private var musicalCount: Int { session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }.count }
+    private var musicalChannels: Set<Int> {
+        Set(channels.filter { $0.track.kind == .drumkit || $0.track.kind == .instrument }.map(\.index))
+    }
 
     // MARK: Preparing
 
+    /// Compatibility overload for tests and importers that already own a
+    /// deliberately small in-memory asset bundle.
+    static func prepare(session: LYLLTHSession, assets: [String: Data], audio: AudioEngineController) async throws -> LYOfflineExport {
+        let media = LYProjectMediaStore(projectID: session.id, assets: assets)
+        return try await prepare(session: session, media: media, audio: audio)
+    }
+
     /// Resolves every source once: drum sounds rendered, samples on disk,
     /// audio events rendered at the export rate. Stem passes reuse it.
-    static func prepare(session: LYLLTHSession, assets: [String: Data], audio: AudioEngineController) async throws -> LYOfflineExport {
+    static func prepare(session: LYLLTHSession, media: LYProjectMediaStore, audio: AudioEngineController) async throws -> LYOfflineExport {
         let window = audio.exportWindow(session)
         var export = LYOfflineExport(
             session: session,
@@ -51,7 +60,7 @@ struct LYOfflineExport {
         for (track, index) in export.channels where track.kind == .drumkit || track.kind == .instrument {
             guard track.synth == nil else { continue }
             // The same choice the live sequencer makes for the channel.
-            if track.kind == .drumkit, let path = track.samplePath, let data = assets[path] {
+            if track.kind == .drumkit, let path = track.samplePath, let data = media.data(for: path) {
                 export.sourceURLs[index] = try LYSampleFiles.url(for: data, path: path)
             } else if LYDrumSounds.presetID(for: track) != nil, let drum = LYDrumSounds.preset(for: track) {
                 export.sourceURLs[index] = try await LYDrumSounds.renderedFile(for: drum)
@@ -66,7 +75,7 @@ struct LYOfflineExport {
         let format = AVAudioFormat(standardFormatWithSampleRate: export.sampleRate, channels: 2)!
         for track in session.tracks where track.kind == .audio {
             for clip in track.clips where clip.kind == .audio {
-                guard let path = clip.sourceRelativePath, let data = assets[path] else { continue }
+                guard let path = clip.sourceRelativePath, let data = media.data(for: path) else { continue }
                 let key = LYTimelineAudioPlayer.renderKey(for: clip, bpm: session.bpm)
                 guard export.cycles[key] == nil else { continue }
                 var cycleClip = clip
@@ -90,7 +99,7 @@ struct LYOfflineExport {
         channels.filter { track, index in
             guard track.kind != .auxiliary, LYChannelMap.isAudible(track, in: session) else { return false }
             if track.kind == .audio { return segments.contains { segment in track.clips.contains { $0.id == segment.clipID } } }
-            let hasSteps = index < musicalCount && frames.contains { frame in
+            let hasSteps = musicalChannels.contains(index) && frames.contains { frame in
                 frame.tracks.indices.contains(index) && frame.tracks[index].activeSteps.contains(true)
             }
             let hasNotes = track.clips.contains { !$0.songNotes(from: window.startBeat, to: window.endBeat).isEmpty }
@@ -105,7 +114,7 @@ struct LYOfflineExport {
     /// to the mix. Each call builds fresh LUNATK cores, so a snapshot renders
     /// once.
     func snapshot(stem: Int? = nil) -> OfflineProjectRenderSnapshot {
-        let lunatk = Set(channels.filter { $0.track.synth != nil && $0.index < musicalCount }.map(\.index))
+        let lunatk = Set(channels.filter { $0.track.synth != nil }.map(\.index))
         let bars = frames.map { frame in
             OfflineRenderBar(
                 tracks: frame.tracks.enumerated().map { index, track in

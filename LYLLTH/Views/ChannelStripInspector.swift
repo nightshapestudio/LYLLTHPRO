@@ -21,8 +21,10 @@ final class LYMeterStore: ObservableObject {
     @Published private(set) var readings: [UUID: Reading] = [:]
     private var channels: [UUID: Int] = [:]
     private var ticks: LYFrameToken?
+    private weak var engine: NightshapeAudioEngine?
 
-    func track(_ session: LYLLTHSession) {
+    func track(_ session: LYLLTHSession, engine: NightshapeAudioEngine) {
+        self.engine = engine
         var next: [UUID: Int] = [:]
         for track in session.tracks {
             if let index = LYFXBridge.engineIndex(for: track.id, in: session) { next[track.id] = index }
@@ -44,7 +46,7 @@ final class LYMeterStore: ObservableObject {
     }
 
     private func poll() {
-        let engine = NightshapeAudioEngine.shared
+        guard let engine else { return }
         var next = readings
         for (id, index) in channels {
             let linear = Double(engine.trackOutputPeak(trackIndex: index))
@@ -156,6 +158,8 @@ struct ChannelStripInspector: View {
     let openSynth: (UUID) -> Void
     let openDrums: (UUID) -> Void
     let close: () -> Void
+    @EnvironmentObject private var audio: AudioEngineController
+    @EnvironmentObject private var audioUnits: LYAudioUnitHost
 
     private enum RoutingMenu { case addSend(UUID), output(UUID) }
     @State private var routingMenu: RoutingMenu?
@@ -256,6 +260,7 @@ struct ChannelStripInspector: View {
         let letter = String(Character(UnicodeScalar(64 + min(count, 26))!))
         let bus = LYTrack(name: "RETURN " + letter, kind: .auxiliary, accent: .teal, volumeDB: 0)
         session.tracks.append(bus)
+        session.assignEngineChannel(toTrackAt: session.tracks.count - 1)
         return bus.id
     }
 
@@ -306,12 +311,17 @@ struct ChannelStripInspector: View {
             name: track.name,
             accent: LYLLTHTheme.trackAccent(position: index),
             source: sourceName(for: track),
-            openSource: track.kind == .drumkit ? { openDrums(track.id) }
-                : (track.kind == .instrument || track.synth != nil ? { openSynth(track.id) } : nil),
+            openSource: track.kind == .audio ? { cycleInput(trackIndex: index) }
+                : (track.kind == .drumkit ? { openDrums(track.id) }
+                : (track.kind == .instrument || track.synth != nil ? { openSynth(track.id) } : nil)),
+            takeLabel: takeLabel(for: track),
+            cycleTake: track.kind == .audio ? { cycleTake(trackIndex: index) } : nil,
             rack: rack,
             reverb: session.reverb ?? .neutral,
             isMain: false,
             hasChannel: hasChannel,
+            hostedPlugins: [track.instrumentPlugin].compactMap { $0 } + track.inserts.filter { $0.format == .audioUnit },
+            openHostedPlugin: { audioUnits.openEditor(slotID: $0.id, title: $0.name) },
             output: outputName(for: track),
             chooseOutput: { routingMenu = .output(track.id) },
             busSends: busSendRows(index: index),
@@ -328,7 +338,7 @@ struct ChannelStripInspector: View {
                     next.reverbSend = amount
                     session.tracks[index].fx = next
                     if let engineIndex = LYFXBridge.engineIndex(for: track.id, in: session) {
-                        NightshapeAudioEngine.shared.setReverbSend(trackIndex: engineIndex, amount: amount)
+                        audio.engine.setReverbSend(trackIndex: engineIndex, amount: amount)
                     }
                 }
             ),
@@ -347,10 +357,14 @@ struct ChannelStripInspector: View {
             accent: LYLLTHTheme.chromeText,
             source: nil,
             openSource: nil,
+            takeLabel: nil,
+            cycleTake: nil,
             rack: session.mainFX ?? LYFXRack(),
             reverb: session.reverb ?? .neutral,
             isMain: true,
             hasChannel: true,
+            hostedPlugins: [],
+            openHostedPlugin: { _ in },
             output: "OUT 1–2",
             volumeDB: Binding(
                 get: { session.mainVolumeDB ?? 0 },
@@ -376,7 +390,7 @@ struct ChannelStripInspector: View {
         var rack = LYFXBridge.rack(for: target, in: session)
         rack.reorderInserts(shown, isMain: target == .main)
         LYFXBridge.setRack(rack, for: target, in: &session)
-        LYFXBridge.pushRack(target: target, session: session, engine: NightshapeAudioEngine.shared)
+        LYFXBridge.pushRack(target: target, session: session, engine: audio.engine)
     }
 
     private func sourceName(for track: LYTrack) -> String {
@@ -391,6 +405,38 @@ struct ChannelStripInspector: View {
             if track.isChordTrack == true { return "CHORD ENGINE" }
             return (track.synthPresetID ?? "SYNTH").uppercased()
         }
+    }
+
+    private func cycleInput(trackIndex: Int) {
+        guard session.tracks.indices.contains(trackIndex) else { return }
+        let count = max(audio.engine.inputConfiguration()?.channelCount ?? 1, 1)
+        var settings = session.recordingSettings ?? LYRecordingSettings()
+        settings.inputChannel = (settings.inputChannel + 1) % count
+        session.recordingSettings = settings
+        session.tracks[trackIndex].inputName = "INPUT \(settings.inputChannel + 1)"
+    }
+
+    private func takeLabel(for track: LYTrack) -> String? {
+        guard let clip = track.clips.last(where: { ($0.takes?.count ?? 0) > 1 }),
+              let takes = clip.takes,
+              let active = takes.firstIndex(where: { $0.id == clip.activeTakeID }) else { return nil }
+        return "TAKE \(active + 1)/\(takes.count)"
+    }
+
+    private func cycleTake(trackIndex: Int) {
+        guard session.tracks.indices.contains(trackIndex),
+              let clipIndex = session.tracks[trackIndex].clips.lastIndex(where: { ($0.takes?.count ?? 0) > 1 }),
+              let takes = session.tracks[trackIndex].clips[clipIndex].takes,
+              !takes.isEmpty else { return }
+        var clip = session.tracks[trackIndex].clips[clipIndex]
+        let current = takes.firstIndex(where: { $0.id == clip.activeTakeID }) ?? -1
+        let take = takes[(current + 1) % takes.count]
+        clip.activeTakeID = take.id
+        clip.sourceRelativePath = take.sourceRelativePath
+        clip.sourceStartSeconds = take.sourceStartSeconds
+        clip.sourceDurationSeconds = take.durationSeconds
+        clip.compSegments = [LYCompSegment(startBeat: 0, lengthBeats: clip.lengthBeats, takeID: take.id)]
+        session.tracks[trackIndex].clips[clipIndex] = clip
     }
 }
 
@@ -409,10 +455,14 @@ private struct LYChannelStrip: View {
     let accent: Color
     let source: String?
     let openSource: (() -> Void)?
+    let takeLabel: String?
+    let cycleTake: (() -> Void)?
     let rack: LYFXRack
     let reverb: ReverbState
     let isMain: Bool
     let hasChannel: Bool
+    let hostedPlugins: [LYPluginSlot]
+    let openHostedPlugin: (LYPluginSlot) -> Void
     let output: String
     var chooseOutput: (() -> Void)? = nil
     var busSends: [BusSendRow] = []
@@ -463,6 +513,15 @@ private struct LYChannelStrip: View {
                 } else {
                     slot(source, color: LYLLTHTheme.text, dim: false)
                 }
+                if let takeLabel, let cycleTake {
+                    Button(action: cycleTake) {
+                        slot(takeLabel, color: LYLLTHTheme.purple, dim: false)
+                            .overlay(Rectangle().stroke(LYLLTHTheme.purple.opacity(0.55), lineWidth: 1))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Choose the active loop take")
+                }
             }
 
             sectionLabel("AUDIO FX")
@@ -474,6 +533,18 @@ private struct LYChannelStrip: View {
                             .offset(y: insertOffset(for: index, in: inserts))
                             .zIndex(draggingInsert == kind ? 1 : 0)
                             .gesture(insertDrag(kind, index: index, in: inserts))
+                    }
+                    ForEach(hostedPlugins) { plugin in
+                        Button { openHostedPlugin(plugin) } label: {
+                            slot(
+                                plugin.name.uppercased(),
+                                color: plugin.validationError == nil ? LYLLTHTheme.indigo : LYLLTHTheme.record,
+                                dim: plugin.isBypassed
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(plugin.validationError ?? "Open Audio Unit")
                     }
                     Button(action: openPicker) {
                         Text("+")

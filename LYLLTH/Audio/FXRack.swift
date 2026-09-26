@@ -389,7 +389,7 @@ extension LYLLTHSession {
 enum LYChannelMap {
     static let engineChannels = 256
 
-    /// Must run before anything touches `NightshapeAudioEngine.shared`.
+    /// Must run before any NightshapeAudioEngine instance is created.
     static func configureEngine() {
         TrackChannel.maxTracks = engineChannels
         TrackChannel.initialTracks = 16
@@ -397,16 +397,23 @@ enum LYChannelMap {
 
     /// Builds any engine channels the session needs that do not exist yet.
     @MainActor
-    static func ensureChannels(for session: LYLLTHSession, engine: NightshapeAudioEngine = .shared) {
-        let needed = channels(in: session).count
+    static func ensureChannels(for session: LYLLTHSession, engine: NightshapeAudioEngine) {
+        let needed = (channels(in: session).map(\.index).max() ?? -1) + 1
         if needed > engine.trackChannelCount { engine.ensureTrackChannels(needed) }
     }
 
     static func channels(in session: LYLLTHSession) -> [(trackID: UUID, index: Int)] {
-        let musical = session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }
-        let audio = session.tracks.filter { $0.kind == .audio }
-        let buses = session.tracks.filter { $0.kind == .auxiliary }
-        return (musical + audio + buses).prefix(TrackChannel.maxTracks).enumerated().map { ($0.element.id, $0.offset) }
+        var used = Set<Int>()
+        var next = 0
+        return session.tracks.compactMap { track in
+            let explicit = track.engineChannelIndex.flatMap { channel in
+                (0..<TrackChannel.maxTracks).contains(channel) && !used.contains(channel) ? channel : nil
+            }
+            while used.contains(next) { next += 1 }
+            guard let channel = explicit ?? (next < TrackChannel.maxTracks ? next : nil) else { return nil }
+            used.insert(channel)
+            return (track.id, channel)
+        }
     }
 
     /// The AUX RETURNs a track can send to or play through.
