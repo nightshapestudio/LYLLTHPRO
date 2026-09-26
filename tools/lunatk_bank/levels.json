@@ -1,4 +1,13 @@
 {
+ "ARP CIRCUIT": {
+  "grit": -0.3762,
+  "master": 1.0,
+  "trim": 0.088
+ },
+ "ASH FALL": {
+  "grit": -0.1618,
+  "master": 0.7868
+ },
  "ASH VEIL": {
   "grit": -0.0709,
   "master": 0.4213
@@ -20,6 +29,10 @@
   "grit": -0.0728,
   "master": 0.612
  },
+ "CATHEDRAL AIR": {
+  "grit": -0.0933,
+  "master": 0.6265
+ },
  "CATHEDRAL LOW": {
   "grit": -0.2456,
   "master": 0.891,
@@ -33,9 +46,22 @@
   "grit": 0.0,
   "master": 0.4661
  },
+ "CHOPPED TAPE": {
+  "grit": 0.0,
+  "master": 0.455
+ },
+ "CHORD STABBER": {
+  "grit": -0.1402,
+  "master": 0.6263
+ },
  "CLAV WIRE": {
   "grit": -0.3849,
   "master": 0.9065
+ },
+ "CLOCKWORK": {
+  "grit": -0.1778,
+  "master": 1.0,
+  "trim": 0.073
  },
  "COPPER RING": {
   "grit": -0.1378,
@@ -48,6 +74,10 @@
  "CORRODED REESE": {
   "grit": 0.0,
   "master": 0.4715
+ },
+ "CORRODED TONE": {
+  "grit": 0.0,
+  "master": 0.4124
  },
  "CORROSION ACID": {
   "grit": -0.2515,
@@ -67,6 +97,10 @@
   "grit": 0.0,
   "master": 0.9444
  },
+ "DEEP WATER": {
+  "grit": -0.2016,
+  "master": 0.939
+ },
  "DEGRADED LOOP": {
   "grit": 0.0,
   "master": 0.9626
@@ -74,6 +108,10 @@
  "DIESEL": {
   "grit": -0.288,
   "master": 0.6782
+ },
+ "DREAD CURRENT": {
+  "grit": 0.0,
+  "master": 0.4739
  },
  "DRIFT MONO": {
   "grit": -0.2455,
@@ -117,6 +155,10 @@
   "grit": -0.2458,
   "master": 0.7975
  },
+ "FROZEN CHOIR": {
+  "grit": -0.1459,
+  "master": 0.7424
+ },
  "FROZEN STRINGS": {
   "grit": -0.0354,
   "master": 0.4018
@@ -124,6 +166,16 @@
  "FURNACE SCREAM": {
   "grit": -0.0263,
   "master": 0.7753
+ },
+ "GATE CATHEDRAL": {
+  "grit": -0.0699,
+  "master": 0.386,
+  "motion": 0.1043
+ },
+ "GHOST ARP": {
+  "grit": -0.1489,
+  "master": 1.0,
+  "trim": 0.1123
  },
  "GHOST VOWEL": {
   "grit": -0.251,
@@ -141,6 +193,11 @@
  "GLASS FLOOR": {
   "grit": -0.2388,
   "master": 0.7371
+ },
+ "GLASS HORIZON": {
+  "grit": 0.0,
+  "master": 1.0,
+  "trim": 0.0104
  },
  "GLASS KEYS": {
   "grit": -0.0073,
@@ -166,9 +223,19 @@
   "grit": -0.1024,
   "master": 0.5761
  },
+ "HEARTBEAT": {
+  "grit": -0.3478,
+  "master": 0.3576,
+  "motion": 0.68,
+  "trim": 0.154
+ },
  "HOLLOW CELESTE": {
   "grit": 0.0,
   "master": 0.4324
+ },
+ "HOLLOW EARTH": {
+  "grit": -0.0771,
+  "master": 0.5974
  },
  "HOLLOW PICK": {
   "grit": -0.2271,
@@ -192,6 +259,12 @@
   "grit": -0.15,
   "master": 0.5797
  },
+ "IRON RAIN": {
+  "grit": -0.3322,
+  "master": 0.3876,
+  "motion": 0.578,
+  "trim": 0.7222
+ },
  "IRON SUB": {
   "grit": -0.29,
   "master": 0.7295
@@ -213,6 +286,15 @@
   "master": 0.8869,
   "trim": 0.1189
  },
+ "MONOLITH": {
+  "grit": -0.2114,
+  "master": 0.9848
+ },
+ "MORSE DATA": {
+  "grit": 0.0,
+  "master": 0.4224,
+  "motion": 0.2466
+ },
  "MUTED PLUCK": {
   "grit": -0.3469,
   "master": 1.0,
@@ -231,6 +313,10 @@
   "grit": -0.0314,
   "master": 0.4055
  },
+ "NIGHT FIELD": {
+  "grit": 0.0,
+  "master": 0.9364
+ },
  "NIGHT STAB": {
   "grit": -0.1656,
   "master": 0.5834
@@ -238,6 +324,10 @@
  "NYLON HINT": {
   "grit": -0.2506,
   "master": 0.5996
+ },
+ "OCEAN MACHINE": {
+  "grit": -0.1044,
+  "master": 0.6209
  },
  "OCTAVE PUNCH": {
   "grit": -0.3621,
@@ -248,10 +338,18 @@
   "master": 0.886,
   "trim": 0.1882
  },
+ "ORGAN PEDAL": {
+  "grit": -0.1449,
+  "master": 0.7741
+ },
  "PISTON": {
   "grit": -0.394,
   "master": 0.9916,
   "trim": 0.008
+ },
+ "PISTON FIELD": {
+  "grit": 0.0,
+  "master": 0.2816
  },
  "PIZZ ENSEMBLE": {
   "grit": -0.2501,
@@ -262,13 +360,26 @@
   "grit": -0.1115,
   "master": 0.5191
  },
+ "POWER LINE": {
+  "grit": -0.0579,
+  "master": 0.3257
+ },
  "PRESSURE LINE": {
   "grit": -0.2707,
   "master": 0.7061
  },
+ "PULSE BED": {
+  "grit": -0.1237,
+  "master": 0.5249,
+  "motion": 0.1942
+ },
  "PULSE CLOUD": {
   "grit": -0.0503,
   "master": 0.4222
+ },
+ "RADIO STATIC": {
+  "grit": 0.0,
+  "master": 0.4792
  },
  "RESIN STRING": {
   "grit": -0.1696,
@@ -277,6 +388,11 @@
  "RUINED ORGAN": {
   "grit": -0.1317,
   "master": 0.613
+ },
+ "RUST CONVEYOR": {
+  "grit": -0.2165,
+  "master": 0.5803,
+  "motion": 0.3067
  },
  "RUST PICK": {
   "grit": -0.1338,
@@ -303,6 +419,16 @@
   "grit": 0.0,
   "master": 0.638
  },
+ "SHIMMER TICKS": {
+  "grit": 0.0,
+  "master": 0.477,
+  "motion": 0.5329,
+  "trim": 0.1526
+ },
+ "SIGNAL DECAY": {
+  "grit": -0.0321,
+  "master": 0.3636
+ },
  "SIGNAL FM": {
   "grit": -0.2911,
   "master": 0.665
@@ -316,6 +442,10 @@
   "master": 0.8747,
   "trim": 0.1313
  },
+ "SLOW BURN": {
+  "grit": -0.1289,
+  "master": 0.6563
+ },
  "SOFT DIGITAL": {
   "grit": 0.0,
   "master": 0.3847
@@ -323,6 +453,11 @@
  "SPECTRAL TIDE": {
   "grit": -0.1419,
   "master": 0.6899
+ },
+ "SPIRAL FILTER": {
+  "grit": -0.2057,
+  "master": 1.0,
+  "trim": 0.0134
  },
  "STAB DUST": {
   "grit": -0.3149,
@@ -357,6 +492,10 @@
   "grit": 0.0,
   "master": 0.4962
  },
+ "TIDAL SWELL": {
+  "grit": -0.0777,
+  "master": 0.5589
+ },
  "TIGHT PLUCK": {
   "grit": -0.4043,
   "master": 0.9999,
@@ -365,6 +504,15 @@
  "TINE DROP": {
   "grit": -0.1466,
   "master": 0.6551
+ },
+ "TRIPLET ENGINE": {
+  "grit": -0.0709,
+  "master": 0.3781,
+  "motion": 0.1224
+ },
+ "TURBINE HALL": {
+  "grit": -0.2137,
+  "master": 0.7124
  },
  "UNDERCURRENT": {
   "grit": 0.0,
@@ -387,9 +535,22 @@
   "grit": -0.0089,
   "master": 0.3906
  },
+ "VOID ENGINE": {
+  "grit": -0.0775,
+  "master": 0.4362
+ },
+ "VOLTAGE STEPS": {
+  "grit": 0.0,
+  "master": 0.3782,
+  "motion": 0.26
+ },
  "WARM TAPE BED": {
   "grit": -0.0634,
   "master": 0.3998
+ },
+ "WIND TUNNEL": {
+  "grit": -0.1312,
+  "master": 0.6677
  },
  "WIRE FUNK": {
   "grit": -0.3381,

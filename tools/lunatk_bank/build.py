@@ -81,6 +81,8 @@ def apply_levels(p, level):
         p.comp(mode="SINGLE", threshold=1.0, ratio=0.0, attack=0.0, release=0.2, gain=level["trim"], depth=0.0, mix=1.0)
     if level.get("grit"):
         p.mod("MACRO4", "MASTER", level["grit"])
+    if level.get("motion"):
+        p.mod("MACRO2", "MASTER", level["motion"])
 
 
 def safe(name):
@@ -236,38 +238,54 @@ def main():
         master = p.get("master")
         entry0 = levels.get(p.name) if isinstance(levels.get(p.name), dict) else {}
         trim_db = entry0.get("trim", 0.0) * 24
-        # Loudness target, but never past -1 dBFS peak at any macro position.
+        m2 = p.get("macro2")
+        motion_c = entry0.get("motion", 0.0)
+        total = master + motion_c * m2          # the gain the default setting plays at
+        # 1. The default gain that hits the loudness target without passing
+        #    -1 dBFS at any macro position; above 1 goes to the trim stage.
         peaks = [m["peak_db"]] + [v for k, v in m["macros"].items() if k.endswith("peak") and not k.startswith("M4")]
         gain_db = min(target - m["lufs"], -1.0 - max(peaks))
-        wanted = master * 10 ** (gain_db / 20)
+        g_total = total * 10 ** (gain_db / 20)
         uses_comp = p.values.get("comp.on", 0) > 0.5 and not entry0.get("trim")
-        if wanted > 1.0 and not uses_comp:
-            trim_db = max(0.0, trim_db + 20 * math.log10(wanted))
-            suggested = 1.0
+        if g_total > 1.0 and not uses_comp:
+            trim_db = max(0.0, trim_db + 20 * math.log10(g_total))
+            g_total = 1.0
+        elif trim_db > 0 and g_total < 0.85:
+            cut = min(trim_db, -20 * math.log10(g_total / 0.85))
+            trim_db -= cut
+            g_total *= 10 ** (cut / 20)
+        g_total = min(1.0, g_total)
+        # 2. MOTION: taking the gate or pump away must not jump the level, so
+        #    part of the gain rides on MACRO 2.
+        existing_db = 20 * math.log10(total / max(master, 1e-6)) if motion_c else 0.0
+        need_db = m["macros"].get("M2=0", 0) + existing_db
+        if m2 > 0.05 and need_db > 1.5:
+            base = g_total * 10 ** (-need_db / 20)
+            motion_new = min(1.0, (g_total - base) / m2)
+            base = g_total - motion_new * m2
         else:
-            if wanted < 0.85 and trim_db > 0:
-                cut = min(trim_db, -20 * math.log10(wanted / 0.85))
-                trim_db -= cut
-                wanted *= 10 ** (cut / 20)
-            suggested = min(1.0, wanted)
+            base, motion_new = g_total, 0.0
+        suggested = base
         if args.level:
-            entry = levels.get(p.name) or {}
-            if isinstance(entry, (int, float)):
-                entry = {"master": entry}
-            # GRIT: aim for at most +1 dB at full, in the new master's terms.
+            entry = dict(entry0)
+            # 3. GRIT: at most +1 dB (and peaks under -1.5 dBFS) at full.
             grit_db = max(m["macros"].get("M4=1", 0), m["macros"].get("M4=1 peak", -99) + 1.5 + 1.0)
             old_grit = entry.get("grit", 0.0)
-            gain_now = master + old_grit
-            wanted = gain_now * 10 ** (min(0.0, 1.0 - grit_db) / 20)
-            new_grit = (wanted - master) * (suggested / max(master, 1e-6))
-            entry["master"] = round(suggested, 4)
+            scale = g_total / max(total, 1e-6)
+            grit_total_now = total + old_grit
+            grit_total_new = grit_total_now * scale * 10 ** (min(0.0, 1.0 - grit_db) / 20)
+            entry["grit"] = round(max(-0.9, min(0.0, grit_total_new - g_total)), 4)
+            entry["master"] = round(base, 4)
+            if motion_new > 0.0005:
+                entry["motion"] = round(motion_new, 4)
+            else:
+                entry.pop("motion", None)
             if trim_db > 0.05:
                 entry["trim"] = round(min(trim_db / 24, 1.0), 4)
             else:
                 entry.pop("trim", None)
-            entry["grit"] = round(max(-0.9, min(0.0, new_grit)), 4)
             levels[p.name] = entry
-        if suggested >= 0.999 and m["lufs"] < target - 1.5 and uses_comp:
+        if g_total >= 0.999 and m["lufs"] < target - 1.5 and uses_comp:
             fails.append("too quiet at full MASTER and its compressor is in use")
         report[p.name] = {"category": p.category, "metrics": m, "fails": fails, "warnings": warns, "master": master}
         status = "PASS" if not fails else "FAIL"
