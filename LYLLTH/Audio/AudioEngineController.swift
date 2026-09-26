@@ -417,13 +417,7 @@ final class AudioEngineController: ObservableObject {
         appliedSynth[channel] = nil
         engine.clearTrackSynth(trackIndex: channel)
         do {
-            let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("LYLLTH/Samples", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let digest = SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
-            let url = folder.appendingPathComponent(digest + "-" + (path as NSString).lastPathComponent)
-            if !FileManager.default.fileExists(atPath: url.path) { try data.write(to: url) }
-            try engine.loadSample(url: url, trackIndex: channel)
+            try engine.loadSample(url: LYSampleFiles.url(for: data, path: path), trackIndex: channel)
         } catch {
             audioEventError = "Could not load sample \(path): \(error.localizedDescription)"
         }

@@ -14,6 +14,7 @@
 		0CEC7DBA1215E7248215069A /* LYLLTHTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */; };
 		0F2E7B5C782BAFAFA9C0A000 /* NoteClipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C197A61BD7F9513D6B09D7D3 /* NoteClipTests.swift */; };
 		1100D2673739C29C697A2403 /* LYScroller.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8138DCA1A91395B53951A82 /* LYScroller.swift */; };
+		154A709FEAD4AA9205A7DBBC /* LYOfflineExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09D35668C634C05CDD514E3C /* LYOfflineExport.swift */; };
 		154CFDC4030483427D92BCE8 /* ExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B68857B9AC741B4807DC37 /* ExportTests.swift */; };
 		162682C9152C4F5217FC0D04 /* SynthCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2F4736A16F53868A4791F0 /* SynthCoreTests.swift */; };
 		1683416DF75FA415C6AC32B8 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 36CE37E3FF75BBDC0DF875F2 /* Accelerate.framework */; };
@@ -85,6 +86,7 @@
 		F3072584030C31119C4860C6 /* LYLLTHSessionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */; };
 		F3B64D71CED48EEFD02691B4 /* LYRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16D07685D250C91B37E5CD8F /* LYRecorder.swift */; };
 		F5073A5322475A1DCD36C06D /* LYBounce.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26A43024412B8FC79FFECBA7 /* LYBounce.swift */; };
+		F5914CB573EBA8C4B066278D /* OfflineExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6FFC78FDE604528578BAEF /* OfflineExportTests.swift */; };
 		FDA597E345BBC5A57BA5F2C0 /* DecimatorMotionDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63BA1223576AF041D954B929 /* DecimatorMotionDisplay.swift */; };
 /* End PBXBuildFile section */
 
@@ -104,6 +106,7 @@
 		05C3A9FF391869346BFAFED1 /* FXWindowHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXWindowHost.swift; sourceTree = "<group>"; };
 		0618CFBCAE4DFCA5D4BA204B /* LYWavetableEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYWavetableEditor.swift; sourceTree = "<group>"; };
 		08B80E1422DCC935BC5E59E1 /* ParameterResetTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ParameterResetTap.swift; path = "../nightshape-drumkit-ios/Views/Components/ParameterResetTap.swift"; sourceTree = "<group>"; };
+		09D35668C634C05CDD514E3C /* LYOfflineExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYOfflineExport.swift; sourceTree = "<group>"; };
 		0C99A40AA929337CAB108FFD /* LYSynthCore.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LYSynthCore.h; sourceTree = "<group>"; };
 		14EF068925C4572F08ABDF5D /* FXWindowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FXWindowViews.swift; path = "../nightshape-drumkit-ios/Views/Components/FXWindowViews.swift"; sourceTree = "<group>"; };
 		16D07685D250C91B37E5CD8F /* LYRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYRecorder.swift; sourceTree = "<group>"; };
@@ -111,6 +114,7 @@
 		1A1922DA06A54E7620D26B2E /* SynthFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynthFeatureTests.swift; sourceTree = "<group>"; };
 		1A2F4736A16F53868A4791F0 /* SynthCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynthCoreTests.swift; sourceTree = "<group>"; };
 		1BB13BE327985FF3958F073F /* FXWindowsMore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FXWindowsMore.swift; path = "../nightshape-drumkit-ios/Views/Components/FXWindowsMore.swift"; sourceTree = "<group>"; };
+		1C6FFC78FDE604528578BAEF /* OfflineExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineExportTests.swift; sourceTree = "<group>"; };
 		1F14758F6049E1F10613908E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		2076405DA45D97F6974188B2 /* NightshapeTheme+macOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NightshapeTheme+macOS.swift"; sourceTree = "<group>"; };
 		24183797B508D69982E65468 /* DrumSoundBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumSoundBrowser.swift; sourceTree = "<group>"; };
@@ -304,6 +308,7 @@
 				6F6FDEB2771DB26C743DA3A2 /* FKitTests.swift */,
 				84AE0F65DFC17746EDC090A3 /* LUNATKTests.swift */,
 				C197A61BD7F9513D6B09D7D3 /* NoteClipTests.swift */,
+				1C6FFC78FDE604528578BAEF /* OfflineExportTests.swift */,
 				CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */,
 				E4590DBB4A2CB4EEFB8F938C /* SongFXTests.swift */,
 				1A2F4736A16F53868A4791F0 /* SynthCoreTests.swift */,
@@ -414,6 +419,7 @@
 				6917A8C3DCB7971E1B412205 /* LYDrumSounds.swift */,
 				03B43134989E942D54830A3A /* LYMIDIInput.swift */,
 				3D695E9DF2B63F21EB41F447 /* LYNotePlayer.swift */,
+				09D35668C634C05CDD514E3C /* LYOfflineExport.swift */,
 				16D07685D250C91B37E5CD8F /* LYRecorder.swift */,
 				67535C49D147B10E190ACCD8 /* TimelinePlayback.swift */,
 			);
@@ -535,6 +541,7 @@
 				DFCE1678A800ACE606F90D11 /* FKitTests.swift in Sources */,
 				7759F7B9F7F7186B3C840682 /* LUNATKTests.swift in Sources */,
 				0F2E7B5C782BAFAFA9C0A000 /* NoteClipTests.swift in Sources */,
+				F5914CB573EBA8C4B066278D /* OfflineExportTests.swift in Sources */,
 				BEDFD504AE4AD5C9E2F9D00E /* SessionDocumentTests.swift in Sources */,
 				8FF0057A33F063C940883B91 /* SongFXTests.swift in Sources */,
 				162682C9152C4F5217FC0D04 /* SynthCoreTests.swift in Sources */,
@@ -578,6 +585,7 @@
 				5D4D320FC8AA37F75BCA3B31 /* LYMIDIInput.swift in Sources */,
 				03A2D18CC3D75840A1D6AD06 /* LYNotePlayer.swift in Sources */,
 				ADC2DE9209525ABF528B72C5 /* LYNoteRecording.swift in Sources */,
+				154A709FEAD4AA9205A7DBBC /* LYOfflineExport.swift in Sources */,
 				F3B64D71CED48EEFD02691B4 /* LYRecorder.swift in Sources */,
 				1100D2673739C29C697A2403 /* LYScroller.swift in Sources */,
 				854046CA26DFA57FB2152650 /* LYSongFX.swift in Sources */,

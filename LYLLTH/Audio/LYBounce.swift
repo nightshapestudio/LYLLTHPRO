@@ -4,11 +4,11 @@ import NightshapeAudioEngine
 
 /// Exports the song the way DrumKit does, from the same choices:
 /// a mixdown (WAV 24-bit, WAV 32-bit float, M4A), STEMS as a ZIP of one WAV
-/// per track that plays, and MIDI. Audio is recorded in real time, from the
-/// first bar to the end of the last region (or the loop, when one is on),
-/// so what is written is exactly what plays: every track, LUNATK, audio
-/// events, buses, all FX. A tail after the last bar keeps reverbs and
-/// releases.
+/// per track that plays, and MIDI, from the first bar to the end of the last
+/// region (or the loop, when one is on). Audio renders offline, faster than
+/// real time, through the same channels and FX (`LYOfflineExport`); a song
+/// the offline renderer cannot take is recorded in real time instead. A
+/// tail after the last bar keeps reverbs and releases.
 @MainActor
 final class LYBounce: ObservableObject {
     enum Kind: Equatable {
@@ -40,6 +40,12 @@ final class LYBounce: ObservableObject {
     }
 
     @Published private(set) var phase: Phase = .idle
+    /// Rendering faster than real time rather than recording the output.
+    @Published private(set) var isOffline = false
+    /// For stems: which one is rendering, "3 OF 9".
+    @Published private(set) var passLabel: String?
+    private var offlineTask: Task<Void, Never>?
+    private var offlineToken: OfflineRenderCancellationToken?
     private var timer: Timer?
     private var startedAt = Date()
     private var restore: (() -> Void)?
@@ -52,6 +58,7 @@ final class LYBounce: ObservableObject {
     func start(kind: Kind, url: URL, songSeconds: Double, stems: [Stem] = [], readme: String = "",
                audio: AudioEngineController, prepare: () -> Void, restore: @escaping () -> Void) {
         guard case .idle = phase else { return }
+        isOffline = false
         audio.stop()
         prepare()
         self.restore = restore
@@ -97,7 +104,95 @@ final class LYBounce: ObservableObject {
         self.timer = timer
     }
 
+    /// Renders the export offline, faster than real time. `prepare` resolves
+    /// the song's sources; `fallback` records in real time instead, for a
+    /// song the offline renderer cannot take (a tempo outside 40–240 BPM).
+    func startOffline(kind: Kind, url: URL, stemName: @escaping (LYTrack, Int) -> String, readme: @escaping ([String]) -> String,
+                      prepare: @escaping () async throws -> LYOfflineExport, fallback: @escaping () -> Void) {
+        guard case .idle = phase else { return }
+        self.kind = kind
+        isOffline = true
+        passLabel = nil
+        let token = OfflineRenderCancellationToken()
+        offlineToken = token
+        phase = .running(elapsed: 0, total: 1, kind: kind.title)
+        offlineTask = Task { @MainActor in
+            do {
+                let export = try await prepare()
+                try Task.checkCancellation()
+                let total = export.window.lengthBeats * 60 / max(export.session.bpm, 1)
+                switch kind {
+                case .mixdown(let format):
+                    _ = try await LYOfflineExport.render(export.snapshot(), to: url, format: Self.offlineFormat(format), cancellation: token) { value in
+                        Task { @MainActor [weak self] in self?.progress(value, total: total) }
+                    }
+                    phase = .finished(url)
+                case .stems:
+                    let stems = export.stemChannels
+                    guard !stems.isEmpty else { throw LYBounceError.nothingToExport }
+                    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("LYLLTH-Stems-\(UUID().uuidString)", isDirectory: true)
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    defer { try? FileManager.default.removeItem(at: folder) }
+                    var entries: [ZipArchiveWriter.Entry] = []
+                    var names: [String] = []
+                    for (pass, stem) in stems.enumerated() {
+                        passLabel = "\(pass + 1) OF \(stems.count)"
+                        var name = stemName(stem.track, stem.index)
+                        while names.contains(name) { name += " 2" }
+                        names.append(name)
+                        var snapshot = export.snapshot(stem: stem.index)
+                        // MAIN's effects stay off so the stems add back up.
+                        snapshot.mainInsertOrder = []
+                        snapshot.finaleLimiter.bypassed = true
+                        let file = folder.appendingPathComponent(name + ".wav")
+                        _ = try await LYOfflineExport.render(snapshot, to: file, format: .wav24Bit, cancellation: token) { value in
+                            Task { @MainActor [weak self] in self?.progress((Double(pass) + value) / Double(stems.count), total: total) }
+                        }
+                        entries.append(ZipArchiveWriter.Entry(data: try Data(contentsOf: file), archiveName: name + ".wav"))
+                    }
+                    entries.append(ZipArchiveWriter.Entry(data: Data(readme(names).utf8), archiveName: "README.txt"))
+                    if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+                    try ZipArchiveWriter.writeStoredArchive(entries: entries, to: url)
+                    phase = .finished(url)
+                }
+            } catch OfflineProjectRenderError.cancelled {
+                phase = .idle
+            } catch is CancellationError {
+                phase = .idle
+            } catch OfflineProjectRenderError.invalidSnapshot {
+                // Something only real time can take: record it instead.
+                phase = .idle
+                isOffline = false
+                fallback()
+            } catch {
+                phase = .failed(error.localizedDescription.uppercased())
+            }
+            offlineTask = nil
+            offlineToken = nil
+            passLabel = nil
+        }
+    }
+
+    private func progress(_ value: Double, total: Double) {
+        guard case .running = phase else { return }
+        phase = .running(elapsed: min(max(value, 0), 1) * total, total: total, kind: kind.title)
+    }
+
+    private static func offlineFormat(_ format: NightshapeAudioEngine.CaptureFormat) -> OfflineExportFormat {
+        switch format {
+        case .wavFloat: return .wav32BitFloat
+        case .m4a: return .aacM4A
+        default: return .wav24Bit
+        }
+    }
+
     func cancel(audio: AudioEngineController) {
+        if isOffline {
+            offlineToken?.cancel()
+            offlineTask?.cancel()
+            phase = .idle
+            return
+        }
         timer?.invalidate()
         timer = nil
         if kind == .stems { audio.engine.cancelStemCapture() } else { audio.engine.cancelOutputCapture() }
@@ -108,7 +203,10 @@ final class LYBounce: ObservableObject {
         phase = .idle
     }
 
-    func dismiss() { phase = .idle }
+    func dismiss() {
+        phase = .idle
+        isOffline = false
+    }
 
     /// For exports that are written at once (MIDI, .fkit).
     func report(_ result: Result<URL, Error>) {
@@ -162,6 +260,11 @@ final class LYBounce: ObservableObject {
         stemFolder = nil
         stemFiles = []
     }
+}
+
+enum LYBounceError: LocalizedError {
+    case nothingToExport
+    var errorDescription: String? { "Nothing in the export range makes a sound." }
 }
 
 /// The song's notes as a Standard MIDI File: drums on channel 10 with the

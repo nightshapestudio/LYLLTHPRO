@@ -542,9 +542,28 @@ struct WorkspaceView: View {
         }
     }
 
-    /// Plays the export range once and records it: the loop when one is on,
-    /// otherwise the whole song from bar 1.
+    /// Renders the export range (the loop when one is on, otherwise the whole
+    /// song from bar 1) offline, faster than real time.
     private func bounceSong(_ kind: LYBounce.Kind, to url: URL) {
+        let session = document.session
+        let assets = document.audioAssets
+        bounce.startOffline(
+            kind: kind,
+            url: url,
+            stemName: { track, _ in
+                let position = (session.tracks.firstIndex { $0.id == track.id } ?? 0) + 1
+                return String(format: "%02d %@", position, track.name.uppercased())
+                    .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            },
+            readme: { names in offlineStemReadme(window: audio.exportWindow(session), names: names) },
+            prepare: { try await LYOfflineExport.prepare(session: session, assets: assets, audio: audio) },
+            fallback: { recordSong(kind, to: url) }
+        )
+    }
+
+    /// Plays the export range once and records it, for a song the offline
+    /// renderer cannot take.
+    private func recordSong(_ kind: LYBounce.Kind, to url: URL) {
         let window = audio.exportWindow(document.session)
         let songSeconds = window.lengthBeats * 60 / max(document.session.bpm, 1)
         let stems = kind == .stems ? exportStems() : []
@@ -558,6 +577,25 @@ struct WorkspaceView: View {
         }, restore: {
             activeWorkspace = previousWorkspace
         })
+    }
+
+    private func offlineStemReadme(window: LYSongWindow, names: [String]) -> String {
+        let session = document.session
+        return """
+        \(session.name.uppercased())  ·  STEMS FROM LYLLTH
+
+        TEMPO: \(String(format: "%.2f", session.bpm)) BPM
+        METER: \(session.numerator)/\(session.denominator)
+        BARS: \(window.startBar + 1)–\(window.startBar + window.barCount) (\(window.barCount) BARS)
+        EACH STEM STARTS AT BAR \(window.startBar + 1) AND RUNS THE FULL LENGTH, WITH ITS TAIL.
+
+        EACH STEM IS ONE TRACK WITH EVERYTHING IT FEEDS: ITS OWN EFFECTS AND FADER,
+        ITS SENDS THROUGH THE BUSES AND ITS SHARE OF THE SHARED REVERB. EFFECTS ON
+        MAIN, INCLUDING ITS LIMITER, ARE LEFT OFF SO THE STEMS ADD BACK UP CLEANLY.
+
+        STEMS:
+        \(names.map { "  " + $0 }.joined(separator: "\n"))
+        """
     }
 
     /// One stem per track that plays (mute and solo respected, as DrumKit),
@@ -3463,8 +3501,11 @@ private struct LYBounceOverlay: View {
                 .frame(height: 10)
                 Text(String(format: "%02d:%02d / %02d:%02d", Int(elapsed) / 60, Int(elapsed) % 60, Int(total) / 60, Int(total) % 60))
                     .font(LYLLTHTheme.value(14)).foregroundStyle(LYLLTHTheme.text)
-                Text(kind.hasPrefix("STEMS") ? "RECORDING EVERY TRACK AT ONCE, IN REAL TIME, SO EACH SOUNDS EXACTLY AS IT PLAYS"
-                                             : "RECORDING THE MAIN MIX IN REAL TIME, SO IT SOUNDS EXACTLY AS IT PLAYS")
+                Text(bounce.isOffline
+                     ? (kind.hasPrefix("STEMS") ? "RENDERING FASTER THAN REAL TIME · STEM \(bounce.passLabel ?? "")"
+                                                : "RENDERING FASTER THAN REAL TIME THROUGH THE SAME CHANNELS AND EFFECTS")
+                     : (kind.hasPrefix("STEMS") ? "RECORDING EVERY TRACK AT ONCE, IN REAL TIME, SO EACH SOUNDS EXACTLY AS IT PLAYS"
+                                                : "RECORDING THE MAIN MIX IN REAL TIME, SO IT SOUNDS EXACTLY AS IT PLAYS"))
                     .font(LYLLTHTheme.label(7, weight: .bold)).tracking(0.9).foregroundStyle(LYLLTHTheme.dim)
                 Button("CANCEL", action: cancel).buttonStyle(LYChromeButtonStyle(compact: true))
             }

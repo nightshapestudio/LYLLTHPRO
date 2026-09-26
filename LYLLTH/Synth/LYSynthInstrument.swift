@@ -25,8 +25,10 @@ final class LYSynthInstrument: NightshapeTrackInstrument {
         }
     }()
 
-    init() {
-        core = lysynth_create(Self.sampleRate)
+    /// `sampleRate` other than the live one is for offline renders, which
+    /// drive the core directly and never use `sourceNode`.
+    init(sampleRate: Double = LYSynthInstrument.sampleRate) {
+        core = lysynth_create(sampleRate)
     }
 
     deinit {

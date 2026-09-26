@@ -356,7 +356,7 @@ enum LYFXBridge {
         )
     }
 
-    private static func motion(for state: DecimatorState) -> DecimatorMotionConfiguration? {
+    static func motion(for state: DecimatorState) -> DecimatorMotionConfiguration? {
         guard state.isMotionActive, let motion = state.motion else { return nil }
         return DecimatorMotionConfiguration(
             isEnabled: true,

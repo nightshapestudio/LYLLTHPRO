@@ -128,7 +128,7 @@ enum LYSongCompiler {
 // MARK: - Audio events on the transport
 
 /// A stretch of one audio event inside one pass of the song window.
-private struct LYEventSegment {
+struct LYEventSegment {
     var clipID: UUID
     var renderKey: String
     /// Beats from the start of the window pass.
@@ -326,8 +326,9 @@ final class LYTimelineAudioPlayer {
 
     // MARK: Segments and mix
 
-    private func rebuildSegments() {
-        guard let session, let window else { segments = []; return }
+    /// Every audio event as it plays inside one pass of `window`, a source
+    /// cycle at a time. Shared with the offline export.
+    static func segments(session: LYLLTHSession, window: LYSongWindow) -> [LYEventSegment] {
         var result: [LYEventSegment] = []
         for track in session.tracks where track.kind == .audio {
             for clip in track.clips where clip.kind == .audio && clip.sourceRelativePath != nil {
@@ -350,7 +351,7 @@ final class LYTimelineAudioPlayer {
                     result.append(
                         LYEventSegment(
                             clipID: clip.id,
-                            renderKey: Self.renderKey(for: clip, bpm: session.bpm),
+                            renderKey: renderKey(for: clip, bpm: session.bpm),
                             windowOffsetBeats: cursor - window.startBeat,
                             lengthBeats: length,
                             cycleOffsetBeats: intoCycle,
@@ -362,6 +363,12 @@ final class LYTimelineAudioPlayer {
                 }
             }
         }
+        return result
+    }
+
+    private func rebuildSegments() {
+        guard let session, let window else { segments = []; return }
+        let result = Self.segments(session: session, window: window)
         segments = result
 
         let live = Set(result.map(\.clipID))
@@ -443,7 +450,7 @@ final class LYTimelineAudioPlayer {
         for key in cycles.keys where !live.contains(key) { cycles[key] = nil }
     }
 
-    private static func renderKey(for clip: LYClip, bpm: Double) -> String {
+    static func renderKey(for clip: LYClip, bpm: Double) -> String {
         [
             clip.sourceRelativePath ?? "",
             String(format: "%.5f", clip.sourceStartSeconds),
@@ -467,7 +474,7 @@ final class LYTimelineAudioPlayer {
         } + ["\(session.bpm)"]
     }
 
-    private static func slice(
+    static func slice(
         _ source: AVAudioPCMBuffer,
         from start: Int,
         count: Int,
