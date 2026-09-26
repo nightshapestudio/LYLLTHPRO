@@ -9,8 +9,10 @@
 /* Begin PBXBuildFile section */
 		00CD8A9C08C13F42A6624EDB /* SequencerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8658DEE809F98F0303AC07 /* SequencerModels.swift */; };
 		030D70F445C8B64626C87ACB /* LYSynthCore.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3093988C25143E99CB35645D /* LYSynthCore.cpp */; settings = {COMPILER_FLAGS = "-O3"; }; };
+		03A2D18CC3D75840A1D6AD06 /* LYNotePlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D695E9DF2B63F21EB41F447 /* LYNotePlayer.swift */; };
 		03F2A270049C0F2561F3DDA7 /* ArrangementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0C312174AA965DC7872AAE /* ArrangementView.swift */; };
 		0CEC7DBA1215E7248215069A /* LYLLTHTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */; };
+		0F2E7B5C782BAFAFA9C0A000 /* NoteClipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C197A61BD7F9513D6B09D7D3 /* NoteClipTests.swift */; };
 		1100D2673739C29C697A2403 /* LYScroller.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8138DCA1A91395B53951A82 /* LYScroller.swift */; };
 		154CFDC4030483427D92BCE8 /* ExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B68857B9AC741B4807DC37 /* ExportTests.swift */; };
 		162682C9152C4F5217FC0D04 /* SynthCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2F4736A16F53868A4791F0 /* SynthCoreTests.swift */; };
@@ -18,9 +20,11 @@
 		1EB9AE99B706B7D1C2A6211B /* ReverbModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 543A005C681BF5D44EE192DB /* ReverbModels.swift */; };
 		1F169417CEC23D5306D775ED /* ChannelStripInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 513D2E0A410B83980A7B0903 /* ChannelStripInspector.swift */; };
 		1F234EB5BBD5FB513736A650 /* NightshapeAudioEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 167D8076867A0FD15A3749D3 /* NightshapeAudioEngine */; };
+		2715202FF2290BB4B30B1DFD /* PianoRoll.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E87A3876A04F43A520B159 /* PianoRoll.swift */; };
 		2B0E806B86EC35725F476C95 /* LYSynthFXPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B03D44787926C50EA6A06C6 /* LYSynthFXPage.swift */; };
 		2D66F4DD8DA2C43A7B698A1A /* CHARGED COMPANIONS.fkit in Resources */ = {isa = PBXBuildFile; fileRef = C18D89386FBB389F94D73831 /* CHARGED COMPANIONS.fkit */; };
 		3904B2CD3898D951F670E9ED /* FilterPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DE9E66DC6125448D57721A6 /* FilterPanelView.swift */; };
+		3ECB3A6665142FE79DE99281 /* ZZRenderProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C26EF89974C1A3C0FDEC21 /* ZZRenderProbe.swift */; };
 		412158E31F5D815A57A5E577 /* LYSynthInstrument.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9405C470F3A00F3CB1F2855 /* LYSynthInstrument.swift */; };
 		426BA90C5EE003358A9D6E10 /* DrumKitSequencerVisuals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B5A010271292EDECA656A29 /* DrumKitSequencerVisuals.swift */; };
 		43F41B9FECA4D8B43B63D747 /* FXWindowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14EF068925C4572F08ABDF5D /* FXWindowViews.swift */; };
@@ -50,6 +54,7 @@
 		A65BB141E76824F4F93607CE /* SonicDecimatorEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95DE102CFAEFE0774BDF2B06 /* SonicDecimatorEditorView.swift */; };
 		A72727F891A861CF9EBE3149 /* FXRack.swift in Sources */ = {isa = PBXBuildFile; fileRef = F548D526F8DC778B1DCD460A /* FXRack.swift */; };
 		AB673A7B503D67D52EEC2E24 /* DrumKitRootShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D0D01CA5DFBABAF7CB19114 /* DrumKitRootShims.swift */; };
+		ADC2DE9209525ABF528B72C5 /* LYNoteRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3584EB3AD88692550DF64DBE /* LYNoteRecording.swift */; };
 		B1123646A4225427ECE8197B /* CompressorWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B60B660A74B0473F5FCECCF /* CompressorWindowView.swift */; };
 		B63626ABA24F747B3810394F /* LYSynthVisuals.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD4ACCE1DB809DEB2FD7914 /* LYSynthVisuals.swift */; };
 		B7937CF1156F2D4D5449C232 /* CompressorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53DEFCF4361EE40F8F34E692 /* CompressorModels.swift */; };
@@ -108,9 +113,11 @@
 		2B60B660A74B0473F5FCECCF /* CompressorWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompressorWindowView.swift; path = "../nightshape-drumkit-ios/Views/Components/CompressorWindowView.swift"; sourceTree = "<group>"; };
 		3093988C25143E99CB35645D /* LYSynthCore.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = LYSynthCore.cpp; sourceTree = "<group>"; };
 		34B68857B9AC741B4807DC37 /* ExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportTests.swift; sourceTree = "<group>"; };
+		3584EB3AD88692550DF64DBE /* LYNoteRecording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYNoteRecording.swift; sourceTree = "<group>"; };
 		35CE53FE7A1928E34EFCCC92 /* LYLLTH.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LYLLTH.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		36CE37E3FF75BBDC0DF875F2 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
 		3BF85EAD4DB1AAE6788D582A /* TransportDisplayState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportDisplayState.swift; sourceTree = "<group>"; };
+		3D695E9DF2B63F21EB41F447 /* LYNotePlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYNotePlayer.swift; sourceTree = "<group>"; };
 		4DE9E66DC6125448D57721A6 /* FilterPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FilterPanelView.swift; path = "../nightshape-drumkit-ios/Views/Components/FilterPanelView.swift"; sourceTree = "<group>"; };
 		513D2E0A410B83980A7B0903 /* ChannelStripInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelStripInspector.swift; sourceTree = "<group>"; };
 		53DEFCF4361EE40F8F34E692 /* CompressorModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompressorModels.swift; path = "../nightshape-drumkit-ios/Models/CompressorModels.swift"; sourceTree = "<group>"; };
@@ -145,6 +152,9 @@
 		BE654E905CE837E5445AB214 /* LYSynthPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthPages.swift; sourceTree = "<group>"; };
 		C0673CFA15F6912BAF84B725 /* ExperimentalFXNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ExperimentalFXNavigation.swift; path = "../nightshape-drumkit-ios/Views/Components/ExperimentalFXNavigation.swift"; sourceTree = "<group>"; };
 		C18D89386FBB389F94D73831 /* CHARGED COMPANIONS.fkit */ = {isa = PBXFileReference; path = "CHARGED COMPANIONS.fkit"; sourceTree = "<group>"; };
+		C197A61BD7F9513D6B09D7D3 /* NoteClipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteClipTests.swift; sourceTree = "<group>"; };
+		C4C26EF89974C1A3C0FDEC21 /* ZZRenderProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZZRenderProbe.swift; sourceTree = "<group>"; };
+		C8E87A3876A04F43A520B159 /* PianoRoll.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PianoRoll.swift; sourceTree = "<group>"; };
 		CDD4ACCE1DB809DEB2FD7914 /* LYSynthVisuals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthVisuals.swift; sourceTree = "<group>"; };
 		CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYLLTHApp.swift; sourceTree = "<group>"; };
 		CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDocumentTests.swift; sourceTree = "<group>"; };
@@ -251,6 +261,7 @@
 			children = (
 				05B62481262297A4782ECA7B /* LYFKit.swift */,
 				D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */,
+				3584EB3AD88692550DF64DBE /* LYNoteRecording.swift */,
 				5D2710D240A4FA97144EC0A9 /* SessionModels.swift */,
 			);
 			path = Models;
@@ -275,9 +286,11 @@
 				34B68857B9AC741B4807DC37 /* ExportTests.swift */,
 				6F6FDEB2771DB26C743DA3A2 /* FKitTests.swift */,
 				84AE0F65DFC17746EDC090A3 /* LUNATKTests.swift */,
+				C197A61BD7F9513D6B09D7D3 /* NoteClipTests.swift */,
 				CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */,
 				1A2F4736A16F53868A4791F0 /* SynthCoreTests.swift */,
 				1A1922DA06A54E7620D26B2E /* SynthFeatureTests.swift */,
+				C4C26EF89974C1A3C0FDEC21 /* ZZRenderProbe.swift */,
 				297C287AF96441E0A0F9CFA4 /* Fixtures */,
 			);
 			path = LYLLTHTests;
@@ -334,6 +347,7 @@
 				7B5A010271292EDECA656A29 /* DrumKitSequencerVisuals.swift */,
 				24183797B508D69982E65468 /* DrumSoundBrowser.swift */,
 				05C3A9FF391869346BFAFED1 /* FXWindowHost.swift */,
+				C8E87A3876A04F43A520B159 /* PianoRoll.swift */,
 				D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */,
 			);
 			path = Views;
@@ -378,6 +392,7 @@
 				26A43024412B8FC79FFECBA7 /* LYBounce.swift */,
 				6917A8C3DCB7971E1B412205 /* LYDrumSounds.swift */,
 				03B43134989E942D54830A3A /* LYMIDIInput.swift */,
+				3D695E9DF2B63F21EB41F447 /* LYNotePlayer.swift */,
 				16D07685D250C91B37E5CD8F /* LYRecorder.swift */,
 				67535C49D147B10E190ACCD8 /* TimelinePlayback.swift */,
 			);
@@ -497,9 +512,11 @@
 				154CFDC4030483427D92BCE8 /* ExportTests.swift in Sources */,
 				DFCE1678A800ACE606F90D11 /* FKitTests.swift in Sources */,
 				7759F7B9F7F7186B3C840682 /* LUNATKTests.swift in Sources */,
+				0F2E7B5C782BAFAFA9C0A000 /* NoteClipTests.swift in Sources */,
 				BEDFD504AE4AD5C9E2F9D00E /* SessionDocumentTests.swift in Sources */,
 				162682C9152C4F5217FC0D04 /* SynthCoreTests.swift in Sources */,
 				EFD5BBF99458A4F73ACC3359 /* SynthFeatureTests.swift in Sources */,
+				3ECB3A6665142FE79DE99281 /* ZZRenderProbe.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -533,6 +550,8 @@
 				F3072584030C31119C4860C6 /* LYLLTHSessionDocument.swift in Sources */,
 				0CEC7DBA1215E7248215069A /* LYLLTHTheme.swift in Sources */,
 				5D4D320FC8AA37F75BCA3B31 /* LYMIDIInput.swift in Sources */,
+				03A2D18CC3D75840A1D6AD06 /* LYNotePlayer.swift in Sources */,
+				ADC2DE9209525ABF528B72C5 /* LYNoteRecording.swift in Sources */,
 				F3B64D71CED48EEFD02691B4 /* LYRecorder.swift in Sources */,
 				1100D2673739C29C697A2403 /* LYScroller.swift in Sources */,
 				7AAEF9D68A52E5362904BFAA /* LYSynthControls.swift in Sources */,
@@ -547,6 +566,7 @@
 				9CEC9247F9086363A88353A1 /* LYWavetableEditor.swift in Sources */,
 				BEF12851075EA3C677715CCD /* NightshapeTheme+macOS.swift in Sources */,
 				F2182A2AF3D1917E59FE6119 /* ParameterResetTap.swift in Sources */,
+				2715202FF2290BB4B30B1DFD /* PianoRoll.swift in Sources */,
 				1EB9AE99B706B7D1C2A6211B /* ReverbModels.swift in Sources */,
 				00CD8A9C08C13F42A6624EDB /* SequencerModels.swift in Sources */,
 				C619A497E1A0A6EEAEC62A38 /* SessionModels.swift in Sources */,

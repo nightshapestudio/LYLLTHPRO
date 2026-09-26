@@ -152,6 +152,8 @@ struct WorkspaceView: View {
     @State private var fxOriginal: (rack: LYFXRack, reverb: ReverbState?) = (LYFXRack(), nil)
     @State private var fxPickerTarget: FXTarget?
     @State private var synthTrackID: UUID?
+    /// The note clip open in the piano roll: (track, clip).
+    @State private var pianoRollClip: (track: UUID, clip: UUID)?
     @State private var drumTrackID: UUID?
     @State private var bounce = LYBounce()
     @State private var engineSync = LYCoalescedSync()
@@ -288,6 +290,9 @@ struct WorkspaceView: View {
                     .zIndex(120)
 
                 fxPickerOverlay
+
+                pianoRollOverlay
+                    .zIndex(179)
 
                 synthEditorOverlay
                     .zIndex(180)
@@ -435,7 +440,8 @@ struct WorkspaceView: View {
             },
             openSynth: { openSynth($0) },
             openDrums: { openDrums($0) },
-            openPattern: { openPattern(trackID: $0, clipID: $1) }
+            openPattern: { openPattern(trackID: $0, clipID: $1) },
+            openNotes: { openNotes(trackID: $0, clipID: $1) }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -521,7 +527,7 @@ struct WorkspaceView: View {
         case .midi:
             guard let url = savePanel("EXPORT · MIDI", name: name + ".mid", type: .midi) else { return }
             let window = audio.exportWindow(document.session)
-            let data = LYMIDIExport.data(session: document.session, frames: audio.songFrames(document.session, window: window))
+            let data = LYMIDIExport.data(session: document.session, frames: audio.songFrames(document.session, window: window), window: window)
             bounce.report(Result { try data.write(to: url, options: .atomic); return url })
         case .fkit:
             saveDrumKitProject()
@@ -644,6 +650,18 @@ struct WorkspaceView: View {
         let inSong = activeWorkspace != "PATTERN"
         for trackIndex in targets {
             let track = document.session.tracks[trackIndex]
+            if inSong, track.kind == .instrument, track.synth != nil, track.isChordTrack != true {
+                document.session.tracks[trackIndex].clips = LYNoteRecording.write(
+                    notes.map { note in
+                        let on = songBeat(forTransportBeat: note.onBeat)
+                        let off = note.offBeat.map { songBeat(forTransportBeat: $0) } ?? on + 0.25
+                        return (on, max(off - on, 0.03), note.note, note.velocity)
+                    },
+                    into: document.session.tracks[trackIndex].clips,
+                    beatsPerBar: beatsPerBar
+                )
+                continue
+            }
             let kind: LYClip.Kind = track.kind == .drumkit ? .pattern : .midi
             let root = track.rootNote ?? (track.kind == .drumkit ? 36 : 48)
             for note in notes {
@@ -784,6 +802,58 @@ struct WorkspaceView: View {
         }
         selectedTrackID = trackID
         withAnimation(LYLLTHTheme.settle) { synthTrackID = trackID }
+    }
+
+    /// Opens a note clip in the piano roll. A track still on a DrumKit
+    /// preset moves onto LUNATK so the notes have something to play.
+    private func openNotes(trackID: UUID, clipID: UUID) {
+        guard let index = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        if document.session.tracks[index].synth == nil {
+            document.session.tracks[index].synth = .initPatch
+        }
+        audio.syncSequencer(document.session)
+        selectedTrackID = trackID
+        withAnimation(LYLLTHTheme.settle) { pianoRollClip = (trackID, clipID) }
+    }
+
+    @ViewBuilder
+    private var pianoRollOverlay: some View {
+        if let ref = pianoRollClip,
+           let trackIndex = document.session.tracks.firstIndex(where: { $0.id == ref.track }),
+           let clipIndex = document.session.tracks[trackIndex].clips.firstIndex(where: { $0.id == ref.clip }) {
+            let track = document.session.tracks[trackIndex]
+            let close = { withAnimation(LYLLTHTheme.snap) { pianoRollClip = nil } }
+            let position = document.session.tracks.firstIndex { $0.id == track.id } ?? 0
+            GeometryReader { geo in
+                LYFloatingWindow(
+                    id: "pianoroll",
+                    title: "PIANO ROLL  ·  " + track.name,
+                    accent: LYLLTHTheme.trackAccent(position: position),
+                    size: CGSize(width: min(geo.size.width - 32, 1180), height: min(geo.size.height - 56, 640)),
+                    close: close
+                ) {
+                    LYPianoRoll(
+                        clip: Binding(
+                            get: {
+                                document.session.tracks.first { $0.id == ref.track }?.clips.first { $0.id == ref.clip }
+                                    ?? document.session.tracks[trackIndex].clips[clipIndex]
+                            },
+                            set: { clip in
+                                guard let t = document.session.tracks.firstIndex(where: { $0.id == ref.track }),
+                                      let c = document.session.tracks[t].clips.firstIndex(where: { $0.id == ref.clip }) else { return }
+                                document.session.tracks[t].clips[c] = clip
+                            }
+                        ),
+                        trackName: track.name,
+                        accent: LYLLTHTheme.trackAccent(position: position),
+                        instrument: audio.synthInstrument(for: ref.track),
+                        beatsPerBar: max(1, Double(document.session.numerator) * 4 / Double(max(document.session.denominator, 1))),
+                        songBeat: { [audio] in audio.isPlaying && audio.transportMode == .song ? audio.currentSongBeat() : nil }
+                    )
+                }
+                .transition(.scale(scale: 0.97).combined(with: .opacity))
+            }
+        }
     }
 
     @ViewBuilder

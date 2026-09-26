@@ -19,6 +19,8 @@ struct ArrangementView: View {
     var openDrums: (UUID) -> Void = { _ in }
     /// Opens a track's pattern (by clip id) in the sequencer.
     var openPattern: (UUID, UUID) -> Void = { _, _ in }
+    /// Opens a note clip (track id, clip id) in the piano roll.
+    var openNotes: (UUID, UUID) -> Void = { _, _ in }
 
     @EnvironmentObject private var audio: AudioEngineController
 
@@ -586,14 +588,30 @@ struct ArrangementView: View {
                 )
                 .contentShape(Rectangle())
                 .gesture(
-                    SpatialTapGesture()
+                    SpatialTapGesture(count: 2)
+                        .onEnded { value in
+                            guard takesNoteClips(track) else { return }
+                            let raw = Double(value.location.x / max(beatWidth, 1))
+                            createNoteClip(trackIndex: index, atBeat: raw)
+                        }
+                        .exclusively(before: SpatialTapGesture()
                         .onEnded { value in
                             selectedTrackID = track.id
                             selectedClipID = nil
                             let raw = Double(value.location.x / max(beatWidth, 1))
                             editCursorBeat = min(max(0, snapBeat(raw, raw)), Double(beats))
-                        }
+                        })
                 )
+
+                if takesNoteClips(track) && !track.clips.contains(where: { $0.isInSong }) {
+                    Text("DOUBLE-CLICK TO ADD A NOTE CLIP")
+                        .font(LYLLTHTheme.label(8, weight: .bold))
+                        .tracking(2)
+                        .foregroundStyle(LYLLTHTheme.dim)
+                        .padding(.leading, 14)
+                        .frame(height: laneHeight)
+                        .allowsHitTesting(false)
+                }
 
                 if track.kind == .audio && track.clips.isEmpty {
                     Text("DROP AUDIO HERE")
@@ -635,6 +653,7 @@ struct ArrangementView: View {
                     )
                     .simultaneousGesture(
                         TapGesture(count: 2).onEnded {
+                            if clip.isNoteClip { openNotes(track.id, clip.id); return }
                             guard clip.isSequenced else { return }
                             openPattern(track.id, track.patternContent(of: clip).id)
                         }
@@ -674,6 +693,30 @@ struct ArrangementView: View {
         }
         .background(selected ? LYLLTHTheme.panel : LYLLTHTheme.deck)
         .overlay(alignment: .bottom) { LYHairline() }
+    }
+
+    /// Melodic tracks take piano-roll clips; drums and chord tracks keep steps.
+    private func takesNoteClips(_ track: LYTrack) -> Bool {
+        track.kind == .instrument && track.isChordTrack != true
+    }
+
+    /// A new, empty note clip on the bar under the pointer, opened straight
+    /// into the piano roll.
+    private func createNoteClip(trackIndex: Int, atBeat raw: Double) {
+        let start = max(0, floor(raw / beatsPerBar) * beatsPerBar)
+        let length = beatsPerBar * 4
+        let track = session.tracks[trackIndex]
+        let taken = track.clips.filter(\.isInSong).map { ($0.startBeat, $0.startBeat + $0.lengthBeats) }
+        guard !taken.contains(where: { raw >= $0.0 && raw < $0.1 }) else { return }
+        let nextStart = taken.map(\.0).filter { $0 > start }.min() ?? .infinity
+        let fitted = min(length, nextStart - start)
+        guard fitted >= 0.25 else { return }
+        let count = track.clips.filter(\.isNoteClip).count + 1
+        let clip = LYClip(name: "NOTES \(count)", kind: .notes, startBeat: start, lengthBeats: fitted, notes: [], noteLoopBeats: fitted)
+        session.tracks[trackIndex].clips.append(clip)
+        selectedTrackID = track.id
+        selectedClipID = clip.id
+        openNotes(track.id, clip.id)
     }
 
     private var addTrackLane: some View {
@@ -1184,6 +1227,42 @@ private struct BeatGrid: View {
 
 // MARK: - Clip
 
+/// A note clip's notes in miniature, repeated across the clip's length.
+private struct LYNoteClipMiniRoll: View {
+    let notes: [LYNote]
+    let accent: Color
+    let beatWidth: CGFloat
+    let lengthBeats: Double
+    let cycleBeats: Double
+    let loopOffsetBeats: Double
+
+    var body: some View {
+        Canvas { context, size in
+            guard !notes.isEmpty, cycleBeats > 0 else { return }
+            let low = notes.map(\.pitch).min()!, high = notes.map(\.pitch).max()!
+            let span = CGFloat(max(high - low, 11) + 1)
+            let row = max(1.5, (size.height - 4) / span)
+            let base = (size.height - row * span) / 2
+            var pass = -loopOffsetBeats
+            while pass < lengthBeats {
+                if pass > 0 {
+                    context.fill(Path(CGRect(x: CGFloat(pass) * beatWidth, y: 0, width: 1, height: size.height)), with: .color(accent.opacity(0.25)))
+                }
+                for note in notes {
+                    let start = pass + note.start
+                    let end = min(pass + note.end, pass + cycleBeats, lengthBeats)
+                    guard end > max(start, 0) else { continue }
+                    let x0 = CGFloat(max(start, 0)) * beatWidth
+                    let y = base + CGFloat(high - note.pitch) * row
+                    let rect = CGRect(x: x0, y: y, width: max(2, CGFloat(end - max(start, 0)) * beatWidth - 1), height: max(1.5, row - 0.5))
+                    context.fill(Path(rect), with: .color(accent.opacity(0.4 + 0.5 * Double(note.velocity) / 127)))
+                }
+                pass += cycleBeats
+            }
+        }
+    }
+}
+
 private struct ArrangementClip: View {
     @Binding var clip: LYClip
     /// The pattern a placement plays, whose steps it draws.
@@ -1215,6 +1294,7 @@ private struct ArrangementClip: View {
         if clip.kind == .audio {
             return LYAudioEventTiming.cycleBeats(for: clip, projectBPM: projectBPM)
         }
+        if clip.isNoteClip { return clip.noteCycleBeats }
         guard let count = (source ?? clip).steps?.count, count > 0 else { return nil }
         return Double(count) * lyBeatsPerStep
     }
@@ -1256,11 +1336,13 @@ private struct ArrangementClip: View {
         .overlay(alignment: .topTrailing) { dragReadout }
         .animation(LYLLTHTheme.snap, value: isSelected)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(clip.kind == .audio ? "Audio event \(clip.name)" : "Pattern region \(clip.name)")
+        .accessibilityLabel(clip.kind == .audio ? "Audio event \(clip.name)" : (clip.isNoteClip ? "Note clip \(clip.name)" : "Pattern region \(clip.name)"))
         .accessibilityValue(accessibilityDescription)
         .accessibilityIdentifier("arrangement-clip-\(clip.id.uuidString)")
         .help(clip.kind == .audio
               ? "Drag to move. Drag the right edge past the end to loop it. Option-drag slides the audio inside the event. Drag the top line for volume."
+              : clip.isNoteClip
+              ? "Double-click to edit the notes in the piano roll. Drag to move. Drag the right edge to repeat the notes."
               : "Double-click to edit in the sequencer. Drag to move. Drag the right edge to repeat the pattern. ⌘D places it again.")
     }
 
@@ -1321,6 +1403,15 @@ private struct ArrangementClip: View {
                     fileDuration: clip.sourceFileDurationSeconds ?? (clip.sourceStartSeconds + (clip.sourceDurationSeconds ?? 0))
                 )
             }
+        } else if clip.isNoteClip {
+            LYNoteClipMiniRoll(
+                notes: clip.notes ?? [],
+                accent: accent,
+                beatWidth: beatWidth,
+                lengthBeats: clip.lengthBeats,
+                cycleBeats: clip.noteCycleBeats,
+                loopOffsetBeats: clip.loopOffsetBeats
+            )
         } else {
             LYPatternCells(
                 steps: patternSteps,

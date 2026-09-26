@@ -17,6 +17,11 @@ final class AudioEngineController: ObservableObject {
         LYChannelMap.configureEngine()
         return NightshapeAudioEngine.shared
     }()
+    private lazy var notePlayer: LYNotePlayer = {
+        let player = LYNotePlayer(engine: engine)
+        player.instrument = { [weak self] id in self?.instruments[id] }
+        return player
+    }()
     private lazy var timeline: LYTimelineAudioPlayer = {
         let player = LYTimelineAudioPlayer(engine: engine)
         player.onRenderError = { [weak self] message in self?.audioEventError = message }
@@ -109,8 +114,10 @@ final class AudioEngineController: ObservableObject {
                 guard let self else { return }
                 if playing && self.transportMode == .song {
                     self.timeline.start()
+                    self.notePlayer.start()
                 } else {
                     self.timeline.stop()
+                    self.notePlayer.stop()
                 }
             }
             .store(in: &cancellables)
@@ -125,8 +132,10 @@ final class AudioEngineController: ObservableObject {
         syncTimeline(session, assets: assets)
         if isPlaying && mode == .song {
             timeline.start()
+            notePlayer.start()
         } else {
             timeline.stop()
+            notePlayer.stop()
         }
     }
 
@@ -142,6 +151,7 @@ final class AudioEngineController: ObservableObject {
         let window = LYSongWindow.resolve(for: session, stepsPerBar: meter.activeSubdivisionCount)
         if window != songWindow { songWindow = window }
         timeline.update(session: session, assets: assets, window: window)
+        notePlayer.update(session: session, window: window)
     }
 
     /// The song beat being heard right now, for the arrangement playhead.

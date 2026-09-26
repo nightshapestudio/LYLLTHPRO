@@ -153,6 +153,20 @@ struct LYPluginSlot: Codable, Identifiable, Equatable {
 
 /// Per-step performance locks. Values stay normalized where possible so the
 /// document can feed both NIGHTSHAPE's current engine and future plug-in hosts.
+/// One piano-roll note.
+struct LYNote: Codable, Equatable, Identifiable, Hashable {
+    var id = UUID()
+    /// Beats from the start of its clip.
+    var start: Double
+    var length: Double
+    /// MIDI note number, 0…127.
+    var pitch: Int
+    /// 1…127.
+    var velocity: Int = 100
+
+    var end: Double { start + length }
+}
+
 struct LYStepParameters: Codable, Equatable {
     var velocity: Double = 0.82
     var level: Double = 0.82
@@ -676,6 +690,8 @@ struct LYClip: Codable, Identifiable, Equatable {
         case pattern
         case audio
         case midi
+        /// Piano-roll notes with free timing, played on LUNATK.
+        case notes
     }
 
     var id = UUID()
@@ -719,6 +735,15 @@ struct LYClip: Codable, Identifiable, Equatable {
     var patternSourceID: UUID? = nil
     /// A pattern kept for the sequencer but not placed in the song.
     var isOffTimeline: Bool? = nil
+    /// A note clip's notes, their times in beats from the clip's start.
+    var notes: [LYNote]? = nil
+    /// How long a note clip's content is before it repeats. nil: the clip's
+    /// length when it was made.
+    var noteLoopBeats: Double? = nil
+
+    var isNoteClip: Bool { kind == .notes }
+    /// The repeating length of a note clip.
+    var noteCycleBeats: Double { max(noteLoopBeats ?? lengthBeats, 0.25) }
 
     var isSequenced: Bool { kind == .pattern || kind == .midi }
     var isPlacement: Bool { isSequenced && patternSourceID != nil }
@@ -784,7 +809,7 @@ extension LYClip {
         case slipOffsetSeconds, eventGainDB
         case pitchSemitones, fadeInSeconds, fadeOutSeconds, fadeCurve, stretchMode
         case sourceBPM, preservePitch, beatMap, isMuted, isLocked, isLooped, loopOffsetBeats, sourceFileDurationSeconds
-        case patternSourceID, isOffTimeline
+        case patternSourceID, isOffTimeline, notes, noteLoopBeats
     }
 
     init(from decoder: Decoder) throws {
@@ -819,6 +844,8 @@ extension LYClip {
         sourceFileDurationSeconds = try values.decodeIfPresent(Double.self, forKey: .sourceFileDurationSeconds)
         patternSourceID = try values.decodeIfPresent(UUID.self, forKey: .patternSourceID)
         isOffTimeline = try values.decodeIfPresent(Bool.self, forKey: .isOffTimeline)
+        notes = try values.decodeIfPresent([LYNote].self, forKey: .notes)
+        noteLoopBeats = try values.decodeIfPresent(Double.self, forKey: .noteLoopBeats)
         normalizeAudioEvent()
     }
 }

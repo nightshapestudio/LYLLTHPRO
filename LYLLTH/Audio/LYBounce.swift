@@ -169,7 +169,7 @@ final class LYBounce: ObservableObject {
 /// bars an audio export would cover. DrumKit's MIDI export, from LYLLTH's
 /// song.
 enum LYMIDIExport {
-    static func data(session: LYLLTHSession, frames: [SongPatternFrame]) -> Data {
+    static func data(session: LYLLTHSession, frames: [SongPatternFrame], window: LYSongWindow? = nil) -> Data {
         let musical = session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }
         let bars = frames.map { frame in
             OfflineRenderBar(tracks: frame.tracks.map { track in
@@ -223,8 +223,19 @@ enum LYMIDIExport {
         case (6, 8): meter = .sixEight
         default: meter = .fourFour
         }
+        // Piano-roll notes, as played, over the same range as the bars.
+        let rangeStart = window?.startBeat ?? 0
+        let rangeEnd = window?.endBeat ?? frames.reduce(0) { $0 + Double($1.stepCount) * lyBeatsPerStep }
+        var free: [Int: [MIDIExportNote]] = [:]
+        for (index, track) in musical.enumerated() where track.kind == .instrument {
+            let notes = track.clips.filter { $0.isNoteClip && $0.isInSong && !$0.isMuted }
+                .flatMap { $0.songNotes(from: rangeStart, to: rangeEnd) }
+                .map { MIDIExportNote(startQuarters: $0.beat - rangeStart, lengthQuarters: min($0.length, rangeEnd - $0.beat),
+                                      note: $0.pitch, velocity: $0.velocity) }
+            if !notes.isEmpty { free[index] = notes }
+        }
         return MIDIFileExporter.data(
-            bars: bars, tracks: tracks, muted: muted, bpm: session.bpm, meter: meter,
+            bars: bars, tracks: tracks, muted: muted, freeNotes: free, bpm: session.bpm, meter: meter,
             swing: session.swing ?? 0.5,
             flamIntervalSeconds: TrackChannel.flamGraceSeconds,
             flamGraceVelocityScale: TrackChannel.flamGraceVelocityScale,
