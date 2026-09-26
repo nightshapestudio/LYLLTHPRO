@@ -12,7 +12,8 @@ struct LYLLTHApp: App {
     }
 
     var body: some Scene {
-        DocumentGroup(newDocument: LYLLTHSessionDocument()) { configuration in
+        // A new song opens on the demo song.
+        DocumentGroup(newDocument: LYLLTHSessionDocument(session: .demoSong())) { configuration in
             LYDocumentWorkspace(document: configuration.$document)
         }
         .windowStyle(.hiddenTitleBar)
