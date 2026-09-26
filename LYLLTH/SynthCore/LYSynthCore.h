@@ -255,8 +255,17 @@ enum {
     LY_VOC_GAIN,        // 0…1: input gain, -12…+24 dB
     LY_VOC_MIX,         // 0…1
 
+    // Analog behavior.
+    LY_VINTAGE,         // 0…1: each note's own pitch, cutoff and envelope spread, and a slow drift
+    LY_FILTER_MORPH_POS, // 0…1, the MORPH filter: low-pass … notch … high-pass
+    LY_F2_MORPH,
+    LY_LADDER_POLES,    // 0 four-pole (24 dB), 1 two-pole (12 dB): both filters' LADDER
+    LY_LADDER_BASS,     // 0…1: bass loss as resonance rises (0 keeps the lows)
+    LY_KEY_PRIORITY,    // LY_PRIORITY_*: which held key a mono voice plays
+
     LY_PARAM_COUNT
 };
+enum { LY_PRIORITY_LAST = 0, LY_PRIORITY_LOW, LY_PRIORITY_HIGH, LY_PRIORITY_COUNT };
 enum { LY_ARP_PATTERN_STEPS = 16 };
 enum {
     LY_FSAT_OFF = 0, LY_FSAT_LIGHT, LY_FSAT_SOFT, LY_FSAT_HARD, LY_FSAT_DIODE, LY_FSAT_SHAPER,
@@ -296,6 +305,7 @@ enum {
     LY_FILTER_LP12 = 0, LY_FILTER_LP24, LY_FILTER_HP12, LY_FILTER_HP24,
     LY_FILTER_BP, LY_FILTER_NOTCH, LY_FILTER_LADDER,
     LY_FILTER_COMB_POS, LY_FILTER_COMB_NEG, LY_FILTER_FORMANT, LY_FILTER_PHASER, LY_FILTER_BP24,
+    LY_FILTER_MORPH,
     LY_FILTER_COUNT
 };
 
@@ -364,6 +374,7 @@ enum {
     LY_DST_FEEDBACK, LY_DST_FB_TONE,
     LY_DST_INS1_AMOUNT, LY_DST_INS1_FREQ, LY_DST_INS2_AMOUNT, LY_DST_INS2_FREQ,
     LY_DST_FSAT_DRIVE, LY_DST_VOC_MIX, LY_DST_VOC_SHIFT,
+    LY_DST_MORPH, LY_DST_F2_MORPH,
     LY_DST_COUNT
 };
 

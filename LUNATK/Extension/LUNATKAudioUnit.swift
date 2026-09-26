@@ -214,8 +214,12 @@ final class LUNATKAudioUnit: AUAudioUnit {
                         lysynth_midi(core, midi.data.0, midi.length > 1 ? midi.data.1 : 0, midi.length > 2 ? midi.data.2 : 0, 0)
                     }
                 case .parameter, .parameterRamp:
+                    // A host can schedule an address that isn't ours; converting it
+                    // unchecked would trap on the audio thread.
                     let parameter = current.pointee.parameter
-                    lysynth_set_param(core, Int32(parameter.parameterAddress), parameter.value)
+                    if parameter.parameterAddress < AUParameterAddress(LY_PARAM_COUNT) {
+                        lysynth_set_param(core, Int32(parameter.parameterAddress), parameter.value)
+                    }
                 default:
                     break
                 }
@@ -445,6 +449,7 @@ enum LUNATKNames {
         case "fb": return "FEEDBACK"
         case "fsat": return "FILTER SATURATION"
         case "voc": return "VOCODER"
+        case "ladder": return "LADDER"
         case "perf": return "PERFORMERS"
         default:
             if key.hasPrefix("ins") { return "INSERT " + key.dropFirst(3) }

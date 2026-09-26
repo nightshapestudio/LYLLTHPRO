@@ -228,6 +228,9 @@ struct FilterSetup {
     float a1 = 0, a2 = 0, a3 = 0, k = 2;       // SVF stage 1
     float b1 = 0, b2 = 0, b3 = 0, k2 = 2;      // SVF stage 2 (24 dB types)
     float ladderG = 0, ladderFeedback = 0, res = 0;
+    bool ladderTwoPole = false;
+    float ladderMakeup = 1;                    // how much of the ladder's bass loss is made up
+    float morphLow = 1, morphHigh = 0;         // MORPH: low-pass and high-pass amounts
     float combDelay = 100, combFeedback = 0;
     float formant[3][4] = {};                  // a1 a2 a3 k per formant band
     float formantGain[3] = {1, 0.6f, 0.25f};
@@ -240,7 +243,8 @@ inline void svfCoefficients(double hz, double sampleRate, float k, float &a1, fl
     a1 = 1.f / (1.f + g * (g + k)); a2 = g * a1; a3 = g * a2;
 }
 
-FilterSetup makeFilter(int type, double hz, float res, float drive, float mix, double sampleRate) {
+FilterSetup makeFilter(int type, double hz, float res, float drive, float mix, double sampleRate,
+                       float morph = 0.f, bool twoPole = false, float bassLoss = 0.f) {
     FilterSetup f;
     f.type = type; f.res = res; f.drive = drive; f.mix = mix;
     f.preGain = 1.f + drive * 9.f;
@@ -249,7 +253,11 @@ FilterSetup makeFilter(int type, double hz, float res, float drive, float mix, d
     switch (type) {
     case LY_FILTER_LADDER:
         f.ladderG = (float)(1.0 - std::exp(-kTwoPi * hz / sampleRate));
-        f.ladderFeedback = res * 3.9f;
+        // Two poles can't self-oscillate, so they take more feedback for the
+        // same bite; BASS LOSS drops the make-up that keeps the lows up.
+        f.ladderTwoPole = twoPole;
+        f.ladderFeedback = res * (twoPole ? 1.8f : 3.9f);
+        f.ladderMakeup = 1.f + res * (twoPole ? 0.5f : 0.8f) * (1.f - clamp01(bassLoss));
         break;
     case LY_FILTER_COMB_POS: case LY_FILTER_COMB_NEG:
         f.combDelay = (float)std::min(sampleRate / hz, (double)kCombSize - 4);
@@ -280,6 +288,11 @@ FilterSetup makeFilter(int type, double hz, float res, float drive, float mix, d
         const bool stacked = type == LY_FILTER_LP24 || type == LY_FILTER_HP24 || type == LY_FILTER_BP24;
         f.k2 = stacked ? 2.f - 1.2f * res : f.k;
         svfCoefficients(hz, sampleRate, f.k2, f.b1, f.b2, f.b3);
+        // MORPH, a 12 dB state-variable: low-pass, through a notch at the
+        // middle (low and high together), to high-pass.
+        morph = clamp01(morph);
+        f.morphLow = std::min(1.f, 2.f * (1.f - morph));
+        f.morphHigh = std::min(1.f, 2.f * morph);
         break;
     }
     }
@@ -323,12 +336,19 @@ struct FilterChannel {
         float y;
         switch (f.type) {
         case LY_FILTER_LADDER: {
+            if (f.ladderTwoPole) {
+                const float in = fastTanh(x - f.ladderFeedback * ladder[1]);
+                ladder[0] = flushf(ladder[0] + f.ladderG * (in - fastTanh(ladder[0])));
+                ladder[1] = flushf(ladder[1] + f.ladderG * (fastTanh(ladder[0]) - fastTanh(ladder[1])));
+                y = ladder[1] * f.ladderMakeup;
+                break;
+            }
             const float in = fastTanh(x * (f.drive > 0.001f ? 1.f : 1.f) - f.ladderFeedback * ladder[3]);
             ladder[0] = flushf(ladder[0] + f.ladderG * (in - fastTanh(ladder[0])));
             ladder[1] = flushf(ladder[1] + f.ladderG * (fastTanh(ladder[0]) - fastTanh(ladder[1])));
             ladder[2] = flushf(ladder[2] + f.ladderG * (fastTanh(ladder[1]) - fastTanh(ladder[2])));
             ladder[3] = flushf(ladder[3] + f.ladderG * (fastTanh(ladder[2]) - fastTanh(ladder[3])));
-            y = ladder[3] * (1.f + f.res * 0.8f);
+            y = ladder[3] * f.ladderMakeup;
             break;
         }
         case LY_FILTER_COMB_POS: case LY_FILTER_COMB_NEG: {
@@ -371,6 +391,7 @@ struct FilterChannel {
             case LY_FILTER_HP12: y = hp; break;
             case LY_FILTER_BP: y = bp * f.k; break;
             case LY_FILTER_NOTCH: y = lp + hp; break;
+            case LY_FILTER_MORPH: y = lp * f.morphLow + hp * f.morphHigh; break;
             case LY_FILTER_LP24: svf[1].process(lp, f.b1, f.b2, f.b3, f.k2, lp, bp, hp); y = lp; break;
             case LY_FILTER_BP24: svf[1].process(bp * f.k, f.b1, f.b2, f.b3, f.k2, lp, bp, hp); y = bp * f.k2; break;
             default: svf[1].process(hp, f.b1, f.b2, f.b3, f.k2, lp, bp, hp); y = hp; break;
@@ -661,7 +682,16 @@ struct Voice {
     float feedback[2] = {}, feedbackLow[2] = {}, feedbackDCX[2] = {}, feedbackDCY[2] = {};
     // Saturation between the filters.
     float satHold[2] = {}, satPhase = 1, satDCX[2] = {}, satDCY[2] = {};
+    // VINTAGE: this note's own offsets (-1…1, scaled by VINTAGE), and a slow drift.
+    float vintagePitch[2] = {}, vintageCutoff = 0, vintageTime[3] = {};
+    double driftPhase = 0;
+    float driftFrom = 0, driftTo = 0, driftRate = 0.3f;
+    inline float drift() const {
+        return driftFrom + (driftTo - driftFrom) * (0.5f - 0.5f * std::cos((float)M_PI * (float)driftPhase));
+    }
 };
+
+struct MonoKey { int note; int velocity; float cutoff; float resonance; };
 
 struct Event {
     int type;       // 0 on, 1 off, 2 all off, 3 MIDI message (note = status, velocity = data1 | data2 << 8)
@@ -753,6 +783,10 @@ struct LYSynth {
     std::atomic<double> anchorBeat { 0 };
     std::atomic<int> anchorPlaying { 0 };
 
+    // Mono: the keys held, for key priority and returning to a held note.
+    MonoKey monoKeys[kHeldNotes];
+    int monoCount = 0;
+
     // Performers: the pattern a switch key picked (-1: the patch's own).
     int perfOverride = -1;
     int perfPatternParam[2] = { -1, -1 };
@@ -830,6 +864,7 @@ void setDefaults(LYSynth *s) {
     set(LY_FB_DRIVE, 0.3f); set(LY_FB_TONE, 0.7f);
     set(LY_CHORUS_WIDTH, 0.75f);
     set(LY_FSAT_DRIVE, 0.3f); set(LY_FSAT_MIX, 1);
+    set(LY_FILTER_MORPH_POS, 0); set(LY_F2_MORPH, 0);
     for (int i = 0; i < LY_ARP_PATTERN_STEPS; ++i) { set(LY_ARP_LEVEL_BASE + i, 1); set(LY_ARP_LENGTH_BASE + i, 0.6f); }
     set(LY_VOC_BANDS, 16); set(LY_VOC_ATTACK, 0.3f); set(LY_VOC_RELEASE, 0.4f); set(LY_VOC_Q, 0.5f);
     set(LY_VOC_HIGHS, 0.3f); set(LY_VOC_GAIN, 1.f / 3.f); set(LY_VOC_MIX, 1);
@@ -893,7 +928,8 @@ void buildSmoothing(LYSynth *s) {
     for (int id : { (int)LY_MACRO5, (int)LY_MACRO6, (int)LY_MACRO7, (int)LY_MACRO8,
                     (int)LY_FB_AMOUNT, (int)LY_FB_DRIVE, (int)LY_FB_TONE, (int)LY_CHORUS_WIDTH,
                     (int)LY_FSAT_DRIVE, (int)LY_FSAT_MIX, (int)LY_PUNCH, (int)LY_VOC_ATTACK, (int)LY_VOC_RELEASE,
-                    (int)LY_VOC_SHIFT, (int)LY_VOC_Q, (int)LY_VOC_HIGHS, (int)LY_VOC_GAIN, (int)LY_VOC_MIX }) on(id);
+                    (int)LY_VOC_SHIFT, (int)LY_VOC_Q, (int)LY_VOC_HIGHS, (int)LY_VOC_GAIN, (int)LY_VOC_MIX,
+                    (int)LY_FILTER_MORPH_POS, (int)LY_F2_MORPH, (int)LY_LADDER_BASS }) on(id);
     for (int k = 0; k < 2; ++k) {
         const int b = LY_INS1_TYPE + k * LY_INS_STRIDE;
         for (int f : { LY_INS1_AMOUNT, LY_INS1_FREQ, LY_INS1_MIX }) on(b + (f - LY_INS1_TYPE));
@@ -1005,7 +1041,8 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
 
     const float semis = 12.f * std::round(s->raw[b + LY_OSC_OCTAVE]) + std::round(s->raw[b + LY_OSC_SEMI])
         + (p[b + LY_OSC_FINE] + m[LY_DST_A_FINE + d2] * 100.f) / 100.f + p[LY_TUNE] / 100.f
-        + m[LY_DST_A_PITCH + dOffset] * 24.f + m[LY_DST_PITCH] * 24.f + v.bendSemis;
+        + m[LY_DST_A_PITCH + dOffset] * 24.f + m[LY_DST_PITCH] * 24.f + v.bendSemis
+        + clamp01(s->raw[LY_VINTAGE]) * (v.vintagePitch[o] * 0.06f + v.drift() * 0.04f);
     const double frequency = v.frequency * std::pow(2.0, semis / 12.0);
     const double baseIncrement = frequency / s->sampleRate;
     if (baseIncrement >= 0.5) return;
@@ -1358,17 +1395,23 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
             return 20.0 * std::pow(1000.0, (double)value);
         };
         FilterSetup one, two;
+        // VINTAGE: each note's filters sit a little apart (up to a quarter octave).
+        const float vintageCutoff = clamp01(r[LY_VINTAGE]) * 0.025f * v.vintageCutoff;
         if (f1On) {
-            const double hz = cutoffHz(p[LY_FILTER_CUTOFF], p[LY_FILTER_KEYTRACK], p[LY_FILTER_ENVAMT], v.envelope[1].value, m[LY_DST_CUTOFF]);
+            const double hz = cutoffHz(p[LY_FILTER_CUTOFF], p[LY_FILTER_KEYTRACK], p[LY_FILTER_ENVAMT], v.envelope[1].value,
+                                       m[LY_DST_CUTOFF] + vintageCutoff);
             v.cutoffHz = (float)std::min(hz, s->sampleRate * 0.45);
             one = makeFilter((int)std::lround(r[LY_FILTER_TYPE]), hz, clamp01(p[LY_FILTER_RES] + m[LY_DST_RES]),
-                             clamp01(p[LY_FILTER_DRIVE] + m[LY_DST_DRIVE]), clamp01(p[LY_FILTER_MIX] + m[LY_DST_FILTER_MIX]), s->sampleRate);
+                             clamp01(p[LY_FILTER_DRIVE] + m[LY_DST_DRIVE]), clamp01(p[LY_FILTER_MIX] + m[LY_DST_FILTER_MIX]), s->sampleRate,
+                             clamp01(p[LY_FILTER_MORPH_POS] + m[LY_DST_MORPH]), r[LY_LADDER_POLES] > 0.5f, p[LY_LADDER_BASS]);
         }
         if (f2On) {
-            const double hz = cutoffHz(p[LY_F2_CUTOFF], p[LY_F2_KEYTRACK], p[LY_F2_ENVAMT], v.envelope[2].value, m[LY_DST_F2_CUTOFF]);
+            const double hz = cutoffHz(p[LY_F2_CUTOFF], p[LY_F2_KEYTRACK], p[LY_F2_ENVAMT], v.envelope[2].value,
+                                       m[LY_DST_F2_CUTOFF] + vintageCutoff);
             v.cutoff2Hz = (float)std::min(hz, s->sampleRate * 0.45);
             two = makeFilter((int)std::lround(r[LY_F2_TYPE]), hz, clamp01(p[LY_F2_RES] + m[LY_DST_F2_RES]),
-                             clamp01(p[LY_F2_DRIVE] + m[LY_DST_F2_DRIVE]), clamp01(p[LY_F2_MIX] + m[LY_DST_F2_MIX]), s->sampleRate);
+                             clamp01(p[LY_F2_DRIVE] + m[LY_DST_F2_DRIVE]), clamp01(p[LY_F2_MIX] + m[LY_DST_F2_MIX]), s->sampleRate,
+                             clamp01(p[LY_F2_MORPH] + m[LY_DST_F2_MORPH]), r[LY_LADDER_POLES] > 0.5f, p[LY_LADDER_BASS]);
         }
         const bool parallel = routing == LY_ROUTING_PARALLEL && f1On && f2On;
         // SATURATION between the filters: after filter 1 (and before filter 2
@@ -1512,6 +1555,18 @@ void startVoice(LYSynth *s, const Event &e, bool fromArp = false) {
     v.fromArp = fromArp;
     v.random = s->random.bipolar();
     v.elapsed = 0;
+    if (s->raw[LY_VINTAGE] > 0.0005f) {
+        for (auto &o : v.vintagePitch) o = s->random.bipolar();
+        v.vintageCutoff = s->random.bipolar();
+        for (auto &t : v.vintageTime) t = (float)(std::log(1.0 + 0.25 * s->random.bipolar()) / std::log(20000.0));
+        v.driftFrom = s->random.bipolar(); v.driftTo = s->random.bipolar();
+        v.driftPhase = s->random.unit();
+        v.driftRate = 0.15f + 0.3f * s->random.unit();
+    } else {
+        v.vintagePitch[0] = v.vintagePitch[1] = v.vintageCutoff = 0;
+        v.vintageTime[0] = v.vintageTime[1] = v.vintageTime[2] = 0;
+        v.driftFrom = v.driftTo = 0;
+    }
     for (int o = 0; o < 2; ++o) {
         const int b = o == 0 ? LY_OSCA_BASE : LY_OSCB_BASE;
         const float start = s->raw[b + LY_OSC_PHASE];
@@ -1713,14 +1768,55 @@ bool isSwitchKey(const LYSynth *s, int note) {
     return note >= root && note < root + LY_PERF_PATTERNS;
 }
 
+bool isMono(const LYSynth *s) { return (int)std::lround(s->raw[LY_VOICES]) <= 1; }
+
+/// The held key a mono voice should play: the last pressed, the lowest or the highest.
+int monoTarget(const LYSynth *s) {
+    const int priority = (int)std::lround(s->raw[LY_KEY_PRIORITY]);
+    int best = s->monoCount - 1;
+    for (int i = 0; i < s->monoCount; ++i) {
+        if (priority == LY_PRIORITY_LOW && s->monoKeys[i].note < s->monoKeys[best].note) best = i;
+        if (priority == LY_PRIORITY_HIGH && s->monoKeys[i].note > s->monoKeys[best].note) best = i;
+    }
+    return best;
+}
+
+void monoForget(LYSynth *s, int note) {
+    for (int i = 0; i < s->monoCount; ++i) if (s->monoKeys[i].note == note) {
+        for (int j = i; j < s->monoCount - 1; ++j) s->monoKeys[j] = s->monoKeys[j + 1];
+        --s->monoCount;
+        return;
+    }
+}
+
 void noteOnInput(LYSynth *s, const Event &e) {
     if (isSwitchKey(s, e.note)) { s->perfOverride = e.note - (int)std::lround(s->raw[LY_PERF_KEYROOT]); return; }
-    if (arpOn(s)) arpNoteOn(s, e.note, e.velocity & 0xFF);
-    else startVoice(s, e);
+    if (arpOn(s)) { arpNoteOn(s, e.note, e.velocity & 0xFF); return; }
+    if (isMono(s)) {
+        // Remember every key; play it only if it wins the key priority.
+        monoForget(s, e.note);
+        if (s->monoCount < kHeldNotes) s->monoKeys[s->monoCount++] = MonoKey { e.note, e.velocity, e.cutoff, e.resonance };
+        if (s->monoKeys[monoTarget(s)].note == e.note) startVoice(s, e);
+        return;
+    }
+    startVoice(s, e);
 }
 
 void noteOffInput(LYSynth *s, int note, int channel) {
     if (isSwitchKey(s, note)) return;
+    if (!arpOn(s) && isMono(s)) {
+        monoForget(s, note);
+        const Voice &v = s->voices[0];
+        // Letting go of the sounding key with others still held goes back
+        // to the one the key priority picks (legato if LEGATO is on).
+        if (s->monoCount > 0 && v.active && v.gate && !v.fromArp && v.note == note) {
+            const MonoKey &k = s->monoKeys[monoTarget(s)];
+            startVoice(s, Event { 0, k.note, k.velocity, 0, k.cutoff, k.resonance });
+            return;
+        }
+        stopNote(s, note, channel);
+        return;
+    }
     if (arpOn(s)) arpNoteOff(s, note);
     else stopNote(s, note, channel);
 }
@@ -1753,7 +1849,7 @@ void handleMIDI(LYSynth *s, const Event &e) {
             if (!s->sustainPedal) for (auto &v : s->voices) if (v.sustained) releaseVoice(v);
         } else if (d1 == 120 || d1 == 123) {
             s->sustainPedal = false;
-            s->heldCount = 0; s->keysDown = 0;
+            s->heldCount = 0; s->keysDown = 0; s->monoCount = 0;
             arpReleaseSounding(s);
             for (auto &v : s->voices) if (v.gate || v.sustained) releaseVoice(v);
         }
@@ -1769,7 +1865,7 @@ void fire(LYSynth *s, const Event &e) {
     case 3: handleMIDI(s, e); break;
     default:
         s->sustainPedal = false;
-        s->heldCount = 0; s->keysDown = 0;
+        s->heldCount = 0; s->keysDown = 0; s->monoCount = 0;
         arpReleaseSounding(s);
         for (auto &v : s->voices) if (v.gate || v.sustained) releaseVoice(v);
         break;
@@ -2073,10 +2169,16 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
         for (auto &v : s->voices) {
             if (!v.active) continue;
             const float *mod = v.modulation;
+            const float vintage = clamp01(s->raw[LY_VINTAGE]);
+            if (vintage > 0.0005f) {
+                v.driftPhase += v.driftRate * n / s->sampleRate;
+                if (v.driftPhase >= 1.0) { v.driftPhase -= 1.0; v.driftFrom = v.driftTo; v.driftTo = s->random.bipolar(); }
+            }
             for (int k = 0; k < 4; ++k) {
                 const int b = LY_ENV1_A + k * 4;
                 const int c = LY_ENV1_ACURVE + k * 3;
                 float a = s->smoothed[b], d = s->smoothed[b + 1], rel = s->smoothed[b + 3];
+                if (vintage > 0.0005f) { a += vintage * v.vintageTime[0]; d += vintage * v.vintageTime[1]; rel += vintage * v.vintageTime[2]; }
                 if (k == 0) { a += mod[LY_DST_ENV1_ATTACK]; d += mod[LY_DST_ENV1_DECAY]; rel += mod[LY_DST_ENV1_RELEASE]; }
                 if (k == 1) { a += mod[LY_DST_ENV2_ATTACK]; d += mod[LY_DST_ENV2_DECAY]; rel += mod[LY_DST_ENV2_RELEASE]; }
                 v.envelope[k].advance(n, s->sampleRate, clamp01(a), s->raw[LY_ENV1_H + k], clamp01(d), s->raw[b + 2], clamp01(rel),

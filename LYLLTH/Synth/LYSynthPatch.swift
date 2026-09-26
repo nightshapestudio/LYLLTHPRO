@@ -270,6 +270,12 @@ enum LYSynthParameters {
         add(LY_VOC_HIGHS, "voc.highs", "HIGHS", 0...1)
         add(LY_VOC_GAIN, "voc.gain", "INPUT", 0...1)
         add(LY_VOC_MIX, "voc.mix", "MIX", 0...1)
+        add(LY_VINTAGE, "vintage", "VINTAGE", 0...1)
+        add(LY_FILTER_MORPH_POS, "filter.morph", "MORPH", 0...1)
+        add(LY_F2_MORPH, "filter2.morph", "MORPH", 0...1)
+        add(LY_LADDER_POLES, "ladder.poles", "2-POLE", 0...1, stepped: true)
+        add(LY_LADDER_BASS, "ladder.bass", "BASS LOSS", 0...1)
+        add(LY_KEY_PRIORITY, "priority", "KEY PRIORITY", 0...Float(LY_PRIORITY_COUNT - 1), stepped: true)
         return list
     }()
 
@@ -300,9 +306,10 @@ enum LYSynthNames {
                             LY_WARP_FM, LY_WARP_RM, LY_WARP_AM].map { Int($0) }
     static let unisonModes = ["LINEAR", "SUPER", "EXP", "RANDOM"]
     static let stacks = ["OFF", "+12", "±12", "+7 +12", "+7"]
-    static let filters = ["LP 12", "LP 24", "HP 12", "HP 24", "BAND", "NOTCH", "LADDER", "COMB +", "COMB −", "FORMANT", "PHASER", "BAND 24"]
+    static let filters = ["LP 12", "LP 24", "HP 12", "HP 24", "BAND", "NOTCH", "LADDER", "COMB +", "COMB −", "FORMANT", "PHASER", "BAND 24", "MORPH"]
+    static let priorities = ["LAST", "LOW", "HIGH"]
     static let filterOrder = [LY_FILTER_LP12, LY_FILTER_LP24, LY_FILTER_LADDER, LY_FILTER_HP12, LY_FILTER_HP24, LY_FILTER_BP,
-                              LY_FILTER_BP24, LY_FILTER_NOTCH, LY_FILTER_COMB_POS, LY_FILTER_COMB_NEG, LY_FILTER_FORMANT,
+                              LY_FILTER_BP24, LY_FILTER_NOTCH, LY_FILTER_MORPH, LY_FILTER_COMB_POS, LY_FILTER_COMB_NEG, LY_FILTER_FORMANT,
                               LY_FILTER_PHASER].map { Int($0) }
     static let lfoShapes = ["SINE", "TRI", "SAW ↑", "SAW ↓", "SQUARE", "S + H", "DRIFT", "DRAW"]
     static let lfoModes = ["FREE", "TRIG", "ENV"]
@@ -352,7 +359,8 @@ enum LYSynthNames {
                          (LY_DST_NOISE_COLOR, "NOISE COLOR"), (LY_DST_NOISE_PITCH, "NOISE PITCH"), (LY_DST_NOISE_PAN, "NOISE PAN")].map { (Int($0.0), $0.1) }),
         ("FILTERS", [(LY_DST_CUTOFF, "CUTOFF"), (LY_DST_RES, "RESONANCE"), (LY_DST_DRIVE, "DRIVE"), (LY_DST_FILTER_MIX, "FILTER MIX"),
                      (LY_DST_F2_CUTOFF, "F2 CUTOFF"), (LY_DST_F2_RES, "F2 RES"), (LY_DST_F2_DRIVE, "F2 DRIVE"), (LY_DST_F2_MIX, "F2 MIX"),
-                     (LY_DST_FILTER_PAN, "FILTER PAN"), (LY_DST_FSAT_DRIVE, "SAT DRIVE")].map { (Int($0.0), $0.1) }),
+                     (LY_DST_FILTER_PAN, "FILTER PAN"), (LY_DST_FSAT_DRIVE, "SAT DRIVE"),
+                     (LY_DST_MORPH, "MORPH"), (LY_DST_F2_MORPH, "F2 MORPH")].map { (Int($0.0), $0.1) }),
         ("VOICE FX", [(LY_DST_FEEDBACK, "FEEDBACK"), (LY_DST_FB_TONE, "FEEDBACK TONE"),
                       (LY_DST_INS1_AMOUNT, "INSERT 1 AMOUNT"), (LY_DST_INS1_FREQ, "INSERT 1 FREQ"),
                       (LY_DST_INS2_AMOUNT, "INSERT 2 AMOUNT"), (LY_DST_INS2_FREQ, "INSERT 2 FREQ")].map { (Int($0.0), $0.1) }),

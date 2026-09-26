@@ -47,6 +47,15 @@ optional DC blocker and reverb low cut. (The voice inserts now have their own DC
 - **Vocoder**: 8–24 bands, the synth as carrier and the plug-ins' sidechain
   input as the voice. LYLLTH can't route a track into it yet; that waits for
   the per-document audio engine being built alongside this.
+- **VINTAGE**: each note gets its own oscillator tuning (up to 6 cents), filter
+  offset (up to a quarter octave) and envelope times (±25%), plus a slow drift
+  of up to 4 cents. At 0 nothing changes and no random numbers are drawn.
+- **MORPH filter**: a 12 dB state-variable filter with MORPH from low-pass
+  through a notch to high-pass, per filter and modulatable.
+- **LADDER**: a 2-pole option and BASS LOSS (how much of the low end the
+  ladder gives up as resonance rises), shared by both filters.
+- **Mono key priority**: LAST, LOW or HIGH, and letting go of the playing key
+  returns to one still held (legato if LEGATO is on).
 
 Every new parameter sits after the drawn LFO points, so the plug-ins' host
 parameter ids for older parameters did not move. All 176 factory presets render

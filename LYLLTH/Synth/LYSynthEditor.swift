@@ -593,6 +593,21 @@ struct LYSynthEditor: View {
                 c.knob(env, accent: LYLLTHTheme.indigo, diameter: 24, label: envLabel)
                 c.knob(key, accent: accent, diameter: 24, label: "KEY")
                 c.knob(mix, destinations.3, accent: accent, diameter: 24)
+                let filterType = Int(c.value(type))
+                if filterType == LY_FILTER_MORPH {
+                    c.knob(number == 1 ? LY_FILTER_MORPH_POS : LY_F2_MORPH, number == 1 ? LY_DST_MORPH : LY_DST_F2_MORPH,
+                           accent: accent, diameter: 24, label: "MORPH", format: { v in
+                        v < 0.08 ? "LP" : v > 0.92 ? "HP" : abs(v - 0.5) < 0.05 ? "NOTCH" : String(format: "%.0f%%", v * 100)
+                    })
+                    .help("Low-pass at the left, a notch in the middle, high-pass at the right")
+                } else if filterType == LY_FILTER_LADDER {
+                    VStack(spacing: 3) {
+                        LYSynthToggle(title: c.isOn(LY_LADDER_POLES) ? "2P" : "4P", isOn: true, accent: accent) { c.toggle(LY_LADDER_POLES) }
+                            .help("Four poles (24 dB) or two (12 dB), for both filters' ladder")
+                        c.knob(LY_LADDER_BASS, accent: accent, diameter: 16, label: "BASS", format: { String(format: "%.0f%%", $0 * 100) })
+                            .help("Bass loss as resonance rises, like the analog ladder")
+                    }
+                }
             }
             .opacity(isOn ? 1 : 0.4)
         }
@@ -791,8 +806,17 @@ struct LYSynthEditor: View {
                         c.set(LY_VOICES, c.value(LY_VOICES) + Float(step))
                     }
                     LYSynthToggle(title: "LEGATO", isOn: c.isOn(LY_LEGATO), accent: accent) { c.toggle(LY_LEGATO) }
+                    if Int(c.value(LY_VOICES)) == 1 {
+                        let priority = min(max(Int(c.value(LY_KEY_PRIORITY)), 0), LYSynthNames.priorities.count - 1)
+                        LYSynthToggle(title: LYSynthNames.priorities[priority], isOn: true, accent: accent) {
+                            c.set(LY_KEY_PRIORITY, Float((priority + 1) % LYSynthNames.priorities.count))
+                        }
+                        .help("Which held key the mono voice plays: the last pressed, the lowest or the highest. Click to change")
+                    }
                 }
                 HStack(spacing: 0) {
+                    c.knob(LY_VINTAGE, accent: LYLLTHTheme.lavender, diameter: 26, label: "VINTAGE", format: { String(format: "%.0f%%", $0 * 100) })
+                        .help("Each note gets its own pitch, filter and envelope, and drifts slowly, like an analog poly")
                     c.knob(LY_GLIDE, accent: accent, diameter: 26, format: { String(format: "%.0f MS", $0 * 1000) })
                     c.knob(LY_MODWHEEL, accent: LYLLTHTheme.chromeText, diameter: 26, label: "MOD WHEEL")
                 }

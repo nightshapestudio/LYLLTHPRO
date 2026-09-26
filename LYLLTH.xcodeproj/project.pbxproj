@@ -155,6 +155,7 @@
 		F2D9DF615E644F09E63100B9 /* Adam-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFAB0361C23B88BFF6CA3B3F /* Adam-Medium.ttf */; };
 		F3072584030C31119C4860C6 /* LYLLTHSessionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */; };
 		F3B64D71CED48EEFD02691B4 /* LYRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16D07685D250C91B37E5CD8F /* LYRecorder.swift */; };
+		F466E72CC69A9D3452A50F01 /* LUNATKAnalogFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE54E9104F92142C7384552F /* LUNATKAnalogFeatureTests.swift */; };
 		F5073A5322475A1DCD36C06D /* LYBounce.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26A43024412B8FC79FFECBA7 /* LYBounce.swift */; };
 		F5914CB573EBA8C4B066278D /* OfflineExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6FFC78FDE604528578BAEF /* OfflineExportTests.swift */; };
 		FC8796D60AE99AEA97677A1E /* LYLLTHTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */; };
@@ -303,6 +304,7 @@
 		F8138DCA1A91395B53951A82 /* LYScroller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYScroller.swift; sourceTree = "<group>"; };
 		F9405C470F3A00F3CB1F2855 /* LYSynthInstrument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthInstrument.swift; sourceTree = "<group>"; };
 		FD5B70CF37364E26AC9E2D61 /* LUNATKVST3.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LUNATKVST3.bundle; sourceTree = BUILT_PRODUCTS_DIR; };
+		FE54E9104F92142C7384552F /* LUNATKAnalogFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUNATKAnalogFeatureTests.swift; sourceTree = "<group>"; };
 		FE62624DC1072EDB75314783 /* LYSynthFX.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = LYSynthFX.hpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -476,6 +478,7 @@
 				34B68857B9AC741B4807DC37 /* ExportTests.swift */,
 				6754E858FAFCB69DCFFDB723 /* FactoryBankTests.swift */,
 				6F6FDEB2771DB26C743DA3A2 /* FKitTests.swift */,
+				FE54E9104F92142C7384552F /* LUNATKAnalogFeatureTests.swift */,
 				173F297644479B0758C8F0A2 /* LUNATKBankRenderTests.swift */,
 				3452F5778039C9C7CCB82DC9 /* LUNATKFeatureTests.swift */,
 				84AE0F65DFC17746EDC090A3 /* LUNATKTests.swift */,
@@ -908,6 +911,7 @@
 				154CFDC4030483427D92BCE8 /* ExportTests.swift in Sources */,
 				DFCE1678A800ACE606F90D11 /* FKitTests.swift in Sources */,
 				33D122DA12E5EDB99EC07FC3 /* FactoryBankTests.swift in Sources */,
+				F466E72CC69A9D3452A50F01 /* LUNATKAnalogFeatureTests.swift in Sources */,
 				6B4BF4D2FD74FB3868170070 /* LUNATKBankRenderTests.swift in Sources */,
 				63B60A0D56425120868D633F /* LUNATKFeatureTests.swift in Sources */,
 				7759F7B9F7F7186B3C840682 /* LUNATKTests.swift in Sources */,

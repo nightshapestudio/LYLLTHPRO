@@ -285,6 +285,7 @@ enum LUNATKVSTNames {
             if section == "fb" { return "FEEDBACK" }
             if section == "fsat" { return "FILTER SATURATION" }
             if section == "voc" { return "VOCODER" }
+            if section == "ladder" { return "LADDER" }
             if section == "perf" { return "PERFORMERS" }
             if section.hasPrefix("ins") { return "INSERT " + section.dropFirst(3) }
             if section.hasPrefix("perf") { return "PERFORMER " + section.dropFirst(4) }

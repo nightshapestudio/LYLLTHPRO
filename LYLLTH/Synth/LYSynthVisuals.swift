@@ -162,7 +162,7 @@ struct LYFilterCurve: View {
     let patch: LYSynthPatch
     @ObservedObject var live: LYSynthLive
 
-    static func magnitude(type: Int, hz: Double, cutoff: Double, res: Double) -> Double {
+    static func magnitude(type: Int, hz: Double, cutoff: Double, res: Double, morph: Double = 0) -> Double {
         let w = hz / cutoff
         let w2 = w * w
         let k = 2 - 1.97 * res, k2 = 2 - 1.2 * res
@@ -175,6 +175,10 @@ struct LYFilterCurve: View {
         case LY_FILTER_BP: return (w * k) / den(k)
         case LY_FILTER_BP24: return ((w * k) / den(k)) * ((w * k2) / den(k2))
         case LY_FILTER_NOTCH: return abs(1 - w2) / den(k)
+        case LY_FILTER_MORPH:
+            // Low-pass and high-pass summed: (a - b·w²) over the same denominator.
+            let a = min(1, 2 * (1 - morph)), b = min(1, 2 * morph)
+            return abs(a - b * w2) / den(k)
         case LY_FILTER_LADDER: return (1 / den(2 - 1.95 * res)) * (1 / den(2))
         case LY_FILTER_COMB_POS, LY_FILTER_COMB_NEG:
             // Peaks (or notches) at every multiple of the cutoff.
@@ -220,12 +224,14 @@ struct LYFilterCurve: View {
             }
             let c1 = cutoff(LY_FILTER_CUTOFF, live: live.display.cutoffHz), c2 = cutoff(LY_F2_CUTOFF, live: live.display.cutoff2Hz)
             func one(_ hz: Double) -> Double {
-                let m = Self.magnitude(type: Int(patch.value(LY_FILTER_TYPE)), hz: hz, cutoff: c1, res: Double(patch.value(LY_FILTER_RES)))
+                let m = Self.magnitude(type: Int(patch.value(LY_FILTER_TYPE)), hz: hz, cutoff: c1, res: Double(patch.value(LY_FILTER_RES)),
+                                       morph: Double(patch.value(LY_FILTER_MORPH_POS)))
                 let mix = Double(patch.value(LY_FILTER_MIX))
                 return 1 + (m - 1) * mix
             }
             func two(_ hz: Double) -> Double {
-                let m = Self.magnitude(type: Int(patch.value(LY_F2_TYPE)), hz: hz, cutoff: c2, res: Double(patch.value(LY_F2_RES)))
+                let m = Self.magnitude(type: Int(patch.value(LY_F2_TYPE)), hz: hz, cutoff: c2, res: Double(patch.value(LY_F2_RES)),
+                                       morph: Double(patch.value(LY_F2_MORPH)))
                 let mix = Double(patch.value(LY_F2_MIX))
                 return 1 + (m - 1) * mix
             }
