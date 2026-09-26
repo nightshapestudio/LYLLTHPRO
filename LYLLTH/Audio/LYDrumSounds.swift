@@ -52,12 +52,14 @@ enum LYDrumSounds {
 
     /// The preset rendered to a WAV, rendering only if it is not cached. The
     /// file name carries a hash of the preset, so an edited preset re-renders.
+    /// Rendered at DrumKit's level: measured reference presets come out of the
+    /// synth 30 dB down and only reach level through normalization.
     static func renderedFile(for preset: DrumSynthPreset) async throws -> URL {
         let data = (try? JSONEncoder().encode(preset)) ?? Data()
-        let url = folder.appendingPathComponent("\(preset.id)-\(abs(data.hashValue & 0xFFFFFFF)).wav")
+        let url = folder.appendingPathComponent("\(preset.id)-n\(abs(data.hashValue & 0xFFFFFFF)).wav")
         if FileManager.default.fileExists(atPath: url.path) { return url }
         return try await Task.detached(priority: .userInitiated) {
-            let result = try DrumSynthRenderer.renderPresetToBuffer(preset)
+            let result = try DrumSynthRenderer.renderPresetToBuffer(preset, normalize: true)
             guard let buffer = result.makePCMBuffer(stereo: true) else { throw CocoaError(.fileWriteUnknown) }
             let file = try AVAudioFile(forWriting: url, settings: buffer.format.settings,
                                        commonFormat: .pcmFormatFloat32, interleaved: false)
@@ -70,7 +72,7 @@ enum LYDrumSounds {
     /// A short render for the browser's audition.
     static func auditionBuffer(for preset: DrumSynthPreset) async -> AVAudioPCMBuffer? {
         await Task.detached(priority: .userInitiated) {
-            (try? DrumSynthRenderer.renderPresetToBuffer(preset, maxDuration: 3))?.makePCMBuffer(stereo: true)
+            (try? DrumSynthRenderer.renderPresetToBuffer(preset, normalize: true, maxDuration: 3))?.makePCMBuffer(stereo: true)
         }.value
     }
 }

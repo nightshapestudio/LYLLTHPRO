@@ -52,6 +52,9 @@ enum LYDemoSong {
         let sound: String
         var volumeDB: Double
         var pan: Double = 0
+        /// LUNATK's MACRO 4 (GRIT): 0 is the preset as designed.
+        var grit: Float = 0
+        var fx: LYFXRack? = nil
         var notes: [LYNote] = []
 
         mutating func add(_ pitch: Int, at beat: Double, length: Double, velocity: Int = 100) {
@@ -81,6 +84,7 @@ enum LYDemoSong {
         var volumeDB: Double
         var pan: Double = 0
         var chokeGroup: Int? = nil
+        var fx: LYFXRack? = nil
         /// Velocity (0…1) by song step (a sixteenth).
         var hits: [Int: Double] = [:]
 
@@ -91,13 +95,13 @@ enum LYDemoSong {
     }
 
     static func drums() -> [DrumPart] {
-        var kick = DrumPart(name: "KICK", preset: "kick_045", volumeDB: -9)          // DARK POP K
-        var snare = DrumPart(name: "SNARE", preset: "snare_043", volumeDB: -12)       // DARK POP SNR
-        var clap = DrumPart(name: "CLAP", preset: "clap_012", volumeDB: -15, pan: 0.05)   // DARK CLAP
-        var hats = DrumPart(name: "HATS", preset: "closedhat_006", volumeDB: -20, pan: 0.2)  // CHARCOAL
+        var kick = DrumPart(name: "KICK", preset: "user_nit_kick", volumeDB: -9, fx: FX.kick)       // CHARGED KICK
+        var snare = DrumPart(name: "SNARE", preset: "user_nit_snare", volumeDB: -12, fx: FX.snare)  // CHARGED SNARE
+        var clap = DrumPart(name: "CLAP", preset: "clap_012", volumeDB: -15, pan: 0.05, fx: FX.tape(0.5))   // DARK CLAP
+        var hats = DrumPart(name: "HATS", preset: "closedhat_006", volumeDB: -20, pan: 0.2, fx: FX.tape(0.45))  // CHARCOAL
         var shaker = DrumPart(name: "CHAINS", preset: "closedhat_017", volumeDB: -24, pan: -0.25)  // CHAINLINK
-        var metal = DrumPart(name: "METAL", preset: "perc_010", volumeDB: -19, pan: -0.1)   // METAL STAB
-        var impact = DrumPart(name: "IMPACT", preset: "tom_003", volumeDB: -14)       // THUNDER
+        var metal = DrumPart(name: "METAL", preset: "perc_010", volumeDB: -19, pan: -0.1, fx: FX.decimated(0.35))   // METAL STAB
+        var impact = DrumPart(name: "IMPACT", preset: "tom_003", volumeDB: -14, fx: FX.tape(0.6))       // THUNDER
 
         // Intro: the kick arrives half-way, then a pulse of hats.
         for bar in 4..<8 {
@@ -219,15 +223,16 @@ enum LYDemoSong {
         var track = LYTrack(name: part.name, kind: .drumkit, accent: accent, volumeDB: part.volumeDB, pan: part.pan, clips: clips)
         track.drumPresetID = part.preset
         track.chokeGroup = part.chokeGroup
+        track.fx = part.fx
         return track
     }
 
     // MARK: Bass
 
     static func bass() -> [Part] {
-        var sub = Part(name: "SUB", sound: "WOUND SUB", volumeDB: -12)
-        var drive = Part(name: "BASS", sound: "RUSTED PISTON", volumeDB: -13)
-        var stutter = Part(name: "STUTTER", sound: "SEIZURE", volumeDB: -16)
+        var sub = Part(name: "SUB", sound: "WOUND SUB", volumeDB: -12, fx: FX.tape(0.35))
+        var drive = Part(name: "BASS", sound: "RUSTED PISTON", volumeDB: -13, grit: 0.45, fx: FX.amp(0.55))
+        var stutter = Part(name: "STUTTER", sound: "SEIZURE", volumeDB: -16, grit: 0.5)
 
         func subRoot(_ root: Int) -> Int { root - 12 >= 26 ? root - 12 : root }
 
@@ -270,10 +275,10 @@ enum LYDemoSong {
     // MARK: Chords, arp, pluck
 
     static func harmony() -> [Part] {
-        var pad = Part(name: "PAD", sound: "ASH CATHEDRAL", volumeDB: -15)
-        var saws = Part(name: "SAWS", sound: "NERVE FIELD", volumeDB: -11)
-        var arp = Part(name: "ARP", sound: "PULSE WOUND", volumeDB: -16, pan: 0.2)
-        var pluck = Part(name: "GLASS", sound: "GLASS SHARD", volumeDB: -15, pan: -0.25)
+        var pad = Part(name: "PAD", sound: "WET CONCRETE", volumeDB: -15, grit: 0.3, fx: FX.tape(0.4))
+        var saws = Part(name: "SAWS", sound: "NERVE FIELD", volumeDB: -11, grit: 0.55, fx: FX.tape(0.5))
+        var arp = Part(name: "ARP", sound: "MACHINE LOOM", volumeDB: -16, pan: 0.2, grit: 0.4)
+        var pluck = Part(name: "GLASS", sound: "RAZOR PLUCK", volumeDB: -15, pan: -0.25, grit: 0.4, fx: FX.decimated(0.25))
 
         // Pad: under intro, verses, bridge and outro, a bar per chord.
         for bar in barsOf(["INTRO", "VERSE 1", "VERSE 2", "OUTRO"]) {
@@ -353,11 +358,11 @@ enum LYDemoSong {
     ]
 
     static func melody() -> [Part] {
-        var voice = Part(name: "LEAD", sound: "GLASS NERVE", volumeDB: -10)
-        var hookLead = Part(name: "HOOK", sound: "SCAR TISSUE", volumeDB: -5)
-        var hookHigh = Part(name: "HOOK HIGH", sound: "HOLLOW CRY", volumeDB: -16, pan: 0.15)
-        var scream = Part(name: "SCREAM", sound: "SCREAMING WIRE", volumeDB: -14)
-        var piano = Part(name: "PIANO", sound: "BURNT PIANO", volumeDB: -15, pan: -0.1)
+        var voice = Part(name: "LEAD", sound: "DEAD FREQUENCY", volumeDB: -10, grit: 0.35)
+        var hookLead = Part(name: "HOOK", sound: "TORN SIREN", volumeDB: -5, grit: 0.45, fx: FX.amp(0.4))
+        var hookHigh = Part(name: "HOOK HIGH", sound: "CATHODE", volumeDB: -16, pan: 0.15, grit: 0.4)
+        var scream = Part(name: "SCREAM", sound: "SCREAMING WIRE", volumeDB: -14, grit: 0.6)
+        var piano = Part(name: "PIANO", sound: "SCORCHED EP", volumeDB: -15, pan: -0.1, grit: 0.35)
 
         func play(_ phrase: Phrase, into part: inout Part, at bar: Int, transpose: Int = 0, velocity: Int = 100, until: Double = .infinity) {
             for (start, length, pitch) in phrase where start < until {
@@ -400,7 +405,6 @@ enum LYDemoSong {
     static func effects() -> [Part] {
         var ghosts = Part(name: "RADIO", sound: "RADIO GHOSTS", volumeDB: -23, pan: 0.1)
         var riser = Part(name: "RISER", sound: "TENSION RISER", volumeDB: -18)
-        var drop = Part(name: "DROP", sound: "SUB DROP", volumeDB: -17)
         var stop = Part(name: "TAPE STOP", sound: "TAPE STOP", volumeDB: -19)
 
         ghosts.add(60, at: 0, length: beat(8) - 0.5, velocity: 90)
@@ -409,10 +413,9 @@ enum LYDemoSong {
             let s = section(name)
             riser.add(60, at: beat(s.bar + s.bars - 2), length: 8, velocity: 110)
         }
-        for name in ["CHORUS 1", "CHORUS 3"] { drop.add(41, at: beat(section(name).bar), length: 2, velocity: 110) }
         // Chorus 2 grinds to a halt into the bridge.
         stop.chord(Fm.voicing, at: beat(section("BRIDGE").bar - 1, 2), length: 1.95, velocity: 100)
-        return [ghosts, riser, drop, stop]
+        return [ghosts, riser, stop]
     }
 
     // MARK: Session
@@ -433,7 +436,10 @@ enum LYDemoSong {
             clips.append(LYClip(name: s.name, kind: .notes, startBeat: start, lengthBeats: end - start, notes: notes, noteLoopBeats: end - start))
         }
         var track = LYTrack(name: part.name, kind: .instrument, accent: accent, volumeDB: part.volumeDB, pan: part.pan, clips: clips)
-        track.synth = LYSynthPatch.factory(named: part.sound)
+        var patch = LYSynthPatch.factory(named: part.sound)
+        if part.grit > 0 { patch?.set(LY_MACRO4, part.grit) }
+        track.synth = patch
+        track.fx = part.fx
         return track
     }
 
@@ -446,7 +452,7 @@ enum LYDemoSong {
         let first = tracks.count
         tracks += parts.enumerated().map { index, part in track(part, accent: accents[(first + index) % accents.count]) }
         tracks.append(LYTrack(name: "VOCAL", kind: .audio, accent: accents[tracks.count % accents.count], volumeDB: -6, inputName: "INPUT 1"))
-        return LYLLTHSession(
+        var session = LYLLTHSession(
             name: title,
             bpm: bpm,
             numerator: 4,
@@ -459,6 +465,101 @@ enum LYDemoSong {
             arrangementEditor: .default,
             tracks: tracks
         )
+        session.mainFX = FX.main
+        return session
+    }
+
+    // MARK: Effects
+
+    /// The inserts that take the demo off the clean synth-pop shelf: tape and
+    /// amp drive on the parts, glue and loudness on MAIN.
+    enum FX {
+        static func tape(_ drive: Float, mix: Float = 0.9) -> LYFXRack {
+            var rack = LYFXRack()
+            var tape = TapeSaturationState()
+            tape.tapeType = 2
+            tape.drive = drive
+            tape.mix = mix
+            tape.isBypassed = false
+            rack.tape = tape
+            rack.order = [.eq, .comp, .tape, .reverb]
+            return rack
+        }
+
+        /// Amp and cabinet, blended so the part keeps its low end.
+        static func amp(_ mix: Float) -> LYFXRack {
+            var rack = LYFXRack()
+            var cab = CabinetState()
+            cab.voice = 2
+            cab.cab = 1
+            cab.drive = 0.55
+            cab.mix = mix
+            cab.isBypassed = false
+            rack.cabinet = cab
+            rack.order = [.eq, .comp, .cabinet, .reverb]
+            return rack
+        }
+
+        static func decimated(_ amount: Float) -> LYFXRack {
+            var rack = tape(0.35)
+            var decimator = DecimatorState()
+            decimator.destroy = amount
+            decimator.crush = amount * 0.6
+            decimator.isBypassed = false
+            rack.decimator = decimator
+            rack.order = [.eq, .comp, .tape, .decim, .reverb]
+            return rack
+        }
+
+        static var kick: LYFXRack {
+            var rack = tape(0.55, mix: 1)
+            rack.compressor = punch(threshold: -10, attack: 18, release: 90, distortion: .soft)
+            return rack
+        }
+
+        static var snare: LYFXRack {
+            var rack = tape(0.6, mix: 1)
+            rack.compressor = punch(threshold: -14, attack: 6, release: 110, distortion: .hard)
+            return rack
+        }
+
+        static func punch(threshold: Float, attack: Float, release: Float,
+                          distortion: CompressorCharacter.Distortion) -> CompressorState {
+            var comp = CompressorState()
+            comp.threshold = threshold
+            comp.ratio = 4
+            comp.attackMilliseconds = attack
+            comp.releaseMilliseconds = release
+            comp.circuit = .fet
+            comp.distortion = distortion
+            comp.makeup = 3
+            comp.isBypassed = false
+            return comp
+        }
+
+        /// MAIN: mud out, air in, glued by the bus compressor, driven into
+        /// tape and brought up to level by the limiter.
+        static var main: LYFXRack {
+            var rack = tape(0.3, mix: 0.7)
+            var bands = LYFXRack.defaultBands
+            bands[0].gain = 1.5
+            bands[1].gain = -2.5
+            bands[3].gain = 1.5
+            bands[4].gain = 3
+            rack.eqBands = bands
+            var comp = punch(threshold: -18, attack: 20, release: 160, distortion: .off)
+            comp.ratio = 2
+            comp.circuit = .vca
+            comp.makeup = 2
+            rack.compressor = comp
+            var finale = FinaleState()
+            finale.mode = 2
+            finale.gainDb = 3
+            finale.isBypassed = false
+            rack.finale = finale
+            rack.order = [.eq, .comp, .tape, .reverb, .finale]
+            return rack
+        }
     }
 }
 
