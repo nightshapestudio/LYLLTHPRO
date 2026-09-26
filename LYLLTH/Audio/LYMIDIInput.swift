@@ -20,6 +20,9 @@ final class LYMIDIInput: ObservableObject {
     nonisolated(unsafe) private var target: LYSynthInstrument?
     /// Set while recording: every channel message, with its host time.
     nonisolated(unsafe) var recordHandler: ((UInt8, UInt8, UInt8, UInt64) -> Void)?
+    /// Plays notes on a track that has no LUNATK (a DrumKit drum or synth
+    /// track). Called on the main thread with note-ons only: (note, velocity).
+    nonisolated(unsafe) var fallback: ((UInt8, UInt8) -> Void)?
 
     func start() {
         guard !started else { return }
@@ -34,9 +37,22 @@ final class LYMIDIInput: ObservableObject {
         connectAllSources()
     }
 
-    func setTarget(_ instrument: LYSynthInstrument?) {
+    func setTarget(_ instrument: LYSynthInstrument?, fallback: ((UInt8, UInt8) -> Void)? = nil) {
         if target !== instrument { target?.allNotesOff() }
         target = instrument
+        self.fallback = instrument == nil ? fallback : nil
+    }
+
+    /// A message from inside LYLLTH (Musical Typing): the same path as a
+    /// hardware keyboard, stamped now.
+    func inject(status: UInt8, data1: UInt8, data2: UInt8) {
+        let now = mach_absolute_time()
+        if let target { lysynth_midi(target.core, status, data1, data2, 0) }
+        recordHandler?(status, data1, data2, now)
+        if status & 0xF0 == 0x90 && data2 > 0 {
+            if target == nil { fallback?(data1, data2) }
+            activity &+= 1
+        }
     }
 
     private func connectAllSources() {
@@ -56,7 +72,7 @@ final class LYMIDIInput: ObservableObject {
     nonisolated private func receive(_ list: UnsafePointer<MIDIEventList>) {
         let target = self.target
         let record = recordHandler
-        guard target != nil || record != nil else { return }
+        guard target != nil || record != nil || fallback != nil else { return }
         var sawNote = false
         for packet in list.unsafeSequence() {
             let host = packet.pointee.timeStamp
@@ -68,6 +84,9 @@ final class LYMIDIInput: ObservableObject {
                 if let target { lysynth_midi(target.core, status, data1, data2, host) }
                 record?(status, data1, data2, host)
                 if status & 0xF0 == 0x90 { sawNote = true }
+                if target == nil, status & 0xF0 == 0x90, data2 > 0, let fallback = self.fallback {
+                    DispatchQueue.main.async { fallback(data1, data2) }
+                }
             }
         }
         if sawNote {

@@ -17,6 +17,7 @@
 		06A90344846ECDF2291B2B70 /* LYSynthFXPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B03D44787926C50EA6A06C6 /* LYSynthFXPage.swift */; };
 		09898A460ACD50AC69E8AB00 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 44A67A0FF10CBC015DE08F8B /* AudioToolbox.framework */; };
 		09F66C919DE67E346C7C14BA /* LYSynthControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC8025D09EE241120C506F1 /* LYSynthControls.swift */; };
+		0A5B888A4A78EF990EB08144 /* MusicalTypingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04497EE3FA78F7DC5711D94A /* MusicalTypingTests.swift */; };
 		0AE3A66A4B0E745106D5B856 /* LUNATKFactory.json in Resources */ = {isa = PBXBuildFile; fileRef = 4FBA588A4436C5289B3966DE /* LUNATKFactory.json */; };
 		0CEC7DBA1215E7248215069A /* LYLLTHTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */; };
 		0F2E7B5C782BAFAFA9C0A000 /* NoteClipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C197A61BD7F9513D6B09D7D3 /* NoteClipTests.swift */; };
@@ -100,6 +101,7 @@
 		9AE7D9A3ED32F70890B747AA /* LYSynthVisuals.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD4ACCE1DB809DEB2FD7914 /* LYSynthVisuals.swift */; };
 		9BCA75BCE51F5A66F18FEBF7 /* Adam-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD2467CDCE9B421E3430FFFE /* Adam-Light.ttf */; };
 		9CEC9247F9086363A88353A1 /* LYWavetableEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0618CFBCAE4DFCA5D4BA204B /* LYWavetableEditor.swift */; };
+		9FA7BD9C3243CE381BEE2210 /* MusicalTyping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F2F2EB003613BEE2E9DD354 /* MusicalTyping.swift */; };
 		A034748AE3041574197C77D8 /* macmain.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 5C54C112F4897B92B51A5243 /* macmain.cpp */; };
 		A1CE8F762ABF6D8CE2DC8135 /* LYFrameClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FF19AFA5BCCFB78BBACFE5 /* LYFrameClock.swift */; };
 		A39C671D6850A084E8B900A9 /* LYSynthPatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EFD5B0EE63778A738F5BBAA /* LYSynthPatch.swift */; };
@@ -187,6 +189,7 @@
 
 /* Begin PBXFileReference section */
 		03B43134989E942D54830A3A /* LYMIDIInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYMIDIInput.swift; sourceTree = "<group>"; };
+		04497EE3FA78F7DC5711D94A /* MusicalTypingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicalTypingTests.swift; sourceTree = "<group>"; };
 		05B62481262297A4782ECA7B /* LYFKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYFKit.swift; sourceTree = "<group>"; };
 		05C3A9FF391869346BFAFED1 /* FXWindowHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXWindowHost.swift; sourceTree = "<group>"; };
 		0618CFBCAE4DFCA5D4BA204B /* LYWavetableEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYWavetableEditor.swift; sourceTree = "<group>"; };
@@ -256,6 +259,7 @@
 		94FF19AFA5BCCFB78BBACFE5 /* LYFrameClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYFrameClock.swift; sourceTree = "<group>"; };
 		95DE102CFAEFE0774BDF2B06 /* SonicDecimatorEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SonicDecimatorEditorView.swift; path = "../nightshape-drumkit-ios/Views/Components/SonicDecimatorEditorView.swift"; sourceTree = "<group>"; };
 		960F211F505A6A045668116C /* LYLLTHTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LYLLTHTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9F2F2EB003613BEE2E9DD354 /* MusicalTyping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicalTyping.swift; sourceTree = "<group>"; };
 		A1957573B0E550787521E811 /* LYLLTH.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LYLLTH.entitlements; sourceTree = "<group>"; };
 		A3622C427AB836F95F83FB66 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A57BE353E11A8378B1B34CC1 /* LYAutomationPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYAutomationPlayer.swift; sourceTree = "<group>"; };
@@ -466,6 +470,7 @@
 				6F6FDEB2771DB26C743DA3A2 /* FKitTests.swift */,
 				173F297644479B0758C8F0A2 /* LUNATKBankRenderTests.swift */,
 				84AE0F65DFC17746EDC090A3 /* LUNATKTests.swift */,
+				04497EE3FA78F7DC5711D94A /* MusicalTypingTests.swift */,
 				C197A61BD7F9513D6B09D7D3 /* NoteClipTests.swift */,
 				1C6FFC78FDE604528578BAEF /* OfflineExportTests.swift */,
 				CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */,
@@ -551,6 +556,7 @@
 				7B5A010271292EDECA656A29 /* DrumKitSequencerVisuals.swift */,
 				24183797B508D69982E65468 /* DrumSoundBrowser.swift */,
 				05C3A9FF391869346BFAFED1 /* FXWindowHost.swift */,
+				9F2F2EB003613BEE2E9DD354 /* MusicalTyping.swift */,
 				C8E87A3876A04F43A520B159 /* PianoRoll.swift */,
 				33626D2FD865653F4F23FAE7 /* SongFXLane.swift */,
 				D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */,
@@ -891,6 +897,7 @@
 				33D122DA12E5EDB99EC07FC3 /* FactoryBankTests.swift in Sources */,
 				6B4BF4D2FD74FB3868170070 /* LUNATKBankRenderTests.swift in Sources */,
 				7759F7B9F7F7186B3C840682 /* LUNATKTests.swift in Sources */,
+				0A5B888A4A78EF990EB08144 /* MusicalTypingTests.swift in Sources */,
 				0F2E7B5C782BAFAFA9C0A000 /* NoteClipTests.swift in Sources */,
 				F5914CB573EBA8C4B066278D /* OfflineExportTests.swift in Sources */,
 				BEDFD504AE4AD5C9E2F9D00E /* SessionDocumentTests.swift in Sources */,
@@ -949,6 +956,7 @@
 				71DD0860BC3BEA2D486A2662 /* LYSynthPatch.swift in Sources */,
 				B63626ABA24F747B3810394F /* LYSynthVisuals.swift in Sources */,
 				9CEC9247F9086363A88353A1 /* LYWavetableEditor.swift in Sources */,
+				9FA7BD9C3243CE381BEE2210 /* MusicalTyping.swift in Sources */,
 				BEF12851075EA3C677715CCD /* NightshapeTheme+macOS.swift in Sources */,
 				F2182A2AF3D1917E59FE6119 /* ParameterResetTap.swift in Sources */,
 				2715202FF2290BB4B30B1DFD /* PianoRoll.swift in Sources */,

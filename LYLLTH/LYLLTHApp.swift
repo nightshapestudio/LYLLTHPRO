@@ -41,6 +41,7 @@ struct LYWorkspaceActions {
     var openDrumKitProject: () -> Void
     var saveDrumKitProject: () -> Void
     var exportSong: () -> Void
+    var toggleMusicalTyping: () -> Void
 }
 
 private struct LYWorkspaceActionsKey: FocusedValueKey {
@@ -77,6 +78,9 @@ struct LYProjectCommands: Commands {
                 .disabled(workspace == nil)
             Button("Arrangement") { workspace?.showArrangement() }
                 .keyboardShortcut("2", modifiers: .command)
+                .disabled(workspace == nil)
+            Button("Musical Typing") { workspace?.toggleMusicalTyping() }
+                .keyboardShortcut("k", modifiers: .command)
                 .disabled(workspace == nil)
             Divider()
         }

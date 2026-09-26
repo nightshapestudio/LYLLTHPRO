@@ -101,6 +101,8 @@ struct LYArrangementKeyMonitor: NSViewRepresentable {
             guard window != nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, let window = self.window, event.window === window else { return event }
+                // Musical Typing owns its keys while it is open.
+                if LYMusicalTyping.claims(event) { return event }
                 return self.action(event) ? nil : event
             }
         }
@@ -156,6 +158,7 @@ struct WorkspaceView: View {
     @State private var fxOriginal: (rack: LYFXRack, reverb: ReverbState?) = (LYFXRack(), nil)
     @State private var fxPickerTarget: FXTarget?
     @State private var synthTrackID: UUID?
+    @State private var showTyping = false
     /// The note clip open in the piano roll: (track, clip).
     @State private var pianoRollClip: (track: UUID, clip: UUID)?
     @State private var drumTrackID: UUID?
@@ -297,6 +300,9 @@ struct WorkspaceView: View {
 
                 pianoRollOverlay
                     .zIndex(179)
+
+                musicalTypingOverlay
+                    .zIndex(182)
 
                 synthEditorOverlay
                     .zIndex(180)
@@ -486,9 +492,22 @@ struct WorkspaceView: View {
     /// the first record-armed synth track.
     private func updateMIDITarget() {
         let tracks = document.session.tracks
-        let target = tracks.first { $0.id == selectedTrackID && $0.synth != nil }
-            ?? tracks.first { $0.isArmed && $0.synth != nil }
-        LYMIDIInput.shared.setTarget(target.flatMap { audio.synthInstrument(for: $0.id) })
+        let musical = { (t: LYTrack) in t.kind == .drumkit || t.kind == .instrument }
+        let target = tracks.first { $0.id == selectedTrackID && musical($0) } ?? tracks.first { $0.isArmed && musical($0) }
+        guard let track = target else { LYMIDIInput.shared.setTarget(nil); return }
+        if track.synth != nil {
+            LYMIDIInput.shared.setTarget(audio.synthInstrument(for: track.id))
+            return
+        }
+        // A DrumKit drum or synth track: each note triggers the channel at
+        // that pitch, relative to the track's root.
+        let session = document.session
+        let engine = audio.engine
+        let root = track.rootNote ?? (track.kind == .drumkit ? 36 : 48)
+        LYMIDIInput.shared.setTarget(nil, fallback: { note, _ in
+            guard let channel = LYFXBridge.engineIndex(for: track.id, in: session) else { return }
+            engine.auditionNote(trackIndex: channel, pitchSemitones: min(max(Int(note) - root, -48), 48))
+        })
     }
 
     /// EXPORT: a real-time bounce of the whole song to WAV.
@@ -1055,8 +1074,43 @@ struct WorkspaceView: View {
             showArrangement: { activeWorkspace = "SONG" },
             openDrumKitProject: openDrumKitProject,
             saveDrumKitProject: saveDrumKitProject,
-            exportSong: presentExport
+            exportSong: presentExport,
+            toggleMusicalTyping: toggleMusicalTyping
         )
+    }
+
+    private func toggleMusicalTyping() {
+        withAnimation(LYLLTHTheme.snap) { showTyping.toggle() }
+        if showTyping { LYMusicalTyping.shared.open() } else { LYMusicalTyping.shared.close() }
+        updateMIDITarget()
+    }
+
+    /// What Musical Typing and a MIDI keyboard play right now.
+    private var playTargetName: String {
+        let tracks = document.session.tracks
+        guard let track = tracks.first(where: { $0.id == selectedTrackID && ($0.kind == .drumkit || $0.kind == .instrument) })
+            ?? tracks.first(where: { $0.isArmed && ($0.kind == .drumkit || $0.kind == .instrument) }) else {
+            return "SELECT A SYNTH OR DRUM TRACK"
+        }
+        return track.name.uppercased() + (track.synth != nil ? "  ·  LUNATK" : track.kind == .drumkit ? "  ·  DRUMS" : "  ·  SYNTH")
+    }
+
+    @ViewBuilder
+    private var musicalTypingOverlay: some View {
+        if showTyping {
+            GeometryReader { geo in
+                LYFloatingWindow(
+                    id: "typing",
+                    title: "MUSICAL TYPING  ·  ⌘K",
+                    accent: LYLLTHTheme.teal,
+                    size: CGSize(width: min(geo.size.width - 32, 760), height: 190),
+                    close: { toggleMusicalTyping() }
+                ) {
+                    LYMusicalTypingPanel(typing: LYMusicalTyping.shared, target: playTargetName, accent: LYLLTHTheme.teal)
+                }
+                .transition(.scale(scale: 0.97).combined(with: .opacity))
+            }
+        }
     }
 
     private func runProjectAction(_ action: ProjectPanel.Action) {
