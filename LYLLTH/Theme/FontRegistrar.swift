@@ -2,10 +2,10 @@ import CoreText
 import Foundation
 
 enum FontRegistrar {
-    static func registerBundledFonts() {
+    static func registerBundledFonts(in bundle: Bundle = .main) {
         let fontURLs = [nil, "Fonts"].flatMap { subdirectory in
-            (Bundle.main.urls(forResourcesWithExtension: "ttf", subdirectory: subdirectory) ?? [])
-                + (Bundle.main.urls(forResourcesWithExtension: "otf", subdirectory: subdirectory) ?? [])
+            (bundle.urls(forResourcesWithExtension: "ttf", subdirectory: subdirectory) ?? [])
+                + (bundle.urls(forResourcesWithExtension: "otf", subdirectory: subdirectory) ?? [])
         }
 
         for url in Set(fontURLs) {
