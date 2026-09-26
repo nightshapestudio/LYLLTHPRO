@@ -28,7 +28,7 @@ final class LYMusicalTyping: ObservableObject {
     private var monitor: Any?
 
     /// Key code to semitone above the octave's C, Logic's layout.
-    static let noteKeys: [UInt16: Int] = [
+    nonisolated static let noteKeys: [UInt16: Int] = [
         0: 0, 13: 1, 1: 2, 14: 3, 2: 4, 3: 5, 17: 6, 5: 7, 16: 8, 4: 9, 32: 10, 38: 11,
         40: 12, 31: 13, 37: 14, 35: 15, 41: 16, 39: 17,
     ]
@@ -37,17 +37,18 @@ final class LYMusicalTyping: ObservableObject {
         0: "A", 1: "W", 2: "S", 3: "E", 4: "D", 5: "F", 6: "T", 7: "G", 8: "Y", 9: "H", 10: "U", 11: "J",
         12: "K", 13: "O", 14: "L", 15: "P", 16: ";", 17: "'",
     ]
-    private static let modKeys: [UInt16: Int] = [20: 0, 21: 1, 23: 2, 22: 3, 26: 4, 28: 5]
+    nonisolated private static let modKeys: [UInt16: Int] = [20: 0, 21: 1, 23: 2, 22: 3, 26: 4, 28: 5]
     /// Z, - and keypad - go down an octave; X, = (+) and keypad + go up.
-    private static let octaveKeys: [UInt16: Int] = [6: -1, 27: -1, 78: -1, 7: 1, 24: 1, 69: 1]
-    private static let controlKeys: Set<UInt16> = Set([8, 9, 48, 18, 19]).union(modKeys.keys).union(octaveKeys.keys)
+    nonisolated private static let octaveKeys: [UInt16: Int] = [6: -1, 27: -1, 78: -1, 7: 1, 24: 1, 69: 1]
+    nonisolated private static let controlKeys: Set<UInt16> = Set([8, 9, 48, 18, 19]).union(modKeys.keys).union(octaveKeys.keys)
 
     var baseNote: Int { (octave + 1) * 12 }
 
     /// Whether a key belongs to Musical Typing right now.
     nonisolated static func claims(_ event: NSEvent) -> Bool {
         guard isOpen, event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
-        if event.window?.firstResponder is NSTextView { return false }
+        // Key events arrive on the main thread.
+        if MainActor.assumeIsolated({ event.window?.firstResponder is NSTextView }) { return false }
         return noteKeys[event.keyCode] != nil || controlKeys.contains(event.keyCode)
     }
     var rangeName: String { LYPianoRoll.name(baseNote) + "–" + LYPianoRoll.name(min(127, baseNote + 17)) }
