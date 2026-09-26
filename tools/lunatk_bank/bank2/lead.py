@@ -345,7 +345,7 @@ def presets():
     p.set("macro2", 0.4)
     p.motion("LFO1", "INS1_FREQ", 0.015)
     p.motion("LFO1", "INS2_AMOUNT", 0.2)
-    echo(p, time="1/4", mix=0.14, feedback=0.35, amount=0.12)
+    echo(p, time="1/4", mix=0.14, feedback=0.26, amount=0.12)
     space(p, 0.14, mode="HALL", decay=0.3)
     grit(p, mode="SOFT", drive=0.4, tone=0.5, amount=0.4, base=0.15)
     p.doc("A saw lead whose shimmering, shifted double drifts in and out of tune with it", "C3–C5",

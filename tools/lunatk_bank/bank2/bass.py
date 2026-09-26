@@ -389,6 +389,7 @@ def presets():
     p.osc(1, level=0.35, wt=0.4, octave=-1)
     p.sub(0.35, "SINE")
     p.filter("LP24", hz=750, res=0.3, keytrack=0.4, env=0.2, drive=0.3)
+    p.filter2("HP12", hz=25)
     p.env(1, a=0.002, d=0.4, s=0.9, r=0.06)
     mono(p)
     velocity(p, 0.45, 0.1)

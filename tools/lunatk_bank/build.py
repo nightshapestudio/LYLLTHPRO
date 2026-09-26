@@ -67,6 +67,12 @@ def load_bank():
         module = importlib.import_module(f"{BANK}." + name)
         presets.extend(module.presets())
     names = [p.name for p in presets]
+    # The app lists the bank beside its original presets; names must not clash.
+    swift = open(os.path.join(ROOT, "LYLLTH", "Synth", "LYSynthPatch.swift")).read()
+    originals = set(__import__("re").findall(r'make\("([^"]+)"', swift)) | {"INIT"}
+    clash = sorted(set(names) & originals)
+    if clash:
+        raise SystemExit(f"names used by the original presets: {clash}")
     dupes = {n for n in names if names.count(n) > 1}
     if dupes:
         raise SystemExit(f"duplicate names: {sorted(dupes)}")
