@@ -38,6 +38,8 @@ LEVELS = os.path.join(HERE, "levels.json")
 RESOURCE = os.path.join(ROOT, "LYLLTH", "Synth", "LUNATKFactory.json")
 DOCS = os.path.join(ROOT, "LUNATK", "FACTORY_BANK.md")
 DERIVED = os.environ.get("LUNATK_DERIVED", os.path.join(ROOT, "build", "DerivedData"))
+# Where movement is heard: plucks and hits move while they decay.
+DEFAULT_WINDOW = {"PLUCK": (0.03, 1.2), "PERC": (0.0, 0.8)}
 MACROS = [(0, 0.0), (0, 1.0), (1, 0.0), (1, 1.0), (2, 0.0), (2, 1.0), (3, 1.0)]
 
 
@@ -142,7 +144,7 @@ def evaluate(p, main, timings):
             fails.append(f"MACRO {index + 1} at {int(value)} peaks at {peak:.1f} dBFS")
     # MOTION must be able to stop the movement.
     if uses_motion(p):
-        w0, w1 = p.test.get("motion_window", (0.8, 4.3))
+        w0, w1 = p.test.get("motion_window", DEFAULT_WINDOW.get(p.category, (0.8, 4.3)))
         still = A.motion_index(r("still"), w0, w1)
         default = A.motion_index(r("pitch"), w0, w1)
         full = A.motion_index(r("moving"), w0, w1)
