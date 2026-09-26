@@ -1,6 +1,6 @@
 # LUNATK factory bank
 
-176 presets. Every one is rendered through the engine in a musical phrase and mixed against a reference arrangement, then gated on loudness, headroom, low end, top end, width, mono fold-down, tails, tuning, macro range, MOTION, velocity and CPU (`tools/lunatk_bank/build.py`).
+177 presets. Every one is rendered through the engine in a musical phrase and mixed against a reference arrangement, then gated on loudness, headroom, low end, top end, width, mono fold-down, tails, tuning, macro range, MOTION, velocity and CPU (`tools/lunatk_bank/build.py`).
 
 ## Macros (every preset)
 
@@ -130,7 +130,7 @@
 | **TWITCH** | A resonant pluck whose accents follow a syncopated pattern locked to the bar | C3–C6 | RHYTHM | Industrial techno, EBM, acid | Straight sixteenth notes; the accents make the groove | Pattern B is on the eighths; MOTION 0 plays every note the same |
 | **PIANO WIRE** | A plucked piano wire: bright, ringing, a little crushed | C3–C6 | FOREGROUND | Gothic, film, industrial | Arpeggios and counterpoint | Rings for half a second; keep patterns open |
 
-## ARP (16)
+## ARP (17)
 
 | Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
 |---|---|---|---|---|---|---|
@@ -150,6 +150,7 @@
 | **SUB MOTOR ARP** | A rolling bass arp with a clean sub under a folded top | C2–C4, sub an octave under | RHYTHM | Industrial techno, EBM, synthwave | Hold two- or three-note shapes low | Dry and mono in the lows; sidechain it to the kick |
 | **ANXIETY** | A tight sixteenth pulse whose filter climbs for four bars and resets: a build that won't stop | C3–C5 | TRANSITION | Trailer, thriller, techno builds | Hold one chord through a four-bar build | The climb is on the song grid; start the chord on the bar |
 | **LOST TRANSMISSION** | An arpeggio caught on a failing radio: band-passed, crushed, drifting off station | C3–C5 | TEXTURE | Trip-hop, film, industrial, hip-hop | Hold chords for two bars | Band-passed: it never touches the bass or the air |
+| **SPECTRUM** | A mono sixteenth arp with its own accent-and-rest pattern: detuned saw and growl through a ladder, folded and flanged | C2–C5 | RHYTHM | Industrial, EBM, darkwave, cyberpunk | Hold a chord; the pattern plays it. MACRO 1 pushes the distortion | Mono with a saw sub: keep the bass out of its way or sidechain it to the kick |
 
 ## MOTION (18)
 

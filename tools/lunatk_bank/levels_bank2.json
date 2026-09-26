@@ -609,6 +609,10 @@
   "master": 1.0,
   "trim": 0.0046
  },
+ "SPECTRUM": {
+  "grit": -0.0645,
+  "master": 0.2999
+ },
  "SPINE CRAWL": {
   "grit": -0.0031,
   "master": 0.2688

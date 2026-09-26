@@ -376,4 +376,115 @@ def presets():
           "Band-passed: it never touches the bass or the air")
     out.append(p)
 
+    out.append(spectrum())
     return out
+
+
+# SPECTRUM, as it was saved in LUNATK (every value kept). Its movement is the
+# arp pattern itself, so it has no MOTION routes of its own.
+SPECTRUM_VALUES = {
+        "a.detune": 0.20256077,
+        "a.fine": 8.8888855,
+        "a.level": 0.8,
+        "a.unison": 5,
+        "a.wtpos": 0.66,
+        "arp.latch": 0,
+        "arp.length12": 0.7,
+        "arp.length13": 0.95,
+        "arp.length14": 0.85,
+        "arp.length3": 0.3,
+        "arp.length6": 0.65,
+        "arp.length9": 0.8,
+        "arp.level1": 0,
+        "arp.level10": 0.45,
+        "arp.level12": 0.6,
+        "arp.level13": 0,
+        "arp.level15": 0,
+        "arp.level3": 1,
+        "arp.level4": 0,
+        "arp.level5": 1,
+        "arp.level7": 0,
+        "arp.level8": 1,
+        "arp.mode": 0,
+        "arp.octaves": 1,
+        "arp.on": 1,
+        "arp.rate": 0.72860867,
+        "arp.steps": 16,
+        "arp.swing": 0,
+        "b.fine": 19.08854,
+        "b.level": 0.35,
+        "b.on": 1,
+        "b.unison": 2,
+        "b.wtpos": 0.4,
+        "chorus.feedback": 0.20978732,
+        "chorus.mode": 1,
+        "chorus.on": 1,
+        "comp.depth": 0.4,
+        "comp.mode": 1,
+        "comp.on": 1,
+        "delay.mix": 0.021831606,
+        "delay.on": 1,
+        "dist.drive": 1,
+        "dist.mix": 0.6,
+        "dist.mode": 4,
+        "dist.on": 1,
+        "env1.a": 0.01,
+        "env1.d": 0.4,
+        "env1.r": 0.2,
+        "env1.s": 0.9,
+        "env2.a": 0.01,
+        "env2.d": 0.38,
+        "env2.h": 0.2,
+        "env2.s": 0.1,
+        "filter.cutoff": 0.61085504,
+        "filter.drive": 0.35,
+        "filter.envamt": 0.32,
+        "filter.res": 0.35,
+        "filter.routeSub": 0,
+        "filter.type": 6,
+        "flanger.depth": 0.73736984,
+        "flanger.feedback": 0.72738713,
+        "flanger.mix": 0.37424046,
+        "flanger.on": 1,
+        "glide": 0.05,
+        "glideAlways": 0,
+        "ins1.amount": 0.6229384,
+        "ins1.type": 4,
+        "legato": 1,
+        "master": 0.6,
+        "mx0.amt": 0.5,
+        "mx0.aux": 0,
+        "mx0.bi": 0,
+        "mx0.curve": 0,
+        "mx0.dst": 52,
+        "mx0.src": 11,
+        "perf1.a.v6": 1,
+        "phaser.on": 0,
+        "reverb.mix": 0.13350695,
+        "reverb.mode": 1,
+        "reverb.on": 0,
+        "sub.level": 0.45,
+        "sub.on": 1,
+        "sub.shape": 3,
+        "voices": 1,
+}
+
+
+def spectrum():
+    p = A("SPECTRUM", "BASIC", "GROWL")
+    for key, value in SPECTRUM_VALUES.items():
+        p.set(key, value)
+    # The saved sound had its macros at the core's 0; keep them there.
+    for m in (1, 2, 3, 4):
+        p.set(f"macro{m}", 0.0)
+    # Two factory fixes, both below what you hear: the lopsided lin-fold
+    # distortion throws DC that pulses with the pattern (a 25 Hz high-pass at
+    # the end of the rack removes it), and the chorus spread the lows.
+    p.fxfilter(type="HP", cut=0.0323, res=0.0, drive=0.0, mix=1.0)
+    p.set("chorus.width", 0.4)
+    p.context(still=True)
+    p.doc("A mono sixteenth arp with its own accent-and-rest pattern: detuned saw and growl through a ladder, folded and flanged",
+          "C2–C5", "Industrial, EBM, darkwave, cyberpunk",
+          "Hold a chord; the pattern plays it. MACRO 1 pushes the distortion", "RHYTHM",
+          "Mono with a saw sub: keep the bass out of its way or sidechain it to the kick")
+    return p
