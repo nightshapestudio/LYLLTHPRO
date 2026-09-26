@@ -1,0 +1,184 @@
+{
+ "BIT RELIC": {
+  "grit": 0.0,
+  "master": 0.8113
+ },
+ "BRAKE 808": {
+  "grit": -0.1186,
+  "master": 0.4739
+ },
+ "CABLE GROWL": {
+  "grit": -0.0728,
+  "master": 0.612
+ },
+ "CATHEDRAL LOW": {
+  "grit": -0.2456,
+  "master": 0.891,
+  "trim": 0.0689
+ },
+ "CORRODED REESE": {
+  "grit": 0.0,
+  "master": 0.4715
+ },
+ "CORROSION ACID": {
+  "grit": -0.2515,
+  "master": 0.8862,
+  "trim": 0.1329
+ },
+ "CORROSION LEAD": {
+  "grit": -0.2587,
+  "master": 1.0,
+  "trim": 0.1329
+ },
+ "DARK MATTER": {
+  "grit": 0.0,
+  "master": 0.7722
+ },
+ "DEGRADED LOOP": {
+  "grit": 0.0,
+  "master": 0.9626
+ },
+ "DIESEL": {
+  "grit": -0.288,
+  "master": 0.6782
+ },
+ "DRIFT MONO": {
+  "grit": -0.2455,
+  "master": 0.7766
+ },
+ "FOLDBACK": {
+  "grit": -0.2232,
+  "master": 0.7645
+ },
+ "FORMANT CRY": {
+  "grit": -0.3988,
+  "master": 0.9252,
+  "trim": 0.012
+ },
+ "FRAGILE SINE": {
+  "grit": -0.2458,
+  "master": 0.7975
+ },
+ "FURNACE SCREAM": {
+  "grit": -0.0263,
+  "master": 0.7753
+ },
+ "GHOST VOWEL": {
+  "grit": -0.251,
+  "master": 0.9396
+ },
+ "GLASS FLOOR": {
+  "grit": -0.2388,
+  "master": 0.7371
+ },
+ "GLASS VOICE": {
+  "grit": -0.1754,
+  "master": 0.6366
+ },
+ "GRINDER": {
+  "grit": -0.1327,
+  "master": 0.5704
+ },
+ "HOLLOW PULSE": {
+  "grit": -0.3817,
+  "master": 0.8852,
+  "trim": 0.0612
+ },
+ "HOLLOW REED": {
+  "grit": -0.2049,
+  "master": 0.7436
+ },
+ "IRON SUB": {
+  "grit": -0.29,
+  "master": 0.7295
+ },
+ "LUNAR SUPERLEAD": {
+  "grit": -0.2406,
+  "master": 0.761
+ },
+ "MACHINE HEART": {
+  "grit": -0.4721,
+  "master": 0.8869,
+  "trim": 0.1189
+ },
+ "NEEDLE LAYER": {
+  "grit": -0.3935,
+  "master": 0.85,
+  "trim": 0.0363
+ },
+ "NEON PULSE": {
+  "grit": -0.2742,
+  "master": 0.8083
+ },
+ "OCTAVE PUNCH": {
+  "grit": -0.3621,
+  "master": 0.8808
+ },
+ "ORGAN FLOOR": {
+  "grit": -0.4902,
+  "master": 0.886,
+  "trim": 0.1882
+ },
+ "PISTON": {
+  "grit": -0.394,
+  "master": 0.9916,
+  "trim": 0.008
+ },
+ "PRESSURE LINE": {
+  "grit": -0.2707,
+  "master": 0.7061
+ },
+ "RUST PULSE": {
+  "grit": -0.1779,
+  "master": 0.9999,
+  "trim": 0.1352
+ },
+ "RUST THEREMIN": {
+  "grit": -0.3884,
+  "master": 0.9008
+ },
+ "SEARING WIRE": {
+  "grit": -0.0631,
+  "master": 0.3369
+ },
+ "SHATTERED WHISTLE": {
+  "grit": 0.0,
+  "master": 0.638
+ },
+ "SIGNAL FM": {
+  "grit": -0.2911,
+  "master": 0.665
+ },
+ "SIGNAL HORN": {
+  "grit": -0.2514,
+  "master": 0.7097
+ },
+ "SLAB": {
+  "grit": -0.29,
+  "master": 0.8747,
+  "trim": 0.1313
+ },
+ "STEEL FLUTE": {
+  "grit": -0.1083,
+  "master": 0.5509
+ },
+ "SYNC SNARL": {
+  "grit": -0.1295,
+  "master": 0.4846
+ },
+ "TAPE BASS": {
+  "grit": -0.399,
+  "master": 0.8858,
+  "trim": 0.0975
+ },
+ "VELVET SUB": {
+  "grit": -0.3926,
+  "master": 0.8843,
+  "trim": 0.0505
+ },
+ "WIRE FUNK": {
+  "grit": -0.3381,
+  "master": 0.8821,
+  "trim": 0.0969
+ }
+}
