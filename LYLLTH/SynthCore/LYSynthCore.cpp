@@ -1673,6 +1673,7 @@ float arpFireStep(LYSynth *s) {
     // PATTERN: each step's level scales the velocity (0 rests, and the note
     // order waits for the next played step); its length replaces GATE.
     float level = 1.f;
+    int transpose = 0;
     float gate = clampf(s->raw[LY_ARP_GATE], 0.05f, 1.f);
     const int patternSteps = std::max(0, std::min((int)LY_ARP_PATTERN_STEPS, (int)std::lround(s->raw[LY_ARP_STEPS])));
     if (patternSteps > 0) {
@@ -1680,10 +1681,13 @@ float arpFireStep(LYSynth *s) {
         s->arpPatternPos = (s->arpPatternPos + 1) % patternSteps;
         level = clamp01(s->raw[LY_ARP_LEVEL_BASE + i]);
         gate = clampf(s->raw[LY_ARP_LENGTH_BASE + i], 0.05f, 1.f);
+        // TRANSPOSE moves whatever note this step would play.
+        transpose = std::max(-24, std::min(24, (int)std::lround(s->raw[LY_ARP_TRANSPOSE_BASE + i])));
         if (level < 0.01f) { s->arpStep = s->arpStep < 0 ? 0 : s->arpStep + 1; return 0; }
     }
-    auto play = [s, level](int note, int velocity) {
+    auto play = [s, level, transpose](int note, int velocity) {
         velocity = std::max(1, std::min(127, (int)std::lround(velocity * level)));
+        note = std::max(0, std::min(127, note + transpose));
         startVoice(s, Event { 0, note, velocity, 0, 1.f, 0.f }, true);
         if (s->arpSoundingCount < kHeldNotes * 4) s->arpSounding[s->arpSoundingCount++] = note;
     };

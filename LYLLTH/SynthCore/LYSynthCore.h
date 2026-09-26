@@ -263,7 +263,9 @@ enum {
     LY_LADDER_BASS,     // 0…1: bass loss as resonance rises (0 keeps the lows)
     LY_KEY_PRIORITY,    // LY_PRIORITY_*: which held key a mono voice plays
 
-    LY_PARAM_COUNT
+    // Arp pattern: each step's transpose, -24…24 semitones.
+    LY_ARP_TRANSPOSE_BASE,
+    LY_PARAM_COUNT = LY_ARP_TRANSPOSE_BASE + 16
 };
 enum { LY_PRIORITY_LAST = 0, LY_PRIORITY_LOW, LY_PRIORITY_HIGH, LY_PRIORITY_COUNT };
 enum { LY_ARP_PATTERN_STEPS = 16 };

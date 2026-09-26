@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - ARP
 
@@ -22,7 +23,7 @@ struct LYSynthArpPage: View {
                         .frame(maxHeight: .infinity)
                         .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
                     AnyView(LYArpPatternEditor(context: c, accent: accent))
-                        .frame(height: 118)
+                        .frame(height: 150)
                     HStack(alignment: .center, spacing: 14) {
                         c.choice(LY_ARP_MODE, label: "MODE", names: LYSynthNames.arpModes, accent: accent, columns: 2, width: 240, anchor: "arpMode")
                             .frame(width: 130)
@@ -134,17 +135,57 @@ struct LYArpPatternEditor: View {
                 LYSynthStepper(label: "STEPS", text: on ? "\(steps)" : "OFF", accent: accent) { delta in
                     c.set(LY_ARP_STEPS, Float(min(max(steps + delta, 0), Int(LY_ARP_PATTERN_STEPS))))
                 }
-                Text(on ? "LEVEL: DRAG · 0 IS A REST\nLENGTH: DRAG" : "EVERY STEP ALIKE")
+                Text(on ? "LEVEL · 0 IS A REST\nLENGTH\nTRANSPOSE · SHIFT FOR OCTAVES" : "EVERY STEP ALIKE")
                     .font(LYLLTHTheme.label(6.5, weight: .bold)).tracking(1).lineSpacing(3)
                     .foregroundStyle(LYLLTHTheme.dim)
             }
             .frame(width: 110, alignment: .leading)
             VStack(spacing: 4) {
-                lane(base: LY_ARP_LEVEL_BASE, range: 0...1, steps: steps, current: current, height: 64)
-                lane(base: LY_ARP_LENGTH_BASE, range: 0.05...1, steps: steps, current: current, height: 26)
+                lane(base: LY_ARP_LEVEL_BASE, range: 0...1, steps: steps, current: current, height: 54)
+                lane(base: LY_ARP_LENGTH_BASE, range: 0.05...1, steps: steps, current: current, height: 22)
+                transposeLane(steps: steps, current: current)
+                    .frame(height: 50)
             }
             .opacity(on ? 1 : 0.4)
         }
+    }
+
+    /// Each step's transpose, -24…24 semitones around a centre line. Drag
+    /// snaps to semitones; with Shift it snaps to octaves.
+    private func transposeLane(steps: Int, current: Int) -> some View {
+        let c = context
+        return GeometryReader { geo in
+            let column = geo.size.width / CGFloat(LY_ARP_PATTERN_STEPS)
+            Canvas { g, size in
+                g.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.5)))
+                let mid = size.height / 2
+                g.fill(Path(CGRect(x: 0, y: mid, width: size.width, height: 1)), with: .color(Color.white.opacity(0.1)))
+                for i in 0..<Int(LY_ARP_PATTERN_STEPS) {
+                    let semis = Int(c.value(LY_ARP_TRANSPOSE_BASE + i).rounded())
+                    let active = i < max(steps, 1)
+                    let color = i == current ? LYLLTHTheme.text : accent.opacity(active ? 0.85 : 0.25)
+                    let h = CGFloat(semis) / 24 * (mid - 2)
+                    if semis != 0 {
+                        g.fill(Path(CGRect(x: CGFloat(i) * column + 2, y: min(mid, mid - h), width: column - 4, height: max(abs(h), 1))), with: .color(color))
+                        let label = semis % 12 == 0 ? String(format: "%+d OCT", semis / 12) : String(format: "%+d", semis)
+                        g.draw(Text(label).font(LYLLTHTheme.value(6.5)).foregroundColor(active ? LYLLTHTheme.text : LYLLTHTheme.dim),
+                               at: CGPoint(x: CGFloat(i) * column + column / 2, y: semis > 0 ? mid + 7 : mid - 7))
+                    }
+                    g.fill(Path(CGRect(x: CGFloat(i) * column, y: 0, width: 1, height: size.height)), with: .color(Color.white.opacity(i % 4 == 0 ? 0.08 : 0.03)))
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                let i = min(max(Int(drag.location.x / column), 0), Int(LY_ARP_PATTERN_STEPS) - 1)
+                let mid = geo.size.height / 2
+                let raw = Float((mid - drag.location.y) / max(mid - 2, 1) * 24)
+                let octaves = NSEvent.modifierFlags.contains(.shift)
+                let semis = octaves ? (raw / 12).rounded() * 12 : raw.rounded()
+                c.set(LY_ARP_TRANSPOSE_BASE + i, min(max(semis, -24), 24))
+            })
+            .help("Transpose each step. Drag up or down; hold Shift for whole octaves")
+        }
+        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
     }
 
     private func lane(base: Int, range: ClosedRange<Float>, steps: Int, current: Int, height: CGFloat) -> some View {

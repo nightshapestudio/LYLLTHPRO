@@ -276,6 +276,9 @@ enum LYSynthParameters {
         add(LY_LADDER_POLES, "ladder.poles", "2-POLE", 0...1, stepped: true)
         add(LY_LADDER_BASS, "ladder.bass", "BASS LOSS", 0...1)
         add(LY_KEY_PRIORITY, "priority", "KEY PRIORITY", 0...Float(LY_PRIORITY_COUNT - 1), stepped: true)
+        for i in 0..<Int(LY_ARP_PATTERN_STEPS) {
+            add(LY_ARP_TRANSPOSE_BASE + i, "arp.transpose\(i)", "STEP \(i + 1) TRANSPOSE", -24...24, stepped: true)
+        }
         return list
     }()
 

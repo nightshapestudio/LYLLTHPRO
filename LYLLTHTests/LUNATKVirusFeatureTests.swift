@@ -196,3 +196,33 @@ final class LUNATKVirusFeatureTests: XCTestCase {
         XCTAssertTrue(LYSynthNames.destinations.allSatisfy { !$0.isEmpty })
     }
 }
+
+extension LUNATKVirusFeatureTests {
+    func testArpPatternTransposesEachStep() {
+        let s = synth { p in
+            p.set(LY_ARP_ON, 1); p.set(LY_ARP_RATE, 10 / 14)      // 1/16: 0.125 s at 120
+            p.set(LY_FILTER_ON, 0)
+            p.set(LYSynthParameters.oscillator(0, LY_OSC_WTPOS), 0)   // sine
+            p.set(LY_ENV1_A, 0); p.set(LY_ENV1_S, 1); p.set(LY_ENV1_R, 0.05)
+            p.set(LY_ARP_STEPS, 4)
+            for (i, semis) in [Float(0), 12, 7, -12].enumerated() {
+                p.set(LY_ARP_TRANSPOSE_BASE + i, semis); p.set(LY_ARP_LENGTH_BASE + i, 0.9)
+            }
+        }
+        _ = render(s, seconds: 0.05, beat: 0)
+        s.noteOn(69, velocity: 110, atHostTime: 0, cutoff: 1, resonance: 0)
+        let out = render(s, seconds: 1.2, beat: 0.1)
+        // Steps start at beat 0.25 (0.075 s in), one every 0.125 s.
+        func strongest(_ k: Int) -> Double {
+            let start = Int((0.075 + 0.125 * Double(k)) * rate) + 400
+            let window = Array(out[start ..< start + 4096])
+            let candidates = [220.0, 440, 659.26, 880]
+            return candidates.max { band(window, $0) < band(window, $1) }!
+        }
+        XCTAssertEqual(strongest(0), 440, "step 1 plays the note")
+        XCTAssertEqual(strongest(1), 880, "step 2 is an octave up")
+        XCTAssertEqual(strongest(2), 659.26, "step 3 is a fifth up")
+        XCTAssertEqual(strongest(3), 220, "step 4 is an octave down")
+        XCTAssertEqual(strongest(4), 440, "the pattern repeats")
+    }
+}
