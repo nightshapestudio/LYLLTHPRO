@@ -76,8 +76,11 @@ struct ArrangementView: View {
 
             GeometryReader { viewport in
                 ScrollView([.horizontal, .vertical]) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ruler
+                    // The ruler (bar numbers, loop brace, cursor heads) is a
+                    // pinned header: it scrolls sideways with the timeline but
+                    // stays at the top however far down the tracks go.
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        Section {
                         LYSongFXLane(
                             blocks: Binding(get: { session.songFX ?? [] }, set: { session.songFX = $0.isEmpty ? nil : $0 }),
                             tracks: session.tracks,
@@ -93,6 +96,9 @@ struct ArrangementView: View {
                             AnyView(automationRows(index: index))
                         }
                         addTrackLane
+                        } header: {
+                            ruler
+                        }
                     }
                     .frame(
                         minWidth: max(headerWidth + CGFloat(beats) * beatWidth, viewport.size.width),
@@ -440,6 +446,7 @@ struct ArrangementView: View {
                     }
                 }
                 loopBrace
+                cursorHeads
                 HStack(spacing: 0) {
                     ForEach(0..<barCount, id: \.self) { bar in
                         let showsNumber = beatWidth * CGFloat(beatsPerBar) >= 22 || bar % 4 == 0
@@ -852,6 +859,28 @@ struct ArrangementView: View {
 
     // MARK: Cursors
 
+    /// The edit cursor's diamond and the playhead's head, drawn in the ruler
+    /// so they stay with it when the tracks scroll.
+    private var cursorHeads: some View {
+        ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(LYLLTHTheme.purple)
+                .frame(width: 7, height: 7)
+                .rotationEffect(.degrees(45))
+                .lyBloom(LYLLTHTheme.purple, strength: 0.3)
+                .offset(x: CGFloat(editCursorBeat) * beatWidth - 3.5, y: rulerHeight - 22)
+            if isPlaying && audio.transportMode == .song {
+                TimelineView(.animation) { _ in
+                    if let beat = audio.currentSongBeat() {
+                        PlayheadHead(color: LYLLTHTheme.teal)
+                            .offset(x: CGFloat(beat) * beatWidth - 6, y: 2)
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
     private var cursors: some View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
@@ -859,12 +888,6 @@ struct ArrangementView: View {
                     .fill(LYLLTHTheme.purple.opacity(0.9))
                     .frame(width: 1, height: geometry.size.height - rulerHeight)
                     .offset(x: headerWidth + CGFloat(editCursorBeat) * beatWidth, y: rulerHeight)
-                Rectangle()
-                    .fill(LYLLTHTheme.purple)
-                    .frame(width: 7, height: 7)
-                    .rotationEffect(.degrees(45))
-                    .lyBloom(LYLLTHTheme.purple, strength: 0.3)
-                    .offset(x: headerWidth + CGFloat(editCursorBeat) * beatWidth - 3.5, y: rulerHeight - 22)
 
                 if isPlaying && audio.transportMode == .song {
                     TimelineView(.animation) { _ in
@@ -875,8 +898,6 @@ struct ArrangementView: View {
                                     .fill(LYLLTHTheme.playhead)
                                     .frame(width: 1.5, height: geometry.size.height)
                                     .offset(x: x - 0.75)
-                                PlayheadHead(color: LYLLTHTheme.teal)
-                                    .offset(x: x - 6, y: 2)
                             }
                         }
                     }
