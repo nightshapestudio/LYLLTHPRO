@@ -18,26 +18,41 @@ final class LUNATKAudioUnit: AUAudioUnit {
         var sampleRate: Double = 48_000
         var musicalContext: AUHostMusicalContextBlock?
         var transportState: AUHostTransportStateBlock?
+        // The sidechain input (the vocoder's voice), pulled into these.
+        var inputLeft: UnsafeMutablePointer<Float>
+        var inputRight: UnsafeMutablePointer<Float>
+        let inputList = AudioBufferList.allocate(maximumBuffers: 2)
+        var inputEnabled = false
+        var inputChannels = 2
 
         init(core: OpaquePointer, capacity: Int) {
             self.core = core
             self.capacity = capacity
             left = .allocate(capacity: capacity)
             right = .allocate(capacity: capacity)
+            inputLeft = .allocate(capacity: capacity)
+            inputRight = .allocate(capacity: capacity)
         }
 
         func resize(_ frames: Int) {
             guard frames > capacity else { return }
             left.deallocate()
             right.deallocate()
+            inputLeft.deallocate()
+            inputRight.deallocate()
             capacity = frames
             left = .allocate(capacity: frames)
             right = .allocate(capacity: frames)
+            inputLeft = .allocate(capacity: frames)
+            inputRight = .allocate(capacity: frames)
         }
 
         deinit {
             left.deallocate()
             right.deallocate()
+            inputLeft.deallocate()
+            inputRight.deallocate()
+            inputList.unsafeMutablePointer.deallocate()
         }
     }
 
@@ -47,6 +62,9 @@ final class LUNATKAudioUnit: AUAudioUnit {
     private let kernel: Kernel
     private var outputBus: AUAudioUnitBus
     private var busArray: AUAudioUnitBusArray!
+    /// A sidechain input: the vocoder's voice.
+    private var inputBus: AUAudioUnitBus
+    private var inputBusArray: AUAudioUnitBusArray!
     private var tree: AUParameterTree!
     private var editorToken: AUParameterObserverToken?
     private var pendingPatchSync = false
@@ -66,8 +84,11 @@ final class LUNATKAudioUnit: AUAudioUnit {
         let format = AVAudioFormat(standardFormatWithSampleRate: Self.designSampleRate, channels: 2)!
         outputBus = try AUAudioUnitBus(format: format)
         outputBus.maximumChannelCount = 2
+        inputBus = try AUAudioUnitBus(format: format)
+        inputBus.maximumChannelCount = 2
         try super.init(componentDescription: componentDescription, options: options)
         busArray = AUAudioUnitBusArray(audioUnit: self, busType: .output, busses: [outputBus])
+        inputBusArray = AUAudioUnitBusArray(audioUnit: self, busType: .input, busses: [inputBus])
         tree = Self.makeTree()
         wireTree()
         applyToCore(patch, to: instrument)
@@ -77,13 +98,16 @@ final class LUNATKAudioUnit: AUAudioUnit {
     // MARK: Busses and formats
 
     override var outputBusses: AUAudioUnitBusArray { busArray }
-    override var channelCapabilities: [NSNumber]? { [0, 2] }
+    override var inputBusses: AUAudioUnitBusArray { inputBusArray }
+    // Stereo out, with the sidechain stereo, mono or not connected.
+    override var channelCapabilities: [NSNumber]? { [2, 2, 1, 2, 0, 2] }
     override var supportsUserPresets: Bool { true }
     override var canProcessInPlace: Bool { false }
 
     /// LUNATK renders stereo only.
     override func shouldChange(to format: AVAudioFormat, for bus: AUAudioUnitBus) -> Bool {
-        format.channelCount == 2 && super.shouldChange(to: format, for: bus)
+        if bus === inputBus { return (1...2).contains(format.channelCount) && super.shouldChange(to: format, for: bus) }
+        return format.channelCount == 2 && super.shouldChange(to: format, for: bus)
     }
 
     override func allocateRenderResources() throws {
@@ -101,6 +125,8 @@ final class LUNATKAudioUnit: AUAudioUnit {
         }
         kernel.resize(Int(maximumFramesToRender))
         kernel.sampleRate = rate
+        kernel.inputEnabled = inputBus.isEnabled
+        kernel.inputChannels = Int(max(1, min(2, inputBus.format.channelCount)))
         kernel.musicalContext = musicalContextBlock
         kernel.transportState = transportStateBlock
     }
@@ -116,10 +142,30 @@ final class LUNATKAudioUnit: AUAudioUnit {
 
     override var internalRenderBlock: AUInternalRenderBlock {
         let kernel = kernel
-        return { _, timestamp, frameCount, _, outputData, realtimeEventListHead, _ in
+        return { _, timestamp, frameCount, _, outputData, realtimeEventListHead, pullInputBlock in
             let count = Int(frameCount)
             guard count <= kernel.capacity else { return kAudioUnitErr_TooManyFramesToProcess }
             let core = kernel.core
+
+            // The sidechain, if the host is feeding one.
+            var inLeft: UnsafePointer<Float>?
+            var inRight: UnsafePointer<Float>?
+            if kernel.inputEnabled, let pull = pullInputBlock {
+                let list = kernel.inputList
+                let channels = kernel.inputChannels
+                list.count = channels
+                list[0] = AudioBuffer(mNumberChannels: 1, mDataByteSize: UInt32(count * MemoryLayout<Float>.size),
+                                      mData: UnsafeMutableRawPointer(kernel.inputLeft))
+                if channels > 1 {
+                    list[1] = AudioBuffer(mNumberChannels: 1, mDataByteSize: UInt32(count * MemoryLayout<Float>.size),
+                                          mData: UnsafeMutableRawPointer(kernel.inputRight))
+                }
+                var flags = AudioUnitRenderActionFlags()
+                if pull(&flags, timestamp, frameCount, 0, list.unsafeMutablePointer) == noErr, let first = list[0].mData {
+                    inLeft = UnsafePointer(first.assumingMemoryBound(to: Float.self))
+                    inRight = channels > 1 ? list[1].mData.map { UnsafePointer($0.assumingMemoryBound(to: Float.self)) } : inLeft
+                }
+            }
 
             // Follow the host's tempo and song position, for synced LFOs,
             // delay, ARP and the performers.
@@ -157,7 +203,8 @@ final class LUNATKAudioUnit: AUAudioUnit {
                 let offset = Int(max(0, min(Int64(count), current.pointee.head.eventSampleTime - blockStart)))
                 if offset > position {
                     if let blockBeat { lysynth_set_song_position(core, blockBeat + Double(position) * beatsPerFrame, playing ? 1 : 0) }
-                    lysynth_render(core, left + position, right + position, Int32(offset - position), 0)
+                    lysynth_render_input(core, left + position, right + position, inLeft.map { $0 + position }, inRight.map { $0 + position },
+                                         Int32(offset - position), 0)
                     position = offset
                 }
                 switch current.pointee.head.eventType {
@@ -176,7 +223,8 @@ final class LUNATKAudioUnit: AUAudioUnit {
             }
             if count > position {
                 if let blockBeat { lysynth_set_song_position(core, blockBeat + Double(position) * beatsPerFrame, playing ? 1 : 0) }
-                lysynth_render(core, left + position, right + position, Int32(count - position), 0)
+                lysynth_render_input(core, left + position, right + position, inLeft.map { $0 + position }, inRight.map { $0 + position },
+                                     Int32(count - position), 0)
             }
             // A mono output gets the left channel; LUNATK is stereo.
             _ = right
@@ -395,6 +443,8 @@ enum LUNATKNames {
     static func added(_ key: String) -> String? {
         switch key {
         case "fb": return "FEEDBACK"
+        case "fsat": return "FILTER SATURATION"
+        case "voc": return "VOCODER"
         case "perf": return "PERFORMERS"
         default:
             if key.hasPrefix("ins") { return "INSERT " + key.dropFirst(3) }

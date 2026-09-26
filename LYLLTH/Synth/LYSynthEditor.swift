@@ -516,22 +516,50 @@ struct LYSynthEditor: View {
         } content: {
             VStack(spacing: 6) {
                 LYFilterCurve(patch: patch, live: live)
-                    .frame(height: 92)
+                    .frame(height: 72)
                     .overlay(alignment: .topTrailing) {
                         HStack(spacing: 3) {
-                            LYSynthToggle(title: "SERIAL", isOn: !c.isOn(LY_FILTER_ROUTING), accent: accent) { c.set(LY_FILTER_ROUTING, 0) }
-                            LYSynthToggle(title: "PARALLEL", isOn: c.isOn(LY_FILTER_ROUTING), accent: accent) { c.set(LY_FILTER_ROUTING, 1) }
+                            ForEach(Array(LYSynthNames.routings.enumerated()), id: \.offset) { index, name in
+                                LYSynthToggle(title: name, isOn: Int(c.value(LY_FILTER_ROUTING).rounded()) == index, accent: accent) {
+                                    c.set(LY_FILTER_ROUTING, Float(index))
+                                }
+                                .help(["Filter 1 into filter 2", "Both filters side by side on the same sound",
+                                       "Osc A (with sub and noise) through filter 1, osc B through filter 2"][index])
+                            }
                         }
                         .padding(5)
                     }
                 filterRow(number: 1, on: LY_FILTER_ON, type: LY_FILTER_TYPE, cutoff: LY_FILTER_CUTOFF, res: LY_FILTER_RES, drive: LY_FILTER_DRIVE,
                           env: LY_FILTER_ENVAMT, envLabel: "ENV 2", key: LY_FILTER_KEYTRACK, mix: LY_FILTER_MIX,
                           destinations: (LY_DST_CUTOFF, LY_DST_RES, LY_DST_DRIVE, LY_DST_FILTER_MIX), accent: accent)
+                saturationRow
                 filterRow(number: 2, on: LY_F2_ON, type: LY_F2_TYPE, cutoff: LY_F2_CUTOFF, res: LY_F2_RES, drive: LY_F2_DRIVE,
                           env: LY_F2_ENVAMT, envLabel: "ENV 3", key: LY_F2_KEYTRACK, mix: LY_F2_MIX,
                           destinations: (LY_DST_F2_CUTOFF, LY_DST_F2_RES, LY_DST_F2_DRIVE, LY_DST_F2_MIX), accent: LYLLTHTheme.indigo)
             }
         }
+    }
+
+    /// Saturation between the filters.
+    private var saturationRow: some View {
+        let c = context
+        let accent = LYLLTHTheme.purple
+        let on = Int(c.value(LY_FSAT_TYPE)) != LY_FSAT_OFF
+        return HStack(spacing: 6) {
+            Text("SAT")
+                .font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.2)
+                .foregroundStyle(on ? accent : LYLLTHTheme.dim)
+                .frame(width: 22)
+            c.choice(LY_FSAT_TYPE, label: "BETWEEN", names: LYSynthNames.saturations, accent: accent, columns: 3, width: 260, anchor: "fsat")
+                .frame(width: 84)
+            HStack(spacing: 0) {
+                c.knob(LY_FSAT_DRIVE, LY_DST_FSAT_DRIVE, accent: accent, diameter: 22, format: { String(format: "%.0f%%", $0 * 100) })
+                c.knob(LY_FSAT_MIX, accent: accent, diameter: 22, format: { String(format: "%.0f%%", $0 * 100) })
+            }
+            .opacity(on ? 1 : 0.45)
+            Spacer(minLength: 0)
+        }
+        .help("Saturation after filter 1: before filter 2 in series, on filter 1's path in parallel and split")
     }
 
     private func filterRow(number: Int, on: Int, type: Int, cutoff: Int, res: Int, drive: Int, env: Int, envLabel: String,
@@ -648,8 +676,18 @@ struct LYSynthEditor: View {
                 Spacer(minLength: 0)
                 c.knob(base + 2, accent: color, label: "SUSTAIN")
                 Spacer(minLength: 0)
+                c.knob(LY_ENV1_SLOPE + e, accent: color, label: "SLOPE", format: { v in
+                    abs(v) < 0.01 ? "FLAT" : String(format: "%+.0f", v * 100)
+                })
+                .help("Where a held sustain drifts: left falls away, right rises")
+                Spacer(minLength: 0)
                 c.knob(base + 3, e == 0 ? LY_DST_ENV1_RELEASE : e == 1 ? LY_DST_ENV2_RELEASE : nil, accent: color, label: "RELEASE", format: LYSynthContext.time)
                 Spacer(minLength: 0)
+                if e == 0 {
+                    c.knob(LY_PUNCH, accent: color, label: "PUNCH", format: { String(format: "%.0f%%", $0 * 100) })
+                        .help("A short lift on every attack")
+                    Spacer(minLength: 0)
+                }
                 Text(note + "\n◆ DRAG TO CURVE")
                     .font(LYLLTHTheme.label(6.5, weight: .bold))
                     .tracking(1)

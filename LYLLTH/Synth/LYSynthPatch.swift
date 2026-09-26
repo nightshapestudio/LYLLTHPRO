@@ -116,7 +116,7 @@ enum LYSynthParameters {
         add(LY_F2_KEYTRACK, "filter2.keytrack", "KEY", 0...1)
         add(LY_F2_ENVAMT, "filter2.envamt", "ENV 3", -1...1)
         add(LY_F2_MIX, "filter2.mix", "MIX", 0...1)
-        add(LY_FILTER_ROUTING, "filter.routing", "ROUTING", 0...1, stepped: true)
+        add(LY_FILTER_ROUTING, "filter.routing", "ROUTING", 0...Float(LY_ROUTING_COUNT - 1), stepped: true)
         for e in 0..<4 {
             let b = LY_ENV1_A + e * 4
             for (k, label) in ["A", "D", "S", "R"].enumerated() {
@@ -251,6 +251,25 @@ enum LYSynthParameters {
         }
         add(LY_CHORUS_MODE, "chorus.mode", "MODE", 0...Float(LY_CHORUS_MODE_COUNT - 1), stepped: true)
         add(LY_CHORUS_WIDTH, "chorus.width", "WIDTH", 0...1)
+        add(LY_FSAT_TYPE, "fsat.type", "TYPE", 0...Float(LY_FSAT_COUNT - 1), stepped: true)
+        add(LY_FSAT_DRIVE, "fsat.drive", "DRIVE", 0...1)
+        add(LY_FSAT_MIX, "fsat.mix", "MIX", 0...1)
+        for e in 0..<4 { add(LY_ENV1_SLOPE + e, "env\(e + 1).slope", "SLOPE", -1...1) }
+        add(LY_PUNCH, "punch", "PUNCH", 0...1)
+        add(LY_ARP_STEPS, "arp.steps", "STEPS", 0...Float(LY_ARP_PATTERN_STEPS), stepped: true)
+        for i in 0..<Int(LY_ARP_PATTERN_STEPS) {
+            add(LY_ARP_LEVEL_BASE + i, "arp.level\(i)", "STEP \(i + 1) LEVEL", 0...1)
+            add(LY_ARP_LENGTH_BASE + i, "arp.length\(i)", "STEP \(i + 1) LENGTH", 0.05...1)
+        }
+        add(LY_VOC_ON, "voc.on", "ON", 0...1, stepped: true)
+        add(LY_VOC_BANDS, "voc.bands", "BANDS", 8...Float(LY_VOC_MAX_BANDS), stepped: true)
+        add(LY_VOC_ATTACK, "voc.attack", "ATTACK", 0...1)
+        add(LY_VOC_RELEASE, "voc.release", "RELEASE", 0...1)
+        add(LY_VOC_SHIFT, "voc.shift", "SHIFT", -1...1)
+        add(LY_VOC_Q, "voc.q", "Q", 0...1)
+        add(LY_VOC_HIGHS, "voc.highs", "HIGHS", 0...1)
+        add(LY_VOC_GAIN, "voc.gain", "INPUT", 0...1)
+        add(LY_VOC_MIX, "voc.mix", "MIX", 0...1)
         return list
     }()
 
@@ -292,6 +311,8 @@ enum LYSynthNames {
     static let noiseTypes = ["WHITE", "PINK", "BROWN", "CRACKLE", "VINYL", "DIGITAL", "METAL", "BREATH"]
     static let arpModes = ["UP", "DOWN", "UP + DOWN", "AS PLAYED", "RANDOM", "CHORD"]
     static let chorusModes = ["CLASSIC", "SUBTLE", "WIDE", "DEEP"]
+    static let saturations = ["OFF", "LIGHT", "SOFT", "HARD", "DIODE", "SHAPER", "RECTIFY", "BITS", "RATE"]
+    static let routings = ["SERIAL", "PARALLEL", "SPLIT"]
     static let inserts = ["OFF", "BITCRUSH", "DECIMATE", "SINE SHAPER", "FOLD", "RECTIFY", "RING MOD", "FREQ SHIFT", "COMB"]
     static let performerModes = ["SONG", "NOTE"]
     static let stepShapes = ["HOLD", "RAMP UP", "RAMP DOWN", "TRIANGLE", "DECAY", "RISE", "PULSE", "GLIDE"]
@@ -331,7 +352,7 @@ enum LYSynthNames {
                          (LY_DST_NOISE_COLOR, "NOISE COLOR"), (LY_DST_NOISE_PITCH, "NOISE PITCH"), (LY_DST_NOISE_PAN, "NOISE PAN")].map { (Int($0.0), $0.1) }),
         ("FILTERS", [(LY_DST_CUTOFF, "CUTOFF"), (LY_DST_RES, "RESONANCE"), (LY_DST_DRIVE, "DRIVE"), (LY_DST_FILTER_MIX, "FILTER MIX"),
                      (LY_DST_F2_CUTOFF, "F2 CUTOFF"), (LY_DST_F2_RES, "F2 RES"), (LY_DST_F2_DRIVE, "F2 DRIVE"), (LY_DST_F2_MIX, "F2 MIX"),
-                     (LY_DST_FILTER_PAN, "FILTER PAN")].map { (Int($0.0), $0.1) }),
+                     (LY_DST_FILTER_PAN, "FILTER PAN"), (LY_DST_FSAT_DRIVE, "SAT DRIVE")].map { (Int($0.0), $0.1) }),
         ("VOICE FX", [(LY_DST_FEEDBACK, "FEEDBACK"), (LY_DST_FB_TONE, "FEEDBACK TONE"),
                       (LY_DST_INS1_AMOUNT, "INSERT 1 AMOUNT"), (LY_DST_INS1_FREQ, "INSERT 1 FREQ"),
                       (LY_DST_INS2_AMOUNT, "INSERT 2 AMOUNT"), (LY_DST_INS2_FREQ, "INSERT 2 FREQ")].map { (Int($0.0), $0.1) }),
@@ -350,6 +371,7 @@ enum LYSynthNames {
                 (LY_DST_EQ_LOW, "EQ LOW"), (LY_DST_EQ_MID, "EQ MID"), (LY_DST_EQ_HIGH, "EQ HIGH"),
                 (LY_DST_FXF_CUTOFF, "FX CUTOFF"), (LY_DST_FXF_RES, "FX RES"), (LY_DST_FXF_MIX, "FX FILTER MIX"),
                 (LY_DST_REVERB_SIZE, "REVERB SIZE"), (LY_DST_REVERB_DECAY, "REVERB DECAY"), (LY_DST_REVERB_MIX, "REVERB MIX"),
+                (LY_DST_VOC_MIX, "VOCODER MIX"), (LY_DST_VOC_SHIFT, "VOCODER SHIFT"),
                 (LY_DST_MASTER, "MASTER")].map { (Int($0.0), $0.1) }),
     ]
 }

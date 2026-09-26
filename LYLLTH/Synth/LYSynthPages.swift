@@ -21,6 +21,8 @@ struct LYSynthArpPage: View {
                     LYArpLane(patch: c.patch, live: c.live, accent: accent)
                         .frame(maxHeight: .infinity)
                         .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                    AnyView(LYArpPatternEditor(context: c, accent: accent))
+                        .frame(height: 118)
                     HStack(alignment: .center, spacing: 14) {
                         c.choice(LY_ARP_MODE, label: "MODE", names: LYSynthNames.arpModes, accent: accent, columns: 2, width: 240, anchor: "arpMode")
                             .frame(width: 130)
@@ -104,6 +106,82 @@ struct LYArpLane: View {
             context.draw(Text("PREVIEW · C E G").font(LYLLTHTheme.label(7.5, weight: .bold)).foregroundColor(LYLLTHTheme.dim),
                          at: CGPoint(x: 52, y: 12))
         }
+    }
+}
+
+/// The arp's step pattern: a level per step (drag down to 0 for a rest) and
+/// a length per step. STEPS OFF plays every step alike.
+struct LYArpPatternEditor: View {
+    let context: LYSynthContext
+    let accent: Color
+    @ObservedObject private var live: LYSynthLive
+
+    init(context: LYSynthContext, accent: Color) {
+        self.context = context
+        self.accent = accent
+        _live = ObservedObject(wrappedValue: context.live)
+    }
+
+    var body: some View {
+        let c = context
+        let steps = Int(c.value(LY_ARP_STEPS))
+        let on = steps > 0
+        let step = Int(live.display.arpStep)
+        let current = on && step > 0 ? (step - 1) % steps : -1
+        return HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("PATTERN").font(LYLLTHTheme.label(8, weight: .bold)).tracking(1.4).foregroundStyle(on ? accent : LYLLTHTheme.dim)
+                LYSynthStepper(label: "STEPS", text: on ? "\(steps)" : "OFF", accent: accent) { delta in
+                    c.set(LY_ARP_STEPS, Float(min(max(steps + delta, 0), Int(LY_ARP_PATTERN_STEPS))))
+                }
+                Text(on ? "LEVEL: DRAG · 0 IS A REST\nLENGTH: DRAG" : "EVERY STEP ALIKE")
+                    .font(LYLLTHTheme.label(6.5, weight: .bold)).tracking(1).lineSpacing(3)
+                    .foregroundStyle(LYLLTHTheme.dim)
+            }
+            .frame(width: 110, alignment: .leading)
+            VStack(spacing: 4) {
+                lane(base: LY_ARP_LEVEL_BASE, range: 0...1, steps: steps, current: current, height: 64)
+                lane(base: LY_ARP_LENGTH_BASE, range: 0.05...1, steps: steps, current: current, height: 26)
+            }
+            .opacity(on ? 1 : 0.4)
+        }
+    }
+
+    private func lane(base: Int, range: ClosedRange<Float>, steps: Int, current: Int, height: CGFloat) -> some View {
+        let c = context
+        return GeometryReader { geo in
+            let column = geo.size.width / CGFloat(LY_ARP_PATTERN_STEPS)
+            Canvas { g, size in
+                g.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.5)))
+                for i in 0..<Int(LY_ARP_PATTERN_STEPS) {
+                    let value = CGFloat((c.value(base + i) - range.lowerBound) / (range.upperBound - range.lowerBound))
+                    let active = i < max(steps, 1)
+                    let color = i == current ? LYLLTHTheme.text : accent.opacity(active ? 0.85 : 0.25)
+                    if base == LY_ARP_LEVEL_BASE {
+                        let h = value * (size.height - 4)
+                        g.fill(Path(CGRect(x: CGFloat(i) * column + 2, y: size.height - 2 - h, width: column - 4, height: max(h, 1))), with: .color(color))
+                        if c.value(base + i) < 0.01 && active {
+                            g.fill(Path(CGRect(x: CGFloat(i) * column + column / 2 - 3, y: size.height / 2, width: 6, height: 1)), with: .color(LYLLTHTheme.dim))
+                        }
+                    } else {
+                        let w = value * (column - 4)
+                        g.fill(Path(CGRect(x: CGFloat(i) * column + 2, y: size.height / 2 - 3, width: max(w, 2), height: 6)), with: .color(color))
+                    }
+                    g.fill(Path(CGRect(x: CGFloat(i) * column, y: 0, width: 1, height: size.height)), with: .color(Color.white.opacity(i % 4 == 0 ? 0.08 : 0.03)))
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                let i = min(max(Int(drag.location.x / column), 0), Int(LY_ARP_PATTERN_STEPS) - 1)
+                let fraction: CGFloat = base == LY_ARP_LEVEL_BASE
+                    ? 1 - drag.location.y / geo.size.height
+                    : (drag.location.x - CGFloat(i) * column) / column
+                let value = range.lowerBound + Float(min(max(fraction, 0), 1)) * (range.upperBound - range.lowerBound)
+                c.set(base + i, (value * 20).rounded() / 20)
+            })
+        }
+        .frame(height: height)
+        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
     }
 }
 
@@ -380,12 +458,12 @@ struct LYSynthGlobalPage: View {
                     VStack(alignment: .leading, spacing: 6) {
                         fact("OSCILLATORS", "2 WAVETABLE · 16 UNISON · DUAL WARP · STACK")
                         fact("SUB + NOISE", "4 SHAPES · 8 NOISE TYPES")
-                        fact("FILTERS", "2 · SERIAL OR PARALLEL · \(LY_FILTER_COUNT) TYPES · FEEDBACK")
+                        fact("FILTERS", "2 · SERIAL, PARALLEL OR SPLIT · \(LY_FILTER_COUNT) TYPES · SATURATION · FEEDBACK")
                         fact("VOICE FX", "2 INSERTS PER NOTE · \(LY_INS_COUNT - 1) TYPES")
                         fact("MODULATION", "4 ENV · 4 LFO · 8 MACROS · \(LY_MATRIX_SLOTS)-SLOT MATRIX")
                         fact("PERFORM", "2 PERFORMERS · 2 TRACKERS · SWITCH KEYS")
                         fact("FX", "\(LY_FX_COUNT) EFFECTS · ANY ORDER")
-                        fact("PLAY", "16 VOICES · ARP ON THE BAR · MPE · SUSTAIN")
+                        fact("PLAY", "16 VOICES · PATTERN ARP ON THE BAR · MPE · VOCODER")
                     }
                     Spacer(minLength: 0)
                     Text("COMPUTER KEYS A–K PLAY · Z / X OCTAVE · ESC CLOSES")

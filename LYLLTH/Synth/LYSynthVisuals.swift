@@ -214,7 +214,7 @@ struct LYFilterCurve: View {
             context.fill(Path(CGRect(x: 0, y: zeroY, width: size.width, height: 1)), with: .color(Color.white.opacity(0.05)))
             let active = live.display.activeVoices > 0
             let oneOn = patch.value(LY_FILTER_ON) > 0.5, twoOn = patch.value(LY_F2_ON) > 0.5
-            let parallel = patch.value(LY_FILTER_ROUTING) > 0.5
+            let parallel = Int(patch.value(LY_FILTER_ROUTING).rounded()) != LY_ROUTING_SERIAL
             func cutoff(_ id: Int, live: Float) -> Double {
                 active && live > 0 ? Double(live) : 20 * pow(1000, Double(patch.value(id)))
             }

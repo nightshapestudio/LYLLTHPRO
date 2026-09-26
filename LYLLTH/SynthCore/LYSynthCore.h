@@ -92,7 +92,7 @@ enum {
     LY_F2_KEYTRACK,
     LY_F2_ENVAMT,       // ENV 3 to cutoff
     LY_F2_MIX,
-    LY_FILTER_ROUTING,  // 0 serial, 1 parallel
+    LY_FILTER_ROUTING,  // LY_ROUTING_*: serial, parallel, or split (A → 1, B → 2)
 
     // Envelopes: times 0…1 map 0.5 ms…10 s; sustain is a level.
     LY_ENV1_A, LY_ENV1_D, LY_ENV1_S, LY_ENV1_R,
@@ -227,8 +227,43 @@ enum {
     // chorus modelled on the Juno's (SUBTLE, WIDE, DEEP), which also use WIDTH.
     LY_CHORUS_MODE = LY_TRACK_POINTS_BASE + 2 * LY_TRACK_POINTS,
     LY_CHORUS_WIDTH,    // 0…1
+
+    // Saturation between the filters (after filter 1 in parallel and split).
+    LY_FSAT_TYPE,       // LY_FSAT_*
+    LY_FSAT_DRIVE,      // 0…1
+    LY_FSAT_MIX,        // 0…1
+
+    // Envelopes: where a held sustain drifts (-1 falls away, +1 rises), and
+    // a transient boost on the amplifier's attack.
+    LY_ENV1_SLOPE, LY_ENV2_SLOPE, LY_ENV3_SLOPE, LY_ENV4_SLOPE,
+    LY_PUNCH,           // 0…1
+
+    // Arpeggiator pattern: 0 steps plays every step alike; 1…16 cycles
+    // through per-step levels (0 is a rest) and lengths.
+    LY_ARP_STEPS,
+    LY_ARP_LEVEL_BASE,
+    LY_ARP_LENGTH_BASE = LY_ARP_LEVEL_BASE + 16,
+
+    // Vocoder: the synth is the carrier, the sidechain input the modulator.
+    LY_VOC_ON = LY_ARP_LENGTH_BASE + 16,
+    LY_VOC_BANDS,       // 8…24
+    LY_VOC_ATTACK,      // 0…1, 1…50 ms
+    LY_VOC_RELEASE,     // 0…1, 10…500 ms
+    LY_VOC_SHIFT,       // -1…1: carrier bands an octave down … up
+    LY_VOC_Q,           // 0…1: wide … narrow bands
+    LY_VOC_HIGHS,       // 0…1: the input's sibilance let through
+    LY_VOC_GAIN,        // 0…1: input gain, -12…+24 dB
+    LY_VOC_MIX,         // 0…1
+
     LY_PARAM_COUNT
 };
+enum { LY_ARP_PATTERN_STEPS = 16 };
+enum {
+    LY_FSAT_OFF = 0, LY_FSAT_LIGHT, LY_FSAT_SOFT, LY_FSAT_HARD, LY_FSAT_DIODE, LY_FSAT_SHAPER,
+    LY_FSAT_RECTIFY, LY_FSAT_BITS, LY_FSAT_RATE, LY_FSAT_COUNT
+};
+enum { LY_ROUTING_SERIAL = 0, LY_ROUTING_PARALLEL, LY_ROUTING_SPLIT, LY_ROUTING_COUNT };
+enum { LY_VOC_MAX_BANDS = 24 };
 enum { LY_CHORUS_CLASSIC = 0, LY_CHORUS_SUBTLE, LY_CHORUS_WIDE, LY_CHORUS_DEEP, LY_CHORUS_MODE_COUNT };
 
 enum {
@@ -328,6 +363,7 @@ enum {
     LY_DST_MASTER,
     LY_DST_FEEDBACK, LY_DST_FB_TONE,
     LY_DST_INS1_AMOUNT, LY_DST_INS1_FREQ, LY_DST_INS2_AMOUNT, LY_DST_INS2_FREQ,
+    LY_DST_FSAT_DRIVE, LY_DST_VOC_MIX, LY_DST_VOC_SHIFT,
     LY_DST_COUNT
 };
 
@@ -360,6 +396,8 @@ typedef struct {
     float trackInput[2];          // where each tracker is reading its curve, 0…1
     float songBeat;               // the beat the synth is following
     int songLocked;               // 1 while a host transport is driving it
+    int vocoderInput;             // 1 while a sidechain input is arriving
+    float vocoderBands[LY_VOC_MAX_BANDS]; // each band's level from the input, 0…1
 } LYSynthDisplay;
 
 LYSynth *lysynth_create(double sampleRate);
@@ -389,6 +427,10 @@ void lysynth_set_transport(LYSynth *synth, int playing, uint64_t hostTime, doubl
 
 /// Audio thread. `blockHostTime` 0 when the render has no host clock.
 void lysynth_render(LYSynth *synth, float *left, float *right, int frames, uint64_t blockHostTime);
+/// The same with a sidechain input for the vocoder (`inRight` may equal
+/// `inLeft` for mono). Null inputs are no input: the vocoder passes the synth.
+void lysynth_render_input(LYSynth *synth, float *left, float *right, const float *inLeft, const float *inRight,
+                          int frames, uint64_t blockHostTime);
 
 /// Not the audio thread. frameCount × LY_WT_SIZE samples, frame after frame.
 void lysynth_set_wavetable(LYSynth *synth, int oscillator, const float *frames, int frameCount);

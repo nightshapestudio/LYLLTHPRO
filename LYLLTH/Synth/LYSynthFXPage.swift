@@ -25,7 +25,11 @@ struct LYSynthFXPage: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            rack.frame(width: 260)
+            VStack(spacing: 8) {
+                rack
+                AnyView(LYVocoderPanel(context: context)).frame(height: 236)
+            }
+            .frame(width: 260)
             detail.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -661,6 +665,69 @@ struct LYFXVisual: View {
             return (x * steps).rounded() / steps
         case LY_DIST_RECTIFY: return soft(abs(v) * 1.2)
         default: return x
+        }
+    }
+}
+
+
+/// The vocoder: the synth is the carrier, the host's sidechain input the
+/// voice. With no input arriving it stands aside and the synth plays as is.
+struct LYVocoderPanel: View {
+    let context: LYSynthContext
+    @ObservedObject private var live: LYSynthLive
+
+    init(context: LYSynthContext) {
+        self.context = context
+        _live = ObservedObject(wrappedValue: context.live)
+    }
+
+    var body: some View {
+        let c = context
+        let accent = LYLLTHTheme.lavender
+        let on = c.isOn(LY_VOC_ON)
+        let receiving = live.display.vocoderInput == 1
+        let bands = Int(c.value(LY_VOC_BANDS))
+        let levels = withUnsafeBytes(of: live.display.vocoderBands) { Array($0.bindMemory(to: Float.self)) }
+        return LYSynthPanel(title: "VOCODER", accent: accent, isOn: on, toggle: { c.toggle(LY_VOC_ON) }) {
+            Text(!on ? "OFF" : receiving ? "INPUT" : "NO INPUT")
+                .font(LYLLTHTheme.label(7, weight: .bold)).tracking(1.2)
+                .foregroundStyle(receiving ? accent : LYLLTHTheme.dim)
+        } content: {
+            VStack(spacing: 8) {
+                Canvas { g, size in
+                    g.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.5)))
+                    let n = max(bands, 1)
+                    let w = size.width / CGFloat(n)
+                    for b in 0..<n {
+                        let h = CGFloat(b < levels.count ? levels[b] : 0) * (size.height - 4)
+                        g.fill(Path(CGRect(x: CGFloat(b) * w + 1, y: size.height - 2 - h, width: w - 2, height: max(h, 1))),
+                               with: .color(accent.opacity(receiving ? 0.9 : 0.25)))
+                    }
+                }
+                .frame(height: 34)
+                .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                .overlay {
+                    if on && !receiving {
+                        Text("ROUTE A SIDECHAIN INTO LUNATK")
+                            .font(LYLLTHTheme.label(6.5, weight: .bold)).tracking(1).foregroundStyle(LYLLTHTheme.dim)
+                    }
+                }
+                HStack(spacing: 0) {
+                    LYSynthStepper(label: "BANDS", text: "\(bands)", accent: accent) { step in
+                        c.set(LY_VOC_BANDS, Float(min(max(bands + step * 4, 8), Int(LY_VOC_MAX_BANDS))))
+                    }
+                    Spacer(minLength: 0)
+                    c.knob(LY_VOC_GAIN, accent: accent, diameter: 22, label: "INPUT", format: { String(format: "%+.0f DB", -12 + $0 * 36) })
+                    c.knob(LY_VOC_MIX, LY_DST_VOC_MIX, accent: accent, diameter: 22, format: { String(format: "%.0f%%", $0 * 100) })
+                }
+                HStack(spacing: 0) {
+                    c.knob(LY_VOC_ATTACK, accent: accent, diameter: 20, format: { String(format: "%.0f MS", pow(50, $0)) })
+                    c.knob(LY_VOC_RELEASE, accent: accent, diameter: 20, format: { String(format: "%.0f MS", 10 * pow(50, $0)) })
+                    c.knob(LY_VOC_SHIFT, LY_DST_VOC_SHIFT, accent: accent, diameter: 20, format: { String(format: "%+.0f ST", $0 * 12) })
+                    c.knob(LY_VOC_Q, accent: accent, diameter: 20, format: { String(format: "%.0f%%", $0 * 100) })
+                    c.knob(LY_VOC_HIGHS, accent: accent, diameter: 20, format: { String(format: "%.0f%%", $0 * 100) })
+                }
+            }
         }
     }
 }

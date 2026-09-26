@@ -401,6 +401,101 @@ struct JunoChorus {
     }
 };
 
+// MARK: - VOCODER
+
+/// A channel vocoder. The synth is the carrier; the sidechain input is the
+/// modulator. Both are split into the same log-spaced bands (100 Hz–8 kHz,
+/// two band-passes each); the input's level in each band shapes the synth's
+/// band. SHIFT moves the carrier bands against the input's for a smaller or
+/// bigger throat; HIGHS lets the input's sibilance through.
+struct Vocoder {
+    struct Coef { float b0 = 0, a1 = 0, a2 = 0; };           // constant-peak band-pass: b1 = 0, b2 = -b0
+    struct State { float z1 = 0, z2 = 0; };
+    static inline float run(const Coef &c, State &s, float x) {
+        const float y = c.b0 * x + s.z1;
+        s.z1 = -c.a1 * y + s.z2;
+        s.z2 = -c.b0 * x - c.a2 * y;
+        return y;
+    }
+    float sampleRate = 44100;
+    int designedBands = -1;
+    float designedShift = -9, designedQ = -9;
+    Coef modCoef[LY_VOC_MAX_BANDS], carCoef[LY_VOC_MAX_BANDS];
+    State mod[LY_VOC_MAX_BANDS][2], car[LY_VOC_MAX_BANDS][2][2];
+    float envelope[LY_VOC_MAX_BANDS] = {};
+    float hpX[2] = {}, hpY[2] = {};
+    float level[LY_VOC_MAX_BANDS] = {};
+
+    void prepare(float sr) { sampleRate = sr; designedBands = -1; clear(); }
+    void clear() {
+        for (auto &b : mod) for (auto &s : b) s = State();
+        for (auto &b : car) for (auto &c : b) for (auto &s : c) s = State();
+        for (auto &e : envelope) e = 0;
+        for (auto &l : level) l = 0;
+        hpX[0] = hpX[1] = hpY[0] = hpY[1] = 0;
+    }
+    Coef bandPass(float hz, float q) const {
+        hz = std::min(std::max(hz, 20.f), sampleRate * 0.45f);
+        const float w = kTwoPi * hz / sampleRate;
+        const float alpha = std::sin(w) / (2.f * q);
+        const float a0 = 1.f + alpha;
+        Coef c;
+        c.b0 = alpha / a0;
+        c.a1 = -2.f * std::cos(w) / a0;
+        c.a2 = (1.f - alpha) / a0;
+        return c;
+    }
+    void design(int bands, float shift, float q) {
+        if (bands == designedBands && std::fabs(shift - designedShift) < 1e-4f && std::fabs(q - designedQ) < 1e-4f) return;
+        designedBands = bands; designedShift = shift; designedQ = q;
+        const float quality = 2.f + q * 14.f;
+        for (int i = 0; i < bands; ++i) {
+            const float hz = 100.f * std::pow(80.f, bands > 1 ? (float)i / (bands - 1) : 0.f);
+            modCoef[i] = bandPass(hz, quality);
+            carCoef[i] = bandPass(hz * std::pow(2.f, shift), quality);
+        }
+    }
+    /// In place on L/R (the carrier). `inL`/`inR` is the modulator.
+    void process(float *L, float *R, const float *inL, const float *inR, int n, int bands, float attack, float release,
+                 float shift, float q, float highs, float gain, float mix) {
+        bands = std::max(8, std::min((int)LY_VOC_MAX_BANDS, bands));
+        design(bands, shift, q);
+        const float attackCoef = 1.f - std::exp(-1.f / (0.001f * std::pow(50.f, attack) * sampleRate));
+        const float releaseCoef = 1.f - std::exp(-1.f / (0.01f * std::pow(50.f, release) * sampleRate));
+        const float inputGain = std::pow(10.f, (-12.f + gain * 36.f) / 20.f);
+        const float hpCoef = std::exp(-kTwoPi * 6000.f / sampleRate);
+        // A broadband carrier split into n bands, shaped by n envelopes, lands
+        // around the product of the two levels; this brings it back up.
+        const float makeup = 6.f;
+        for (int i = 0; i < n; ++i) {
+            const float m = 0.5f * (inL[i] + inR[i]) * inputGain;
+            float outL = 0, outR = 0;
+            for (int b = 0; b < bands; ++b) {
+                const float band = run(modCoef[b], mod[b][1], run(modCoef[b], mod[b][0], m));
+                const float rectified = std::fabs(band);
+                float &e = envelope[b];
+                e += (rectified - e) * (rectified > e ? attackCoef : releaseCoef);
+                e = flush(e);
+                outL += run(carCoef[b], car[b][0][1], run(carCoef[b], car[b][0][0], L[i])) * e;
+                outR += run(carCoef[b], car[b][1][1], run(carCoef[b], car[b][1][0], R[i])) * e;
+            }
+            // The input's own highs (above ~6 kHz) for consonants.
+            float sib = 0;
+            for (int c = 0; c < 1; ++c) {
+                const float y = hpCoef * (hpY[c] + m - hpX[c]);
+                hpX[c] = m; hpY[c] = flush(y);
+                sib = y;
+            }
+            const float vocL = outL * makeup + sib * highs;
+            const float vocR = outR * makeup + sib * highs;
+            L[i] = L[i] * (1.f - mix) + vocL * mix;
+            R[i] = R[i] * (1.f - mix) + vocR * mix;
+        }
+        for (int b = 0; b < bands; ++b) level[b] = envelope[b];
+        for (int b = bands; b < LY_VOC_MAX_BANDS; ++b) level[b] = 0;
+    }
+};
+
 // MARK: - DELAY
 
 struct Delay {

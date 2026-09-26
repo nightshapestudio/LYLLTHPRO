@@ -36,6 +36,17 @@ optional DC blocker and reverb low cut. (The voice inserts now have their own DC
 - **Feedback.** Filter output back into the filter input per voice, with a
   low-pass, saturation and a DC blocker inside the loop.
 - **Macros 5–8.**
+- **Saturation between the filters** (light, soft, hard, diode, shaper,
+  rectify, bits, rate): before filter 2 in series, on filter 1's path in
+  parallel and split. **SPLIT routing** sends oscillator B to filter 2 on its
+  own while A, sub and noise go through filter 1. In split, the inserts set
+  before the filters work on filter 1's path only.
+- **Sustain slope** on every envelope (a held note drifts down or up) and
+  **PUNCH** on the amplifier's attack.
+- **Arp patterns**: up to 16 steps with a level (0 rests) and a length each.
+- **Vocoder**: 8–24 bands, the synth as carrier and the plug-ins' sidechain
+  input as the voice. LYLLTH can't route a track into it yet; that waits for
+  the per-document audio engine being built alongside this.
 
 Every new parameter sits after the drawn LFO points, so the plug-ins' host
 parameter ids for older parameters did not move. All 176 factory presets render

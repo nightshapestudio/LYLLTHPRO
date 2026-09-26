@@ -90,6 +90,8 @@ public:
         if (result != kResultOk) return result;
         addEventInput(STR16("MIDI In"), 16);
         addAudioOutput(STR16("Stereo Out"), SpeakerArr::kStereo);
+        // A sidechain input: the vocoder's voice. Off until the host routes one.
+        addAudioInput(STR16("Sidechain"), SpeakerArr::kStereo, BusTypes::kAux, 0);
 
         box = lunatk_box_create(44100);
         core = lunatk_box_core(box);
@@ -123,8 +125,10 @@ public:
     tresult PLUGIN_API terminate() SMTG_OVERRIDE { return SingleComponentEffect::terminate(); }
 
     tresult PLUGIN_API setBusArrangements(SpeakerArrangement *inputs, int32 numIns, SpeakerArrangement *outputs, int32 numOuts) SMTG_OVERRIDE {
-        // Stereo out only.
-        if (numIns == 0 && numOuts == 1 && outputs[0] == SpeakerArr::kStereo)
+        // Stereo out, and optionally a mono or stereo sidechain in.
+        if (numOuts != 1 || outputs[0] != SpeakerArr::kStereo) return kResultFalse;
+        if (numIns == 0) return SingleComponentEffect::setBusArrangements(inputs, numIns, outputs, numOuts);
+        if (numIns == 1 && (inputs[0] == SpeakerArr::kStereo || inputs[0] == SpeakerArr::kMono))
             return SingleComponentEffect::setBusArrangements(inputs, numIns, outputs, numOuts);
         return kResultFalse;
     }
@@ -204,6 +208,13 @@ public:
         float *right = hasOutput ? data.outputs[0].channelBuffers32[1] : nullptr;
         const int32 frames = data.numSamples;
         int32 position = 0;
+        // The sidechain, when the host has it active and is feeding it.
+        const float *inLeft = nullptr, *inRight = nullptr;
+        if (data.numInputs > 0 && data.inputs[0].numChannels > 0 && data.inputs[0].channelBuffers32
+            && audioInputs.size() > 0 && audioInputs[0]->isActive()) {
+            inLeft = data.inputs[0].channelBuffers32[0];
+            inRight = data.inputs[0].numChannels > 1 ? data.inputs[0].channelBuffers32[1] : inLeft;
+        }
         // The host's song position, for synced LFOs, ARP and the performers.
         const ProcessContext *context = data.processContext;
         const bool hasBeat = context && (context->state & ProcessContext::kProjectTimeMusicValid);
@@ -214,7 +225,8 @@ public:
             until = std::max(0, std::min(frames, until));
             if (hasOutput && until > position) {
                 if (hasBeat) lysynth_set_song_position(core, blockBeat + position * beatsPerFrame, playing);
-                lysynth_render(core, left + position, right + position, until - position, 0);
+                lysynth_render_input(core, left + position, right + position, inLeft ? inLeft + position : nullptr,
+                                     inRight ? inRight + position : nullptr, until - position, 0);
             }
             position = std::max(position, until);
         };

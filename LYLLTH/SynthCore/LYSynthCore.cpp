@@ -133,7 +133,8 @@ struct Envelope {
     inline void gateOn() { stage = 1; progress = 0; from = value; }
     inline void gateOff() { if (stage != 0) { stage = 4; progress = 0; from = value; } }
     inline void reset() { stage = 0; value = 0; progress = 0; from = 0; }
-    inline void advance(int n, double sampleRate, float a, float h, float d, float s, float r, float ca, float cd, float cr) {
+    inline void advance(int n, double sampleRate, float a, float h, float d, float s, float r, float ca, float cd, float cr,
+                        float slope = 0) {
         switch (stage) {
         case 1:
             progress += (float)(n / (envelopeTime(a) * sampleRate));
@@ -150,7 +151,16 @@ struct Envelope {
             if (progress >= 1.f) { value = s; stage = 3; break; }
             value = s + (1.f - s) * (1.f - curveShape(progress, cd));
             break;
-        case 3: value = s; break;
+        case 3:
+            if (std::fabs(slope) < 0.001f) { value = s; break; }
+            // SLOPE: a held sustain keeps moving, down towards silence or up
+            // towards full; further from 0 is faster (about 10 s … 0.3 s).
+            {
+                const float rate = 0.1f + slope * slope * 3.f;
+                const float target = slope > 0 ? 1.f : 0.f;
+                value += (target - value) * (1.f - std::exp(-rate * (float)(n / sampleRate)));
+            }
+            break;
         case 4:
             progress += (float)(n / (envelopeTime(r) * sampleRate));
             if (progress >= 1.f) { value = 0; stage = 0; break; }
@@ -595,6 +605,27 @@ void processInsert(InsertState &st, int type, float *L, float *R, int n, float a
     }
 }
 
+/// Saturation between the filters, one sample. `g` is the drive gain.
+inline float saturate(int type, float x, float g, float drive, float &dcX, float &dcY, float dcR) {
+    float y;
+    switch (type) {
+    case LY_FSAT_LIGHT: y = fastTanh(x * (1.f + drive * 3.f)) / (1.f + drive * 0.5f); break;
+    case LY_FSAT_SOFT: y = fastTanh(x * g); break;
+    case LY_FSAT_HARD: y = clampf(x * g, -1.f, 1.f); break;
+    case LY_FSAT_DIODE: { const float v = x * g; y = v > 0 ? fastTanh(v) : 0.6f * fastTanh(v * 0.6f); break; }
+    case LY_FSAT_SHAPER: y = std::sin(clampf(x * g, -40.f, 40.f) * 1.5707963f); break;
+    case LY_FSAT_RECTIFY: y = std::fabs(fastTanh(x * g)); break;
+    default: return x;
+    }
+    // Diode and rectify are lopsided; take the DC back out.
+    if (type == LY_FSAT_DIODE || type == LY_FSAT_RECTIFY) {
+        const float out = y - dcX + dcR * dcY;
+        dcX = y; dcY = flushf(out);
+        y = out;
+    }
+    return y;
+}
+
 // MARK: - Voices, events
 
 struct Voice {
@@ -628,6 +659,8 @@ struct Voice {
     float cutoffHz = 1000, cutoff2Hz = 1000;
     InsertState insert[2];
     float feedback[2] = {}, feedbackLow[2] = {}, feedbackDCX[2] = {}, feedbackDCY[2] = {};
+    // Saturation between the filters.
+    float satHold[2] = {}, satPhase = 1, satDCX[2] = {}, satDCY[2] = {};
 };
 
 struct Event {
@@ -705,6 +738,7 @@ struct LYSynth {
     bool arpWasOn = false;
     bool arpFresh = false;            // grid mode: a new chord waits for (or lands on) a grid line
     long arpNextStep = 0;             // grid mode: the grid step that fires next
+    int arpPatternPos = 0;            // where the arp pattern is
 
     // Song position. `beat` runs on its own at the tempo when no transport
     // drives it; a host's position locks it (and so the synced LFOs, the
@@ -736,13 +770,16 @@ struct LYSynth {
     lyfx::EQ eq;
     lyfx::FXFilter fxFilter;
     lyfx::Reverb reverb;
+    lyfx::Vocoder vocoder;
+    bool vocoderInput = false;
+    bool vocoderWasOn = false;
     lyfx::Meter meters[LY_FX_COUNT];
     bool fxWasOn[LY_FX_COUNT] = {};
     float fxMod[LY_DST_COUNT] = {};
 
     float scope[kScope] = {};
     std::atomic<uint32_t> scopeWrite { 0 };
-    std::atomic<float> display[40 + LY_DST_COUNT + 10];
+    std::atomic<float> display[40 + LY_DST_COUNT + 12 + LY_VOC_MAX_BANDS];
 
     float mixL[kChunk], mixR[kChunk];
     float busL[kChunk], busR[kChunk];
@@ -792,6 +829,10 @@ void setDefaults(LYSynth *s) {
 
     set(LY_FB_DRIVE, 0.3f); set(LY_FB_TONE, 0.7f);
     set(LY_CHORUS_WIDTH, 0.75f);
+    set(LY_FSAT_DRIVE, 0.3f); set(LY_FSAT_MIX, 1);
+    for (int i = 0; i < LY_ARP_PATTERN_STEPS; ++i) { set(LY_ARP_LEVEL_BASE + i, 1); set(LY_ARP_LENGTH_BASE + i, 0.6f); }
+    set(LY_VOC_BANDS, 16); set(LY_VOC_ATTACK, 0.3f); set(LY_VOC_RELEASE, 0.4f); set(LY_VOC_Q, 0.5f);
+    set(LY_VOC_HIGHS, 0.3f); set(LY_VOC_GAIN, 1.f / 3.f); set(LY_VOC_MIX, 1);
     for (int k = 0; k < 2; ++k) {
         const int b = LY_INS1_TYPE + k * LY_INS_STRIDE;
         set(b + (LY_INS1_AMOUNT - LY_INS1_TYPE), 0.5f);
@@ -850,7 +891,9 @@ void buildSmoothing(LYSynth *s) {
                     LY_FILTER_PAN, LY_F2_CUTOFF, LY_F2_RES, LY_F2_DRIVE, LY_F2_KEYTRACK, LY_F2_ENVAMT, LY_F2_MIX,
                     LY_MACRO1, LY_MACRO2, LY_MACRO3, LY_MACRO4, LY_MODWHEEL, LY_MASTER, LY_TUNE }) on(id);
     for (int id : { (int)LY_MACRO5, (int)LY_MACRO6, (int)LY_MACRO7, (int)LY_MACRO8,
-                    (int)LY_FB_AMOUNT, (int)LY_FB_DRIVE, (int)LY_FB_TONE, (int)LY_CHORUS_WIDTH }) on(id);
+                    (int)LY_FB_AMOUNT, (int)LY_FB_DRIVE, (int)LY_FB_TONE, (int)LY_CHORUS_WIDTH,
+                    (int)LY_FSAT_DRIVE, (int)LY_FSAT_MIX, (int)LY_PUNCH, (int)LY_VOC_ATTACK, (int)LY_VOC_RELEASE,
+                    (int)LY_VOC_SHIFT, (int)LY_VOC_Q, (int)LY_VOC_HIGHS, (int)LY_VOC_GAIN, (int)LY_VOC_MIX }) on(id);
     for (int k = 0; k < 2; ++k) {
         const int b = LY_INS1_TYPE + k * LY_INS_STRIDE;
         for (int f : { LY_INS1_AMOUNT, LY_INS1_FREQ, LY_INS1_MIX }) on(b + (f - LY_INS1_TYPE));
@@ -1204,6 +1247,10 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
     const bool anyFilter = f1On || f2On;
     float *wetL = s->mixL, *wetR = s->mixR;
     float dryL[kChunk] = {}, dryR[kChunk] = {};
+    // SPLIT: oscillator B has its own path into filter 2.
+    const int routing = (int)std::lround(r[LY_FILTER_ROUTING]);
+    const bool split = routing == LY_ROUTING_SPLIT && anyFilter;
+    float splitL[kChunk] = {}, splitR[kChunk] = {};
     std::memset(wetL, 0, sizeof(float) * n);
     std::memset(wetR, 0, sizeof(float) * n);
     auto route = [&](const float *l, const float *rr, bool toFilter) {
@@ -1212,7 +1259,11 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         for (int i = 0; i < n; ++i) { dl[i] += l[i]; dr[i] += rr[i]; }
     };
     route(s->oscL[0], s->oscR[0], r[LY_FILTER_ROUTE_A] > 0.5f);
-    route(s->oscL[1], s->oscR[1], r[LY_FILTER_ROUTE_B] > 0.5f);
+    if (split && r[LY_FILTER_ROUTE_B] > 0.5f) {
+        for (int i = 0; i < n; ++i) { splitL[i] += s->oscL[1][i]; splitR[i] += s->oscR[1][i]; }
+    } else {
+        route(s->oscL[1], s->oscR[1], r[LY_FILTER_ROUTE_B] > 0.5f);
+    }
 
     // Sub and noise, each with its own pan.
     float extraL[kChunk], extraR[kChunk];
@@ -1319,7 +1370,17 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
             two = makeFilter((int)std::lround(r[LY_F2_TYPE]), hz, clamp01(p[LY_F2_RES] + m[LY_DST_F2_RES]),
                              clamp01(p[LY_F2_DRIVE] + m[LY_DST_F2_DRIVE]), clamp01(p[LY_F2_MIX] + m[LY_DST_F2_MIX]), s->sampleRate);
         }
-        const bool parallel = r[LY_FILTER_ROUTING] > 0.5f && f1On && f2On;
+        const bool parallel = routing == LY_ROUTING_PARALLEL && f1On && f2On;
+        // SATURATION between the filters: after filter 1 (and before filter 2
+        // in series).
+        const int satType = (int)std::lround(r[LY_FSAT_TYPE]);
+        const float satMix = clamp01(p[LY_FSAT_MIX]);
+        const bool satOn = satType > LY_FSAT_OFF && satType < LY_FSAT_COUNT && satMix > 0.0005f;
+        const float satDrive = clamp01(p[LY_FSAT_DRIVE] + m[LY_DST_FSAT_DRIVE]);
+        const float satGain = 1.f + satDrive * 15.f;
+        const float satSteps = std::exp2(12.f - satDrive * 10.f);
+        const float satStep = 1.f / (1.f + satDrive * satDrive * 40.f);
+        const float satDC = 1.f - (float)(kTwoPi * 5.0 / s->sampleRate);
         float gl = 1, gr = 1;
         const float fpan = clampf(p[LY_FILTER_PAN] + m[LY_DST_FILTER_PAN], -1, 1);
         if (std::fabs(fpan) > 0.001f) { gl = fpan > 0 ? 1.f - fpan : 1.f; gr = fpan < 0 ? 1.f + fpan : 1.f; }
@@ -1333,13 +1394,36 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         const float fbCoef = 1.f - std::exp(-(float)kTwoPi * std::min(fbHz, (float)s->sampleRate * 0.45f) / (float)s->sampleRate);
         for (int i = 0; i < n; ++i) {
             float in[2] = { wetL[i], wetR[i] };
+            const float in2[2] = { splitL[i], splitR[i] };
+            bool take = false;
+            if (satOn && satType == LY_FSAT_RATE) {
+                v.satPhase += satStep;
+                if (v.satPhase >= 1.f) { v.satPhase -= std::floor(v.satPhase); take = true; }
+            }
             for (int c = 0; c < 2; ++c) {
+                auto sat = [&](float y) {
+                    if (!satOn) return y;
+                    float z;
+                    if (satType == LY_FSAT_BITS) z = std::round(y * satSteps) / satSteps;
+                    else if (satType == LY_FSAT_RATE) { if (take) v.satHold[c] = y; z = v.satHold[c]; }
+                    else z = saturate(satType, y, satGain, satDrive, v.satDCX[c], v.satDCY[c], satDC);
+                    return y + (z - y) * satMix;
+                };
                 float x = in[c];
                 if (fbOn) x += fbGain * v.feedback[c];
-                if (parallel) {
-                    x = 0.5f * (v.filter[0][c].process(one, x) + v.filter[1][c].process(two, x)) * 1.4f;
+                if (split) {
+                    // A (with sub and noise) through filter 1 and the
+                    // saturation, B through filter 2, side by side.
+                    float a = f1On ? v.filter[0][c].process(one, x) : x;
+                    a = sat(a);
+                    float b = in2[c] + (fbOn ? fbGain * v.feedback[c] : 0.f);
+                    if (f2On) b = v.filter[1][c].process(two, b);
+                    x = a + b;
+                } else if (parallel) {
+                    x = 0.5f * (sat(v.filter[0][c].process(one, x)) + v.filter[1][c].process(two, x)) * 1.4f;
                 } else {
                     if (f1On) x = v.filter[0][c].process(one, x);
+                    x = sat(x);
                     if (f2On) x = v.filter[1][c].process(two, x);
                 }
                 if (fbOn) {
@@ -1365,7 +1449,10 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
 
     // Amplifier.
     const float sens = clamp01(r[LY_VEL_SENS]);
-    const float ampTarget = v.envelope[0].value * ((1.f - sens) + sens * v.velocity) * clampf(1.f + m[LY_DST_AMP], 0.f, 2.f);
+    float ampTarget = v.envelope[0].value * ((1.f - sens) + sens * v.velocity) * clampf(1.f + m[LY_DST_AMP], 0.f, 2.f);
+    // PUNCH: a short lift on each attack, gone after about 30 ms.
+    const float punch = clamp01(p[LY_PUNCH]);
+    if (punch > 0.0005f) ampTarget *= 1.f + punch * 1.5f * std::exp(-(float)v.elapsed / 0.012f);
     const float step = (ampTarget - v.amp) / n;
     float amp = v.amp;
     for (int i = 0; i < n; ++i) {
@@ -1442,6 +1529,8 @@ void startVoice(LYSynth *s, const Event &e, bool fromArp = false) {
         for (auto &filter : v.filter) for (auto &channel : filter) channel.reset();
         for (auto &insert : v.insert) insert.reset();
         for (int c = 0; c < 2; ++c) v.feedback[c] = v.feedbackLow[c] = v.feedbackDCX[c] = v.feedbackDCY[c] = 0;
+        for (int c = 0; c < 2; ++c) v.satHold[c] = v.satDCX[c] = v.satDCY[c] = 0;
+        v.satPhase = 1;
         v.noise.reset();
         v.noiseColor = 0;
         v.amp = 0;
@@ -1486,7 +1575,7 @@ void arpNoteOn(LYSynth *s, int note, int velocity) {
     if (s->heldCount >= kHeldNotes) return;
     const bool wasEmpty = s->heldCount == 0;
     s->held[s->heldCount++] = HeldNote { note, velocity, s->heldOrder++ };
-    if (wasEmpty) { s->arpCountdown = 0; s->arpIndex = 0; s->arpDirection = 1; s->arpStep = 0; s->arpFresh = true; }
+    if (wasEmpty) { s->arpCountdown = 0; s->arpIndex = 0; s->arpDirection = 1; s->arpStep = 0; s->arpFresh = true; s->arpPatternPos = 0; }
 }
 
 void arpNoteOff(LYSynth *s, int note) {
@@ -1518,13 +1607,28 @@ int arpSequence(const LYSynth *s, int *notes, int *velocities) {
     return count;
 }
 
-void arpFireStep(LYSynth *s) {
+/// Plays the next step and returns its length as a fraction of a step
+/// (the pattern's, or GATE); a rest returns 0.
+float arpFireStep(LYSynth *s) {
     arpReleaseSounding(s);
     int notes[kHeldNotes * 4], velocities[kHeldNotes * 4];
     const int count = arpSequence(s, notes, velocities);
-    if (count == 0) return;
+    if (count == 0) return 0;
     const int mode = (int)std::lround(s->raw[LY_ARP_MODE]);
-    auto play = [s](int note, int velocity) {
+    // PATTERN: each step's level scales the velocity (0 rests, and the note
+    // order waits for the next played step); its length replaces GATE.
+    float level = 1.f;
+    float gate = clampf(s->raw[LY_ARP_GATE], 0.05f, 1.f);
+    const int patternSteps = std::max(0, std::min((int)LY_ARP_PATTERN_STEPS, (int)std::lround(s->raw[LY_ARP_STEPS])));
+    if (patternSteps > 0) {
+        const int i = s->arpPatternPos % patternSteps;
+        s->arpPatternPos = (s->arpPatternPos + 1) % patternSteps;
+        level = clamp01(s->raw[LY_ARP_LEVEL_BASE + i]);
+        gate = clampf(s->raw[LY_ARP_LENGTH_BASE + i], 0.05f, 1.f);
+        if (level < 0.01f) { s->arpStep = s->arpStep < 0 ? 0 : s->arpStep + 1; return 0; }
+    }
+    auto play = [s, level](int note, int velocity) {
+        velocity = std::max(1, std::min(127, (int)std::lround(velocity * level)));
         startVoice(s, Event { 0, note, velocity, 0, 1.f, 0.f }, true);
         if (s->arpSoundingCount < kHeldNotes * 4) s->arpSounding[s->arpSoundingCount++] = note;
     };
@@ -1551,6 +1655,7 @@ void arpFireStep(LYSynth *s) {
         play(notes[index], velocities[index]);
     }
     s->arpStep = s->arpStep < 0 ? 0 : s->arpStep + 1;
+    return gate;
 }
 
 void arpAdvance(LYSynth *s, int n) {
@@ -1582,8 +1687,7 @@ void arpAdvance(LYSynth *s, int n) {
             s->arpFresh = false;
         }
         if (s->beat + 1e-9 >= gridBeat(s->arpNextStep)) {
-            arpFireStep(s);
-            s->arpGateLeft = stepSamples * clampf(s->raw[LY_ARP_GATE], 0.05f, 1.f);
+            s->arpGateLeft = stepSamples * arpFireStep(s);
             s->arpNextStep += 1;
         }
         return;
@@ -1591,13 +1695,13 @@ void arpAdvance(LYSynth *s, int n) {
     s->arpFresh = false;
     s->arpCountdown -= n;
     if (s->arpCountdown <= 0) {
-        arpFireStep(s);
+        const float gate = arpFireStep(s);
         // Swing pushes every second step late and pulls the next one in.
         const double swing = clamp01(s->raw[LY_ARP_SWING]) * 0.33 * stepSamples;
         const double length = (s->arpStep % 2 == 0) ? stepSamples + swing : stepSamples - swing;
         s->arpCountdown += length;
         if (s->arpCountdown < 1) s->arpCountdown = length;
-        s->arpGateLeft = stepSamples * clampf(s->raw[LY_ARP_GATE], 0.05f, 1.f);
+        s->arpGateLeft = stepSamples * gate;
     }
 }
 
@@ -1685,7 +1789,7 @@ void prepareEffects(LYSynth *s) {
     const float sr = (float)s->sampleRate;
     s->hyper.prepare(sr); s->distortion.prepare(sr); s->flanger.prepare(sr); s->phaser.prepare(sr);
     s->chorus.prepare(sr); s->junoChorus.prepare(sr); s->delay.prepare(sr); s->compressor.prepare(sr); s->eq.prepare(sr);
-    s->fxFilter.prepare(sr); s->reverb.prepare(sr);
+    s->fxFilter.prepare(sr); s->reverb.prepare(sr); s->vocoder.prepare(sr);
 }
 
 void clearEffect(LYSynth *s, int fx) {
@@ -1862,6 +1966,13 @@ void lysynth_midi(LYSynth *s, uint8_t status, uint8_t data1, uint8_t data2, uint
 }
 
 void lysynth_render(LYSynth *s, float *left, float *right, int frames, uint64_t blockHost) {
+    lysynth_render_input(s, left, right, nullptr, nullptr, frames, blockHost);
+}
+
+void lysynth_render_input(LYSynth *s, float *left, float *right, const float *inLeft, const float *inRight,
+                          int frames, uint64_t blockHost) {
+    if (inLeft && !inRight) inRight = inLeft;
+    s->vocoderInput = inLeft != nullptr;
     std::memset(left, 0, sizeof(float) * frames);
     std::memset(right, 0, sizeof(float) * frames);
 
@@ -1969,7 +2080,7 @@ void lysynth_render(LYSynth *s, float *left, float *right, int frames, uint64_t 
                 if (k == 0) { a += mod[LY_DST_ENV1_ATTACK]; d += mod[LY_DST_ENV1_DECAY]; rel += mod[LY_DST_ENV1_RELEASE]; }
                 if (k == 1) { a += mod[LY_DST_ENV2_ATTACK]; d += mod[LY_DST_ENV2_DECAY]; rel += mod[LY_DST_ENV2_RELEASE]; }
                 v.envelope[k].advance(n, s->sampleRate, clamp01(a), s->raw[LY_ENV1_H + k], clamp01(d), s->raw[b + 2], clamp01(rel),
-                                      s->raw[c], s->raw[c + 1], s->raw[c + 2]);
+                                      s->raw[c], s->raw[c + 1], s->raw[c + 2], clampf(s->raw[LY_ENV1_SLOPE + k], -1.f, 1.f));
             }
             for (int l = 0; l < 4; ++l) {
                 const int b = lfoBase(l);
@@ -1989,6 +2100,21 @@ void lysynth_render(LYSynth *s, float *left, float *right, int frames, uint64_t 
         const Voice &source = (s->newestVoice >= 0 && s->voices[s->newestVoice].active) ? s->voices[s->newestVoice] : s->idle;
         if (&source == &s->idle) evaluateMatrix(s, s->idle, s->fxMod);
         else std::memcpy(s->fxMod, source.modulation, sizeof(s->fxMod));
+
+        // VOCODER: before the rack, so the effects fall on the vocoded sound.
+        // With no input it stands aside and the synth plays as it is.
+        const bool vocoderOn = s->raw[LY_VOC_ON] > 0.5f && s->vocoderInput;
+        if (vocoderOn) {
+            const float *m = s->fxMod;
+            s->vocoder.process(outL, outR, inLeft + position, inRight + position, n,
+                               (int)std::lround(s->raw[LY_VOC_BANDS]), clamp01(s->smoothed[LY_VOC_ATTACK]),
+                               clamp01(s->smoothed[LY_VOC_RELEASE]), clampf(s->smoothed[LY_VOC_SHIFT] + m[LY_DST_VOC_SHIFT], -1.f, 1.f),
+                               clamp01(s->smoothed[LY_VOC_Q]), clamp01(s->smoothed[LY_VOC_HIGHS]), clamp01(s->smoothed[LY_VOC_GAIN]),
+                               clamp01(s->smoothed[LY_VOC_MIX] + m[LY_DST_VOC_MIX]));
+        } else if (s->vocoderWasOn) {
+            s->vocoder.clear();
+        }
+        s->vocoderWasOn = vocoderOn;
 
         processEffects(s, outL, outR, n);
 
@@ -2042,6 +2168,9 @@ void lysynth_render(LYSynth *s, float *left, float *right, int frames, uint64_t 
     }
     s->display[extra + 8].store((float)s->beat, std::memory_order_relaxed);
     s->display[extra + 9].store(s->songLocked ? 1.f : 0.f, std::memory_order_relaxed);
+    s->display[extra + 10].store(s->vocoderInput && s->raw[LY_VOC_ON] > 0.5f ? 1.f : 0.f, std::memory_order_relaxed);
+    for (int b = 0; b < LY_VOC_MAX_BANDS; ++b)
+        s->display[extra + 12 + b].store(s->vocoderWasOn ? std::min(1.f, s->vocoder.level[b] * 8.f) : 0.f, std::memory_order_relaxed);
 }
 
 void lysynth_set_song_position(LYSynth *s, double beat, int playing) {
@@ -2117,6 +2246,8 @@ void lysynth_get_display(const LYSynth *s, LYSynthDisplay *out) {
     }
     out->songBeat = s->display[extra + 8].load(std::memory_order_relaxed);
     out->songLocked = (int)s->display[extra + 9].load(std::memory_order_relaxed);
+    out->vocoderInput = (int)s->display[extra + 10].load(std::memory_order_relaxed);
+    for (int b = 0; b < LY_VOC_MAX_BANDS; ++b) out->vocoderBands[b] = s->display[extra + 12 + b].load(std::memory_order_relaxed);
 }
 
 void lysynth_get_scope(const LYSynth *s, float *out, int count) {
