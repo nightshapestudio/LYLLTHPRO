@@ -21,6 +21,8 @@ struct ArrangementView: View {
     var openPattern: (UUID, UUID) -> Void = { _, _ in }
     /// Opens a note clip (track id, clip id) in the piano roll.
     var openNotes: (UUID, UUID) -> Void = { _, _ in }
+    /// Opens the automation target menu: (track id, lane id or nil to add one).
+    var openAutomationMenu: (UUID, UUID?) -> Void = { _, _ in }
 
     @EnvironmentObject private var audio: AudioEngineController
 
@@ -76,6 +78,7 @@ struct ArrangementView: View {
                         ruler
                         ForEach(Array(session.tracks.indices), id: \.self) { index in
                             trackLane(index: index)
+                            AnyView(automationRows(index: index))
                         }
                         addTrackLane
                     }
@@ -569,6 +572,14 @@ struct ArrangementView: View {
                 isMuted: $session.tracks[index].isMuted,
                 isSolo: $session.tracks[index].isSolo,
                 isArmed: track.kind == .auxiliary ? nil : $session.tracks[index].isArmed,
+                showsAutomation: Binding(
+                    get: { session.tracks.indices.contains(index) && session.tracks[index].showsAutomation == true },
+                    set: { value in
+                        guard session.tracks.indices.contains(index) else { return }
+                        session.tracks[index].showsAutomation = value ? true : nil
+                    }
+                ),
+                automationCount: (track.automation ?? []).count,
                 instrumentIcon: track.kind == .drumkit ? "waveform.path" : (track.kind == .instrument && track.isChordTrack != true ? "pianokeys" : nil),
                 openInstrument: { track.kind == .drumkit ? openDrums(track.id) : openSynth(track.id) }
             )
@@ -693,6 +704,94 @@ struct ArrangementView: View {
         }
         .background(selected ? LYLLTHTheme.panel : LYLLTHTheme.deck)
         .overlay(alignment: .bottom) { LYHairline() }
+    }
+
+    // MARK: Automation
+
+    private let automationHeight: CGFloat = 64
+
+    private func laneBinding(trackID: UUID, laneID: UUID) -> Binding<LYAutomationLane>? {
+        guard let t = session.tracks.firstIndex(where: { $0.id == trackID }),
+              let lane = session.tracks[t].automation?.first(where: { $0.id == laneID }) else { return nil }
+        return Binding(
+            get: { session.tracks.first { $0.id == trackID }?.automation?.first { $0.id == laneID } ?? lane },
+            set: { value in
+                guard let t = session.tracks.firstIndex(where: { $0.id == trackID }),
+                      let l = session.tracks[t].automation?.firstIndex(where: { $0.id == laneID }) else { return }
+                session.tracks[t].automation?[l] = value
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func automationRows(index: Int) -> some View {
+        let track = session.tracks[index]
+        if track.showsAutomation == true {
+            let accent = LYLLTHTheme.trackAccent(position: index)
+            ForEach(track.automation ?? []) { lane in
+                if let binding = laneBinding(trackID: track.id, laneID: lane.id) {
+                    HStack(spacing: 0) {
+                        LYAutomationLaneHeader(
+                            title: lane.target.title(in: session),
+                            accent: accent,
+                            anchor: "auto.\(lane.id)",
+                            isBypassed: Binding(get: { binding.wrappedValue.isBypassed == true },
+                                                set: { binding.wrappedValue.isBypassed = $0 ? true : nil }),
+                            pickTarget: { openAutomationMenu(track.id, lane.id) },
+                            remove: {
+                                guard let t = session.tracks.firstIndex(where: { $0.id == track.id }) else { return }
+                                session.tracks[t].automation?.removeAll { $0.id == lane.id }
+                            }
+                        )
+                        .frame(width: headerWidth, height: automationHeight)
+                        LYAutomationLaneView(
+                            lane: binding,
+                            accent: accent,
+                            beatWidth: beatWidth,
+                            snap: { snapBeat($0, $0) },
+                            songBeat: { [audio] in audio.currentSongBeat() },
+                            isPlaying: isPlaying && audio.transportMode == .song
+                        )
+                        .frame(width: CGFloat(beats) * beatWidth, height: automationHeight)
+                        .background(
+                            BeatGrid(beats: beats, beatWidth: beatWidth, height: automationHeight, beatsPerBar: beatsPerBar,
+                                     subdivisionBeats: displayGridBeats, showsGrid: editor.showsGrid)
+                                .opacity(0.6)
+                                .allowsHitTesting(false)
+                        )
+                    }
+                    .background(LYLLTHTheme.background)
+                    .overlay(alignment: .bottom) { LYHairline() }
+                }
+            }
+            HStack(spacing: 0) {
+                Button { openAutomationMenu(track.id, nil) } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "plus").font(.system(size: 8, weight: .bold))
+                        Text("AUTOMATION LANE").font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.4)
+                    }
+                    .foregroundStyle(LYLLTHTheme.indigo)
+                    .padding(.horizontal, 8)
+                    .frame(height: 20)
+                    .overlay(Rectangle().stroke(LYLLTHTheme.indigo.opacity(0.5), lineWidth: 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .lyMenuAnchor("auto.add.\(track.id)")
+                .padding(.leading, 18)
+                .frame(width: headerWidth, height: 30, alignment: .leading)
+                if (track.automation ?? []).isEmpty {
+                    Text("PICK VOLUME, PAN, A SEND, AN EFFECT OR A LUNATK KNOB · CLICK THE LANE TO ADD POINTS")
+                        .font(LYLLTHTheme.label(7, weight: .bold))
+                        .tracking(1.2)
+                        .foregroundStyle(LYLLTHTheme.dim)
+                        .padding(.leading, 12)
+                }
+                Spacer(minLength: 0)
+            }
+            .background(LYLLTHTheme.background)
+            .overlay(alignment: .bottom) { LYHairline() }
+        }
     }
 
     /// Melodic tracks take piano-roll clips; drums and chord tracks keep steps.
@@ -1033,6 +1132,8 @@ private struct LYTrackHeader: View {
     @Binding var isMuted: Bool
     @Binding var isSolo: Bool
     var isArmed: Binding<Bool>?
+    var showsAutomation: Binding<Bool>? = nil
+    var automationCount = 0
     var instrumentIcon: String? = nil
     var openInstrument: () -> Void = {}
 
@@ -1078,6 +1179,15 @@ private struct LYTrackHeader: View {
                 LYTrackToggle(title: "R", isOn: isArmed, tint: LYLLTHTheme.record)
                     .help("Record arm")
             }
+            if let showsAutomation {
+                LYTrackToggle(title: "A", isOn: showsAutomation, tint: LYLLTHTheme.indigo)
+                    .overlay(alignment: .topTrailing) {
+                        if automationCount > 0 && !showsAutomation.wrappedValue {
+                            Circle().fill(LYLLTHTheme.indigo).frame(width: 4, height: 4).offset(x: 1.5, y: -1.5)
+                        }
+                    }
+                    .help("Show automation lanes")
+            }
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1110,7 +1220,7 @@ struct LYTrackToggle: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(title == "M" ? "Mute" : (title == "S" ? "Solo" : "Record arm"))
+        .accessibilityLabel(["M": "Mute", "S": "Solo", "R": "Record arm", "A": "Automation"][title] ?? title)
         .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }

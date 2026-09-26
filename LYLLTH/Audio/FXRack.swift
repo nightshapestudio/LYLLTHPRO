@@ -432,7 +432,10 @@ enum LYChannelMap {
             guard let index = map[track.id] else { continue }
             var route = NightshapeAudioEngine.BusRoute()
             for send in track.sends ?? [] {
-                guard let target = map[send.busID], send.level > 0.0001 else { continue }
+                // An automated send keeps its connection at zero, so a
+                // lane riding it up never rewires the graph mid-song.
+                let automated = (track.automation ?? []).contains { $0.target == .send(send.busID) && $0.isActive }
+                guard let target = map[send.busID], send.level > 0.0001 || automated else { continue }
                 route.sends[target, default: 0] += send.level
             }
             if let output = track.outputBusID, let target = map[output], target != index {

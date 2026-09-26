@@ -22,6 +22,12 @@ final class AudioEngineController: ObservableObject {
         player.instrument = { [weak self] id in self?.instruments[id] }
         return player
     }()
+    private lazy var automationPlayer: LYAutomationPlayer = {
+        let player = LYAutomationPlayer(engine: engine)
+        player.instrument = { [weak self] id in self?.instruments[id] }
+        player.songBeat = { [weak self] in self?.currentSongBeat() }
+        return player
+    }()
     private lazy var timeline: LYTimelineAudioPlayer = {
         let player = LYTimelineAudioPlayer(engine: engine)
         player.onRenderError = { [weak self] message in self?.audioEventError = message }
@@ -115,9 +121,11 @@ final class AudioEngineController: ObservableObject {
                 if playing && self.transportMode == .song {
                     self.timeline.start()
                     self.notePlayer.start()
+                    self.automationPlayer.start()
                 } else {
                     self.timeline.stop()
                     self.notePlayer.stop()
+                    self.automationPlayer.stop()
                 }
             }
             .store(in: &cancellables)
@@ -133,9 +141,11 @@ final class AudioEngineController: ObservableObject {
         if isPlaying && mode == .song {
             timeline.start()
             notePlayer.start()
+            automationPlayer.start()
         } else {
             timeline.stop()
             notePlayer.stop()
+            automationPlayer.stop()
         }
     }
 
@@ -152,6 +162,7 @@ final class AudioEngineController: ObservableObject {
         if window != songWindow { songWindow = window }
         timeline.update(session: session, assets: assets, window: window)
         notePlayer.update(session: session, window: window)
+        automationPlayer.update(session: session)
     }
 
     /// The song beat being heard right now, for the arrangement playhead.

@@ -926,6 +926,10 @@ struct LYTrack: Codable, Identifiable, Equatable {
     var chokeGroup: Int? = nil
     /// DrumKit's track-shaping ADSR. nil leaves the sound as it is.
     var envelope: TrackEnvelopeState? = nil
+    /// Automation lanes, drawn under the track in SONG.
+    var automation: [LYAutomationLane]? = nil
+    /// Whether the lanes are open under the track.
+    var showsAutomation: Bool? = nil
 }
 
 extension LYTrack {

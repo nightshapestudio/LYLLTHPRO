@@ -122,6 +122,8 @@ private enum LYWorkspaceMenu: Equatable {
     case songKey
     case addTrack
     case arrangementSnap
+    /// Pick what a lane moves: (track, lane), lane nil to add one.
+    case automation(UUID, UUID?)
 }
 
 private struct LYAudioImportTarget {
@@ -441,7 +443,10 @@ struct WorkspaceView: View {
             openSynth: { openSynth($0) },
             openDrums: { openDrums($0) },
             openPattern: { openPattern(trackID: $0, clipID: $1) },
-            openNotes: { openNotes(trackID: $0, clipID: $1) }
+            openNotes: { openNotes(trackID: $0, clipID: $1) },
+            openAutomationMenu: { trackID, laneID in
+                presentMenu(.automation(trackID, laneID), from: laneID.map { "auto.\($0)" } ?? "auto.add.\(trackID)")
+            }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1060,6 +1065,33 @@ struct WorkspaceView: View {
         }
     }
 
+    /// Adds a lane for `target`, or points an existing lane at it. A new lane
+    /// starts with one point at the control's current value, so nothing
+    /// jumps until the line is drawn.
+    private func setAutomationTarget(_ target: LYAutomationTarget, trackID: UUID, laneID: UUID?) {
+        guard let index = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        var lanes = document.session.tracks[index].automation ?? []
+        let start = target.staticValue(of: document.session.tracks[index])
+        if let laneID, let l = lanes.firstIndex(where: { $0.id == laneID }) {
+            guard lanes[l].target != target else { return }
+            lanes[l].target = target
+            lanes[l].points = [LYAutomationPoint(beat: 0, value: start)]
+        } else {
+            lanes.append(LYAutomationLane(target: target, points: [LYAutomationPoint(beat: 0, value: start)]))
+        }
+        document.session.tracks[index].automation = lanes
+        document.session.tracks[index].showsAutomation = true
+        // A send lane needs its connection even while the send is at zero.
+        if case .send(let busID) = target {
+            var sends = document.session.tracks[index].sends ?? []
+            if !sends.contains(where: { $0.busID == busID }) {
+                sends.append(LYBusSend(busID: busID, level: 0))
+                document.session.tracks[index].sends = sends
+            }
+            audio.syncSequencer(document.session)
+        }
+    }
+
     private func presentMenu(_ menu: LYWorkspaceMenu, from anchor: String? = nil) {
         menuAnchorID = anchor
         withAnimation(LYLLTHTheme.snap) { activeMenu = menu }
@@ -1082,6 +1114,20 @@ struct WorkspaceView: View {
                         ),
                         close: dismissMenu
                     )
+                case .automation(let trackID, let laneID):
+                    if let track = document.session.tracks.first(where: { $0.id == trackID }) {
+                        LYAutomationTargetPanel(
+                            track: track,
+                            session: document.session,
+                            current: laneID.flatMap { id in track.automation?.first { $0.id == id }?.target },
+                            taken: Set((track.automation ?? []).map(\.target)),
+                            choose: { target in
+                                setAutomationTarget(target, trackID: trackID, laneID: laneID)
+                                dismissMenu()
+                            },
+                            close: dismissMenu
+                        )
+                    }
                 case .addTrack:
                     AddTrackPanel(
                         add: { kind in
