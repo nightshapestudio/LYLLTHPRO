@@ -27,6 +27,7 @@ constexpr int kPending = 1024;
 constexpr int kScope = 2048;
 constexpr int kCombSize = 4096;      // voice comb filter: down to ~11 Hz at 44.1 kHz
 constexpr int kHeldNotes = 32;
+constexpr int kInsertComb = 2048;   // voice insert comb: down to ~22 Hz at 44.1 kHz
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 
 // MARK: - Small helpers
@@ -441,6 +442,150 @@ struct NoiseState {
     }
 };
 
+// MARK: - Voice inserts
+
+/// One insert slot's memory, per voice.
+struct InsertState {
+    float hold[2];
+    float holdPhase;
+    double carrier;                      // ring modulator / frequency shifter oscillator
+    float dcX[2], dcY[2];
+    float hilbert[2][8][4];              // [channel][stage][x1 x2 y1 y2]
+    float hilbertDelay[2];
+    float comb[2][kInsertComb];
+    int combWrite;
+    void reset() { std::memset(this, 0, sizeof(*this)); holdPhase = 1; }
+};
+
+// Two 4-stage allpass chains 90° apart across the audio band (Olli Niemitalo's
+// coefficients), for the frequency shifter.
+const float kHilbertA[4] = { 0.6923878f, 0.9360654322959f, 0.9882295226860f, 0.9987488452737f };
+const float kHilbertB[4] = { 0.4021921162426f, 0.8561710882420f, 0.9722909545651f, 0.9952884791278f };
+
+inline float hilbertChain(float (*stages)[4], const float *coefficients, float x) {
+    for (int k = 0; k < 4; ++k) {
+        float *st = stages[k];
+        const float a2 = coefficients[k] * coefficients[k];
+        const float y = a2 * (x + st[3]) - st[1];
+        st[1] = st[0]; st[0] = x;
+        st[3] = st[2]; st[2] = y;
+        x = y;
+    }
+    return x;
+}
+
+/// One insert over a chunk, in place. `noteHz` is the voice's pitch.
+void processInsert(InsertState &st, int type, float *L, float *R, int n, float amount, float freq, float mix,
+                   double noteHz, double sampleRate) {
+    if (type <= LY_INS_OFF || type >= LY_INS_COUNT || mix <= 0.0005f) return;
+    float *ch[2] = { L, R };
+    switch (type) {
+    case LY_INS_BITCRUSH: {
+        const float steps = std::exp2(15.f - amount * 13.f);
+        for (int c = 0; c < 2; ++c) for (int i = 0; i < n; ++i) {
+            const float x = ch[c][i];
+            ch[c][i] = x + (std::round(x * steps) / steps - x) * mix;
+        }
+        break;
+    }
+    case LY_INS_DECIMATE: {
+        const float step = 1.f / (1.f + amount * amount * 63.f);
+        for (int i = 0; i < n; ++i) {
+            st.holdPhase += step;
+            if (st.holdPhase >= 1.f) { st.holdPhase -= std::floor(st.holdPhase); st.hold[0] = L[i]; st.hold[1] = R[i]; }
+            L[i] += (st.hold[0] - L[i]) * mix;
+            R[i] += (st.hold[1] - R[i]) * mix;
+        }
+        break;
+    }
+    case LY_INS_SINE: {
+        const float drive = (1.f + amount * 11.f) * 1.5707963f;
+        for (int c = 0; c < 2; ++c) for (int i = 0; i < n; ++i) {
+            const float x = ch[c][i];
+            ch[c][i] = x + (std::sin(clampf(x * drive, -40.f, 40.f)) - x) * mix;
+        }
+        break;
+    }
+    case LY_INS_FOLD: {
+        const float drive = 1.f + amount * 7.f;
+        for (int c = 0; c < 2; ++c) for (int i = 0; i < n; ++i) {
+            const float x = ch[c][i];
+            const float u = clampf(x * drive, -64.f, 64.f) * 0.25f + 0.25f;
+            const float y = 1.f - 4.f * std::fabs(u - std::floor(u) - 0.5f);
+            ch[c][i] = x + (y - x) * mix;
+        }
+        break;
+    }
+    case LY_INS_RECTIFY: {
+        // Rectifying makes DC; a blocker takes it back out.
+        for (int c = 0; c < 2; ++c) for (int i = 0; i < n; ++i) {
+            const float x = ch[c][i];
+            const float y = x + (std::fabs(x) - x) * amount;
+            const float out = y - st.dcX[c] + 0.995f * st.dcY[c];
+            st.dcX[c] = y; st.dcY[c] = flushf(out);
+            ch[c][i] = x + (out - x) * mix;
+        }
+        break;
+    }
+    case LY_INS_RING: {
+        const double hz = std::min(noteHz * std::pow(2.0, (freq - 0.5) * 8.0), sampleRate * 0.45);
+        const double increment = hz / sampleRate;
+        for (int i = 0; i < n; ++i) {
+            st.carrier += increment; st.carrier -= std::floor(st.carrier);
+            const float c = std::sin((float)kTwoPi * (float)st.carrier);
+            const float g = (1.f - amount) + amount * c;
+            L[i] += (L[i] * g - L[i]) * mix;
+            R[i] += (R[i] * g - R[i]) * mix;
+        }
+        break;
+    }
+    case LY_INS_SHIFT: {
+        // Up to ±2 kHz, finer near the middle.
+        const float f = (freq - 0.5f) * 2.f;
+        const double hz = (f < 0 ? -1.0 : 1.0) * f * f * 2000.0;
+        const double increment = hz / sampleRate;
+        for (int i = 0; i < n; ++i) {
+            st.carrier += increment; st.carrier -= std::floor(st.carrier);
+            const float cs = std::cos((float)kTwoPi * (float)st.carrier), sn = std::sin((float)kTwoPi * (float)st.carrier);
+            for (int c = 0; c < 2; ++c) {
+                const float x = ch[c][i];
+                const float re = st.hilbertDelay[c];
+                st.hilbertDelay[c] = hilbertChain(st.hilbert[c], kHilbertA, x);
+                const float im = hilbertChain(st.hilbert[c] + 4, kHilbertB, x);
+                const float shifted = re * cs - im * sn;
+                const float y = x + (shifted - x) * amount;
+                ch[c][i] = x + (y - x) * mix;
+            }
+        }
+        for (int c = 0; c < 2; ++c) for (auto &stage : st.hilbert[c]) for (auto &v : stage) v = flushf(v);
+        break;
+    }
+    case LY_INS_COMB: {
+        const double hz = std::max(25.0, noteHz * std::pow(2.0, (freq - 0.5) * 4.0));
+        const float delay = (float)std::min((double)kInsertComb - 2, std::max(2.0, sampleRate / hz));
+        const float feedback = amount * 0.95f;
+        const float gain = std::sqrt(1.f - feedback * feedback);
+        for (int i = 0; i < n; ++i) {
+            float read = (float)st.combWrite - delay;
+            if (read < 0) read += kInsertComb;
+            const int r0 = (int)read;
+            const float t = read - r0;
+            const int r1 = (r0 + 1) % kInsertComb;
+            for (int c = 0; c < 2; ++c) {
+                const float delayed = st.comb[c][r0] + (st.comb[c][r1] - st.comb[c][r0]) * t;
+                const float x = ch[c][i];
+                const float y = x + feedback * delayed;
+                st.comb[c][st.combWrite] = flushf(fastTanh(y));
+                ch[c][i] = x + (y * gain - x) * mix;
+            }
+            st.combWrite = (st.combWrite + 1) % kInsertComb;
+        }
+        break;
+    }
+    default: break;
+    }
+}
+
 // MARK: - Voices, events
 
 struct Voice {
@@ -472,6 +617,8 @@ struct Voice {
     float modulation[LY_DST_COUNT] = {};
     float wavetablePosition[2] = {0, 0};
     float cutoffHz = 1000, cutoff2Hz = 1000;
+    InsertState insert[2];
+    float feedback[2] = {}, feedbackLow[2] = {}, feedbackDCX[2] = {}, feedbackDCY[2] = {};
 };
 
 struct Event {
@@ -547,6 +694,26 @@ struct LYSynth {
     int arpSounding[kHeldNotes * 4];
     int arpSoundingCount = 0;
     bool arpWasOn = false;
+    bool arpFresh = false;            // grid mode: a new chord waits for (or lands on) a grid line
+    long arpNextStep = 0;             // grid mode: the grid step that fires next
+
+    // Song position. `beat` runs on its own at the tempo when no transport
+    // drives it; a host's position locks it (and so the synced LFOs, the
+    // arpeggiator and the performers) to the bar.
+    double beat = 0;
+    bool songLocked = false;
+    bool blockPositionValid = false;
+    double blockBeat = 0;
+    bool blockPlaying = false;
+    std::atomic<uint32_t> anchorVersion { 0 };
+    std::atomic<uint64_t> anchorHost { 0 };
+    std::atomic<double> anchorBeat { 0 };
+    std::atomic<int> anchorPlaying { 0 };
+
+    // Performers: the pattern a switch key picked (-1: the patch's own).
+    int perfOverride = -1;
+    int perfPatternParam[2] = { -1, -1 };
+    int perfPattern[2] = { 0, 0 };
 
     // Effects.
     lyfx::Hyper hyper;
@@ -565,7 +732,7 @@ struct LYSynth {
 
     float scope[kScope] = {};
     std::atomic<uint32_t> scopeWrite { 0 };
-    std::atomic<float> display[40 + LY_DST_COUNT];
+    std::atomic<float> display[40 + LY_DST_COUNT + 10];
 
     float mixL[kChunk], mixR[kChunk];
     float busL[kChunk], busR[kChunk];
@@ -613,6 +780,34 @@ void setDefaults(LYSynth *s) {
     set(LY_BEND_RANGE, 2);
     set(LY_ARP_RATE, 10.f / 14.f); set(LY_ARP_OCTAVES, 1); set(LY_ARP_GATE, 0.6f);
 
+    set(LY_FB_DRIVE, 0.3f); set(LY_FB_TONE, 0.7f);
+    for (int k = 0; k < 2; ++k) {
+        const int b = LY_INS1_TYPE + k * LY_INS_STRIDE;
+        set(b + (LY_INS1_AMOUNT - LY_INS1_TYPE), 0.5f);
+        set(b + (LY_INS1_FREQ - LY_INS1_TYPE), 0.5f);
+        set(b + (LY_INS1_MIX - LY_INS1_TYPE), 1);
+    }
+    // Performers start with four useful patterns: sixteenth pulses, a
+    // syncopated rhythm, a one-bar rise and a stepped line.
+    const char *rhythm = "x..x..x...x.x...";
+    const float line[16] = { 1, -0.5f, 0.5f, -1, 0.75f, -0.25f, 0.25f, -0.75f, 1, -0.5f, 0.5f, -1, 0.75f, 0, 0.5f, -0.5f };
+    for (int k = 0; k < 2; ++k) {
+        const int b = LY_PERF1_MODE + k * LY_PERF_STRIDE;
+        set(b + (LY_PERF1_RATE - LY_PERF1_MODE), 10.f / 14.f);
+        set(b + (LY_PERF1_STEPS - LY_PERF1_MODE), 16);
+        for (int i = 0; i < LY_PERF_MAX_STEPS; ++i) {
+            auto at = [&](int pattern) { return (k * LY_PERF_PATTERNS + pattern) * LY_PERF_MAX_STEPS + i; };
+            set(LY_PERF_VALUES_BASE + at(0), 1); set(LY_PERF_SHAPES_BASE + at(0), LY_PSTEP_DECAY);
+            set(LY_PERF_VALUES_BASE + at(1), rhythm[i] == 'x' ? 1.f : 0.f); set(LY_PERF_SHAPES_BASE + at(1), LY_PSTEP_DECAY);
+            set(LY_PERF_VALUES_BASE + at(2), -1.f + 2.f * i / 15.f); set(LY_PERF_SHAPES_BASE + at(2), LY_PSTEP_GLIDE);
+            set(LY_PERF_VALUES_BASE + at(3), line[i]); set(LY_PERF_SHAPES_BASE + at(3), LY_PSTEP_HOLD);
+        }
+    }
+    set(LY_PERF_KEYROOT, 24);
+    set(LY_TRACK1_SOURCE, LY_SRC_NOTE); set(LY_TRACK2_SOURCE, LY_SRC_VELOCITY);
+    for (int t = 0; t < 2; ++t)
+        for (int i = 0; i < LY_TRACK_POINTS; ++i) set(LY_TRACK_POINTS_BASE + t * LY_TRACK_POINTS + i, -1.f + 2.f * i / (float)(LY_TRACK_POINTS - 1));
+
     for (int i = 0; i < LY_FX_COUNT; ++i) set(LY_FX_ORDER + i, kDefaultFXOrder[i]);
     set(LY_HYPER_RATE, 0.4f); set(LY_HYPER_DETUNE, 0.25f); set(LY_HYPER_VOICES, 0.5f); set(LY_HYPER_MIX, 0.5f);
     set(LY_HYPER_DIM_SIZE, 0.5f);
@@ -643,6 +838,12 @@ void buildSmoothing(LYSynth *s) {
                     LY_FILTER_CUTOFF, LY_FILTER_RES, LY_FILTER_DRIVE, LY_FILTER_KEYTRACK, LY_FILTER_ENVAMT, LY_FILTER_MIX,
                     LY_FILTER_PAN, LY_F2_CUTOFF, LY_F2_RES, LY_F2_DRIVE, LY_F2_KEYTRACK, LY_F2_ENVAMT, LY_F2_MIX,
                     LY_MACRO1, LY_MACRO2, LY_MACRO3, LY_MACRO4, LY_MODWHEEL, LY_MASTER, LY_TUNE }) on(id);
+    for (int id : { (int)LY_MACRO5, (int)LY_MACRO6, (int)LY_MACRO7, (int)LY_MACRO8,
+                    (int)LY_FB_AMOUNT, (int)LY_FB_DRIVE, (int)LY_FB_TONE }) on(id);
+    for (int k = 0; k < 2; ++k) {
+        const int b = LY_INS1_TYPE + k * LY_INS_STRIDE;
+        for (int f : { LY_INS1_AMOUNT, LY_INS1_FREQ, LY_INS1_MIX }) on(b + (f - LY_INS1_TYPE));
+    }
     for (int l = 0; l < 4; ++l) on(lfoBase(l) + (LY_LFO1_RATE - LY_LFO1_SHAPE));
     for (int id = LY_HYPER_ON; id < LY_MATRIX_BASE; ++id) on(id);
     for (int id : { LY_HYPER_ON, LY_DIST_ON, LY_DIST_MODE, LY_FLANGER_ON, LY_PHASER_ON, LY_CHORUS_ON, LY_DELAY_ON,
@@ -820,6 +1021,7 @@ inline bool isUnipolar(int source) {
     switch (source) {
     case LY_SRC_LFO1: case LY_SRC_LFO2: case LY_SRC_LFO3: case LY_SRC_LFO4:
     case LY_SRC_NOTE: case LY_SRC_RANDOM: case LY_SRC_PITCHBEND:
+    case LY_SRC_PERF1: case LY_SRC_PERF2: case LY_SRC_TRACK1: case LY_SRC_TRACK2:
         return false;
     default: return true;
     }
@@ -838,6 +1040,60 @@ inline float lfoValue(const LYSynth *s, const Voice &v, int l) {
         if (rise > 0.001f && t < rise) value *= (float)(t / rise);
     }
     return value;
+}
+
+/// Where a performer reads its pattern: the song's beat (SONG), or beats
+/// since this voice's note began (TRIG).
+inline double performerBeat(const LYSynth *s, const Voice &v, int k) {
+    const int mode = (int)std::lround(s->raw[LY_PERF1_MODE + k * LY_PERF_STRIDE]);
+    if (mode == LY_PERFMODE_TRIG) return v.elapsed * std::max(20.f, s->raw[LY_BPM]) / 60.0;
+    return s->beat;
+}
+
+/// A performer's output at `beat`: the step it is on, shaped across the step.
+float performerValue(const LYSynth *s, int k, double beat, int *stepOut = nullptr) {
+    const int b = LY_PERF1_MODE + k * LY_PERF_STRIDE;
+    const int steps = std::max(1, std::min((int)LY_PERF_MAX_STEPS, (int)std::lround(s->raw[b + (LY_PERF1_STEPS - LY_PERF1_MODE)])));
+    const double stepBeats = syncBeats(s->raw[b + (LY_PERF1_RATE - LY_PERF1_MODE)]);
+    double position = std::fmod(beat / stepBeats, (double)steps);
+    if (position < 0) position += steps;
+    const int i = std::min(steps - 1, (int)position);
+    const float t = (float)(position - i);
+    const int row = (k * LY_PERF_PATTERNS + s->perfPattern[k]) * LY_PERF_MAX_STEPS;
+    const float value = s->raw[LY_PERF_VALUES_BASE + row + i];
+    const int shape = (int)std::lround(s->raw[LY_PERF_SHAPES_BASE + row + i]);
+    if (stepOut) *stepOut = i;
+    switch (shape) {
+    case LY_PSTEP_RAMP_UP: return value * t;
+    case LY_PSTEP_RAMP_DOWN: return value * (1.f - t);
+    case LY_PSTEP_TRIANGLE: return value * (1.f - std::fabs(2.f * t - 1.f));
+    case LY_PSTEP_DECAY: return value * std::exp(-5.f * t);
+    case LY_PSTEP_RISE: return value * (std::exp(3.f * t) - 1.f) / (std::exp(3.f) - 1.f);
+    case LY_PSTEP_PULSE: return t < 0.5f ? value : 0.f;
+    case LY_PSTEP_GLIDE: {
+        const float previous = s->raw[LY_PERF_VALUES_BASE + row + (i + steps - 1) % steps];
+        return previous + (value - previous) * (0.5f - 0.5f * std::cos((float)M_PI * t));
+    }
+    default: return value;
+    }
+}
+
+inline float sourceValue(const LYSynth *s, const Voice &v, int source);
+
+/// Where a tracker reads its curve (0…1) for this voice's source.
+float trackerInput(const LYSynth *s, const Voice &v, int t) {
+    const int source = (int)std::lround(s->raw[LY_TRACK1_SOURCE + t]);
+    if (source <= LY_SRC_NONE || source >= LY_SRC_COUNT || source == LY_SRC_TRACK1 || source == LY_SRC_TRACK2) return 0;
+    const float x = sourceValue(s, v, source);
+    return clamp01(isUnipolar(source) ? x : 0.5f + 0.5f * x);
+}
+
+float trackerValue(const LYSynth *s, const Voice &v, int t) {
+    const float position = trackerInput(s, v, t) * (LY_TRACK_POINTS - 1);
+    const int i = std::min(LY_TRACK_POINTS - 2, (int)position);
+    const float f = position - i;
+    const float *points = s->raw + LY_TRACK_POINTS_BASE + t * LY_TRACK_POINTS;
+    return points[i] + (points[i + 1] - points[i]) * f;
 }
 
 inline float sourceValue(const LYSynth *s, const Voice &v, int source) {
@@ -859,6 +1115,13 @@ inline float sourceValue(const LYSynth *s, const Voice &v, int source) {
     case LY_SRC_PRESSURE: return v.pressure;
     case LY_SRC_TIMBRE: return s->raw[LY_MPE] > 0.5f ? s->channelTimbre[v.channel & 15] : s->channelTimbre[0];
     case LY_SRC_PITCHBEND: return s->masterBend;
+    case LY_SRC_MACRO5: case LY_SRC_MACRO6: case LY_SRC_MACRO7: case LY_SRC_MACRO8:
+        return s->smoothed[LY_MACRO5 + (source - LY_SRC_MACRO5)];
+    case LY_SRC_PERF1: case LY_SRC_PERF2: {
+        const int k = source - LY_SRC_PERF1;
+        return performerValue(s, k, performerBeat(s, v, k));
+    }
+    case LY_SRC_TRACK1: case LY_SRC_TRACK2: return trackerValue(s, v, source - LY_SRC_TRACK1);
     default: return 0;
     }
 }
@@ -998,6 +1261,34 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         route(extraL, extraR, r[LY_FILTER_ROUTE_NOISE] > 0.5f);
     }
 
+    // Voice inserts, per slot, before or after the filters.
+    auto runInserts = [&](int position, float *L, float *R) {
+        for (int k = 0; k < 2; ++k) {
+            const int b = LY_INS1_TYPE + k * LY_INS_STRIDE;
+            const int type = (int)std::lround(r[b]);
+            if (type <= LY_INS_OFF || type >= LY_INS_COUNT) continue;
+            if ((r[b + (LY_INS1_POSITION - LY_INS1_TYPE)] > 0.5f ? 1 : 0) != position) continue;
+            const int d = k == 0 ? LY_DST_INS1_AMOUNT : LY_DST_INS2_AMOUNT;
+            processInsert(v.insert[k], type, L, R, n,
+                          clamp01(p[b + (LY_INS1_AMOUNT - LY_INS1_TYPE)] + m[d]),
+                          clamp01(p[b + (LY_INS1_FREQ - LY_INS1_TYPE)] + m[d + 1]),
+                          clamp01(p[b + (LY_INS1_MIX - LY_INS1_TYPE)]), v.frequency, s->sampleRate);
+        }
+    };
+    auto anyInsertAt = [&](int position) {
+        for (int k = 0; k < 2; ++k) {
+            const int b = LY_INS1_TYPE + k * LY_INS_STRIDE;
+            const int type = (int)std::lround(r[b]);
+            if (type > LY_INS_OFF && type < LY_INS_COUNT && (r[b + (LY_INS1_POSITION - LY_INS1_TYPE)] > 0.5f ? 1 : 0) == position) return true;
+        }
+        return false;
+    };
+    // Before the filters they work on what goes into them (everything, with
+    // no filter on).
+    if (anyInsertAt(0)) {
+        if (anyFilter) runInserts(0, wetL, wetR); else runInserts(0, dryL, dryR);
+    }
+
     // Filters: 1 then 2 (serial), or both from the same input (parallel).
     if (anyFilter) {
         auto cutoffHz = [&](float cutoff, float keytrack, float envAmount, float env, float mod) {
@@ -1021,20 +1312,44 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         float gl = 1, gr = 1;
         const float fpan = clampf(p[LY_FILTER_PAN] + m[LY_DST_FILTER_PAN], -1, 1);
         if (std::fabs(fpan) > 0.001f) { gl = fpan > 0 ? 1.f - fpan : 1.f; gr = fpan < 0 ? 1.f + fpan : 1.f; }
+        // FEEDBACK: the filters' output, darkened, saturated and DC-free,
+        // back into their input on the next sample.
+        const float fbAmount = clamp01(p[LY_FB_AMOUNT] + m[LY_DST_FEEDBACK]);
+        const bool fbOn = fbAmount > 0.0005f;
+        const float fbGain = fbAmount * 1.25f;
+        const float fbDrive = 1.f + p[LY_FB_DRIVE] * 7.f;
+        const float fbHz = 150.f * std::pow(100.f, clamp01(p[LY_FB_TONE] + m[LY_DST_FB_TONE]));
+        const float fbCoef = 1.f - std::exp(-(float)kTwoPi * std::min(fbHz, (float)s->sampleRate * 0.45f) / (float)s->sampleRate);
         for (int i = 0; i < n; ++i) {
             float in[2] = { wetL[i], wetR[i] };
             for (int c = 0; c < 2; ++c) {
                 float x = in[c];
+                if (fbOn) x += fbGain * v.feedback[c];
                 if (parallel) {
                     x = 0.5f * (v.filter[0][c].process(one, x) + v.filter[1][c].process(two, x)) * 1.4f;
                 } else {
                     if (f1On) x = v.filter[0][c].process(one, x);
                     if (f2On) x = v.filter[1][c].process(two, x);
                 }
+                if (fbOn) {
+                    v.feedbackLow[c] += (x - v.feedbackLow[c]) * fbCoef;
+                    const float dc = v.feedbackLow[c] - v.feedbackDCX[c] + 0.995f * v.feedbackDCY[c];
+                    v.feedbackDCX[c] = v.feedbackLow[c];
+                    v.feedbackDCY[c] = flushf(dc);
+                    v.feedback[c] = fastTanh(dc * fbDrive);
+                } else {
+                    v.feedback[c] = 0;
+                }
                 in[c] = x;
             }
             wetL[i] = in[0] * gl; wetR[i] = in[1] * gr;
         }
+    }
+
+    // After the filters they work on the whole voice.
+    if (anyInsertAt(1)) {
+        for (int i = 0; i < n; ++i) { wetL[i] += dryL[i]; wetR[i] += dryR[i]; dryL[i] = 0; dryR[i] = 0; }
+        runInserts(1, wetL, wetR);
     }
 
     // Amplifier.
@@ -1114,6 +1429,8 @@ void startVoice(LYSynth *s, const Event &e, bool fromArp = false) {
     for (int l = 0; l < 4; ++l) v.lfo[l].retrigger(s->random, s->raw[lfoBase(l) + (LY_LFO1_PHASE - LY_LFO1_SHAPE)]);
     if (!wasActive) {
         for (auto &filter : v.filter) for (auto &channel : filter) channel.reset();
+        for (auto &insert : v.insert) insert.reset();
+        for (int c = 0; c < 2; ++c) v.feedback[c] = v.feedbackLow[c] = v.feedbackDCX[c] = v.feedbackDCY[c] = 0;
         v.noise.reset();
         v.noiseColor = 0;
         v.amp = 0;
@@ -1158,7 +1475,7 @@ void arpNoteOn(LYSynth *s, int note, int velocity) {
     if (s->heldCount >= kHeldNotes) return;
     const bool wasEmpty = s->heldCount == 0;
     s->held[s->heldCount++] = HeldNote { note, velocity, s->heldOrder++ };
-    if (wasEmpty) { s->arpCountdown = 0; s->arpIndex = 0; s->arpDirection = 1; s->arpStep = 0; }
+    if (wasEmpty) { s->arpCountdown = 0; s->arpIndex = 0; s->arpDirection = 1; s->arpStep = 0; s->arpFresh = true; }
 }
 
 void arpNoteOff(LYSynth *s, int note) {
@@ -1239,6 +1556,28 @@ void arpAdvance(LYSynth *s, int n) {
         s->arpGateLeft -= n;
         if (s->arpGateLeft <= 0) arpReleaseSounding(s);
     }
+    if (s->songLocked) {
+        // Locked to the song: steps land on the grid (odd steps late by the
+        // swing). A chord that lands just after a grid line plays on it;
+        // any later waits for the next one.
+        const double stepBeats = syncBeats(s->raw[LY_ARP_RATE]);
+        const double swingBeats = clamp01(s->raw[LY_ARP_SWING]) * 0.33 * stepBeats;
+        auto gridBeat = [&](long k) { return k * stepBeats + ((k & 1) ? swingBeats : 0.0); };
+        const long here = (long)std::floor(s->beat / stepBeats);
+        if (s->arpFresh || gridBeat(s->arpNextStep) > s->beat + 2 * stepBeats || gridBeat(s->arpNextStep) < s->beat - 2 * stepBeats) {
+            const double late = s->beat - gridBeat(here);
+            s->arpNextStep = (late >= -1e-9 && late <= 0.15 * stepBeats) ? here : here + 1;
+            if (gridBeat(here) > s->beat) s->arpNextStep = here;
+            s->arpFresh = false;
+        }
+        if (s->beat + 1e-9 >= gridBeat(s->arpNextStep)) {
+            arpFireStep(s);
+            s->arpGateLeft = stepSamples * clampf(s->raw[LY_ARP_GATE], 0.05f, 1.f);
+            s->arpNextStep += 1;
+        }
+        return;
+    }
+    s->arpFresh = false;
     s->arpCountdown -= n;
     if (s->arpCountdown <= 0) {
         arpFireStep(s);
@@ -1251,12 +1590,22 @@ void arpAdvance(LYSynth *s, int n) {
     }
 }
 
+/// With switch keys on, the four keys from KEY ROOT choose the performers'
+/// pattern and make no sound.
+bool isSwitchKey(const LYSynth *s, int note) {
+    if (s->raw[LY_PERF_KEYSWITCH] < 0.5f) return false;
+    const int root = (int)std::lround(s->raw[LY_PERF_KEYROOT]);
+    return note >= root && note < root + LY_PERF_PATTERNS;
+}
+
 void noteOnInput(LYSynth *s, const Event &e) {
+    if (isSwitchKey(s, e.note)) { s->perfOverride = e.note - (int)std::lround(s->raw[LY_PERF_KEYROOT]); return; }
     if (arpOn(s)) arpNoteOn(s, e.note, e.velocity & 0xFF);
     else startVoice(s, e);
 }
 
 void noteOffInput(LYSynth *s, int note, int channel) {
+    if (isSwitchKey(s, note)) return;
     if (arpOn(s)) arpNoteOff(s, note);
     else stopNote(s, note, channel);
 }
@@ -1511,6 +1860,43 @@ void lysynth_render(LYSynth *s, float *left, float *right, int frames, uint64_t 
     }
     s->readIndex.store(r, std::memory_order_release);
 
+    // Where the song is: a plug-in's position for this render, an app's
+    // transport anchor, or the synth's own clock running at the tempo.
+    const double beatsPerSecond = std::max(20.f, s->raw[LY_BPM]) / 60.0;
+    const bool wasLocked = s->songLocked;
+    if (s->blockPositionValid) {
+        s->beat = s->blockBeat;
+        s->songLocked = s->blockPlaying;
+        s->blockPositionValid = false;
+    } else if (blockHost != 0 && s->anchorPlaying.load(std::memory_order_relaxed)) {
+        uint32_t version;
+        uint64_t host;
+        double anchor;
+        do {
+            version = s->anchorVersion.load(std::memory_order_acquire);
+            host = s->anchorHost.load(std::memory_order_relaxed);
+            anchor = s->anchorBeat.load(std::memory_order_relaxed);
+        } while ((version & 1) || version != s->anchorVersion.load(std::memory_order_acquire));
+        const double seconds = blockHost >= host ? (double)(blockHost - host) / s->ticksPerSecond
+                                                 : -(double)(host - blockHost) / s->ticksPerSecond;
+        s->beat = anchor + seconds * beatsPerSecond;
+        s->songLocked = true;
+    } else {
+        s->songLocked = false;
+    }
+    if (s->songLocked != wasLocked) s->arpFresh = true;
+
+    // Performer patterns: the patch's, until a switch key picks another; a
+    // change to the patch's pattern takes over again.
+    for (int k = 0; k < 2; ++k) {
+        const int param = std::max(0, std::min((int)LY_PERF_PATTERNS - 1, (int)std::lround(s->raw[LY_PERF1_PATTERN + k * LY_PERF_STRIDE])));
+        if (param != s->perfPatternParam[k]) {
+            if (s->perfPatternParam[k] >= 0) s->perfOverride = -1;
+            s->perfPatternParam[k] = param;
+        }
+    }
+    for (int k = 0; k < 2; ++k) s->perfPattern[k] = s->perfOverride >= 0 ? s->perfOverride : s->perfPatternParam[k];
+
     const int maxVoices = std::max(1, std::min(kMaxVoices, (int)std::lround(s->raw[LY_VOICES])));
     for (int i = maxVoices; i < kMaxVoices; ++i) {
         if (s->voices[i].gate) { s->voices[i].gate = false; for (auto &e : s->voices[i].envelope) e.gateOff(); }
@@ -1536,7 +1922,17 @@ void lysynth_render(LYSynth *s, float *left, float *right, int frames, uint64_t 
 
         for (int l = 0; l < 4; ++l) {
             const int b = lfoBase(l);
-            s->globalLFO[l].advance(lfoIncrement(s, l, nullptr, n), (int)std::lround(s->raw[b]), s->random,
+            double increment = lfoIncrement(s, l, nullptr, n);
+            // Synced and FREE while a transport drives the song: the phase is
+            // the bar position, so the LFO lines up with the beat.
+            if (s->songLocked && s->raw[b + (LY_LFO1_SYNC - LY_LFO1_SHAPE)] > 0.5f
+                && (int)std::lround(s->raw[b + (LY_LFO1_RETRIG - LY_LFO1_SHAPE)]) == LY_LFOMODE_FREE) {
+                double target = s->beat / syncBeats(s->raw[b + (LY_LFO1_RATE - LY_LFO1_SHAPE)]);
+                target -= std::floor(target);
+                increment = target - s->globalLFO[l].phase;
+                increment -= std::floor(increment);
+            }
+            s->globalLFO[l].advance(increment, (int)std::lround(s->raw[b]), s->random,
                                     s->raw + LY_LFO_POINTS_BASE + l * LY_LFO_POINTS, s->raw[b + (LY_LFO1_SMOOTH - LY_LFO1_SHAPE)] > 0.5f,
                                     false, s->raw[b + (LY_LFO1_PHASE - LY_LFO1_SHAPE)]);
         }
@@ -1583,6 +1979,7 @@ void lysynth_render(LYSynth *s, float *left, float *right, int frames, uint64_t 
             outL[i] = l; outR[i] = rr;
         }
         position += n;
+        s->beat += n * beatsPerSecond / s->sampleRate;
     }
 
     // Scope and display, for the editor.
@@ -1613,6 +2010,33 @@ void lysynth_render(LYSynth *s, float *left, float *right, int frames, uint64_t 
     for (int f = 0; f < LY_FX_COUNT; ++f) s->display[20 + f].store(s->meters[f].peak, std::memory_order_relaxed);
     s->display[30].store((float)(s->heldCount > 0 && arpOn(s) ? s->arpStep : -1), std::memory_order_relaxed);
     for (int d = 0; d < LY_DST_COUNT; ++d) s->display[40 + d].store(v.active ? v.modulation[d] : s->fxMod[d], std::memory_order_relaxed);
+    const int extra = 40 + LY_DST_COUNT;
+    for (int k = 0; k < 2; ++k) {
+        int step = -1;
+        const float value = performerValue(s, k, performerBeat(s, v, k), &step);
+        s->display[extra + k].store((float)step, std::memory_order_relaxed);
+        s->display[extra + 2 + k].store((float)s->perfPattern[k], std::memory_order_relaxed);
+        s->display[extra + 4 + k].store(value, std::memory_order_relaxed);
+        s->display[extra + 6 + k].store(trackerInput(s, v, k), std::memory_order_relaxed);
+    }
+    s->display[extra + 8].store((float)s->beat, std::memory_order_relaxed);
+    s->display[extra + 9].store(s->songLocked ? 1.f : 0.f, std::memory_order_relaxed);
+}
+
+void lysynth_set_song_position(LYSynth *s, double beat, int playing) {
+    if (!std::isfinite(beat)) return;
+    s->blockBeat = beat;
+    s->blockPlaying = playing != 0;
+    s->blockPositionValid = true;
+}
+
+void lysynth_set_transport(LYSynth *s, int playing, uint64_t hostTime, double beat) {
+    if (!std::isfinite(beat)) return;
+    s->anchorVersion.fetch_add(1, std::memory_order_acq_rel);
+    s->anchorHost.store(hostTime, std::memory_order_relaxed);
+    s->anchorBeat.store(beat, std::memory_order_relaxed);
+    s->anchorPlaying.store(playing ? 1 : 0, std::memory_order_relaxed);
+    s->anchorVersion.fetch_add(1, std::memory_order_acq_rel);
 }
 
 void lysynth_set_wavetable(LYSynth *s, int oscillator, const float *frames, int frameCount) {
@@ -1663,6 +2087,15 @@ void lysynth_get_display(const LYSynth *s, LYSynthDisplay *out) {
     for (int f = 0; f < LY_FX_COUNT; ++f) out->fxLevel[f] = s->display[20 + f].load(std::memory_order_relaxed);
     out->arpStep = (int)s->display[30].load(std::memory_order_relaxed);
     for (int d = 0; d < LY_DST_COUNT; ++d) out->modulation[d] = s->display[40 + d].load(std::memory_order_relaxed);
+    const int extra = 40 + LY_DST_COUNT;
+    for (int k = 0; k < 2; ++k) {
+        out->perfStep[k] = (int)s->display[extra + k].load(std::memory_order_relaxed);
+        out->perfPattern[k] = (int)s->display[extra + 2 + k].load(std::memory_order_relaxed);
+        out->perfValue[k] = s->display[extra + 4 + k].load(std::memory_order_relaxed);
+        out->trackInput[k] = s->display[extra + 6 + k].load(std::memory_order_relaxed);
+    }
+    out->songBeat = s->display[extra + 8].load(std::memory_order_relaxed);
+    out->songLocked = (int)s->display[extra + 9].load(std::memory_order_relaxed);
 }
 
 void lysynth_get_scope(const LYSynth *s, float *out, int count) {

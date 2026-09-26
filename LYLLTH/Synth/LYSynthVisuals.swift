@@ -653,7 +653,11 @@ struct LYSynthKeyMonitor: NSViewRepresentable {
 
     private func handle(_ event: NSEvent) -> Bool {
         if event.window?.firstResponder is NSTextView { return false }
-        guard isEnabled, !LYMusicalTyping.isOpen else { return false }
+        guard isEnabled else { return false }
+        #if !LUNATK_PLUGIN
+        // The app's Musical Typing (⌘K) has the keyboard while it is open.
+        if LYMusicalTyping.isOpen { return false }
+        #endif
         guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
         if event.type == .keyDown && event.keyCode == 53 { close(); return true }
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""

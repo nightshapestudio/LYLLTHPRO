@@ -74,7 +74,7 @@ struct LYSynthEditor: View {
     /// The page it opens on.
     var initialPage: Page = .osc
 
-    enum Page: String, CaseIterable { case osc = "OSC", fx = "FX", arp = "ARP", matrix = "MATRIX", global = "GLOBAL" }
+    enum Page: String, CaseIterable { case osc = "OSC", voice = "VOICE FX", fx = "FX", arp = "ARP", perform = "PERFORM", matrix = "MATRIX", global = "GLOBAL" }
 
     // Held, not observed: the editor must not redraw every frame. The views
     // that show live values (displays, dots, meters) each watch it.
@@ -224,8 +224,10 @@ struct LYSynthEditor: View {
     private func pageAccent(_ page: Page) -> Color {
         switch page {
         case .osc: return LYLLTHTheme.teal
+        case .voice: return LYLLTHTheme.purple
         case .fx: return LYLLTHTheme.indigo
         case .arp: return LYLLTHTheme.purple
+        case .perform: return LYLLTHTheme.teal
         case .matrix: return LYLLTHTheme.lavender
         case .global: return LYLLTHTheme.chromeText
         }
@@ -241,6 +243,14 @@ struct LYSynthEditor: View {
         case .matrix:
             let used = patch.usedMatrixSlots.count
             if used > 0 { badge("\(used)", color: LYLLTHTheme.lavender) }
+        case .voice:
+            let on = (0..<2).filter { Int(patch.value(LYSynthParameters.insert($0, LY_INS1_TYPE))) != LY_INS_OFF }.count
+                + (patch.value(LY_FB_AMOUNT) > 0.0005 ? 1 : 0)
+            if on > 0 { badge("\(on)", color: LYLLTHTheme.purple) }
+        case .perform:
+            let sources = [LY_SRC_PERF1, LY_SRC_PERF2, LY_SRC_TRACK1, LY_SRC_TRACK2]
+            let used = patch.usedMatrixSlots.filter { sources.contains(Int(patch.value(LYSynthParameters.matrix($0, LY_MX_SOURCE)))) }.count
+            if used > 0 { badge("\(used)", color: LYLLTHTheme.teal) }
         case .arp:
             if patch.value(LY_ARP_ON) > 0.5 {
                 Circle().fill(LYLLTHTheme.purple).frame(width: 5, height: 5).lyBloom(LYLLTHTheme.purple).padding(.top, 6).padding(.trailing, 4)
@@ -307,7 +317,9 @@ struct LYSynthEditor: View {
         switch page {
         case .osc: return AnyView(oscPage)
         case .fx: return AnyView(LYSynthFXPage(context: context))
+        case .voice: return AnyView(LYSynthVoiceFXPage(context: context))
         case .arp: return AnyView(LYSynthArpPage(context: context))
+        case .perform: return AnyView(LYSynthPerformPage(context: context))
         case .matrix: return AnyView(LYSynthMatrixPage(context: context))
         case .global: return AnyView(LYSynthGlobalPage(context: context))
         }
@@ -715,12 +727,13 @@ struct LYSynthEditor: View {
     private var macroPanel: some View {
         let c = context
         return LYSynthPanel(title: "MACROS", accent: LYLLTHTheme.chromeText) {
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                ForEach(0..<4, id: \.self) { m in
-                    let source = LY_SRC_MACRO1 + m
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 4), spacing: 8) {
+                ForEach(0..<8, id: \.self) { m in
+                    let source = m < 4 ? LY_SRC_MACRO1 + m : LY_SRC_MACRO5 + (m - 4)
                     let color = LYSynthSourceColor.color(source)
                     let routes = patch.usedMatrixSlots.filter { Int(patch.value(LYSynthParameters.matrix($0, LY_MX_SOURCE))) == source }.count
-                    c.knob(LY_MACRO1 + m, accent: color, diameter: 42, label: routes > 0 ? "MACRO \(m + 1) · \(routes)" : "MACRO \(m + 1)")
+                    c.knob(m < 4 ? LY_MACRO1 + m : LY_MACRO5 + (m - 4), accent: color, diameter: 30,
+                           label: routes > 0 ? "M\(m + 1) · \(routes)" : "MACRO \(m + 1)")
                         .overlay(alignment: .topTrailing) { dragHandle(source, color: color, help: "Drag onto a knob to put it on MACRO \(m + 1)") }
                 }
             }

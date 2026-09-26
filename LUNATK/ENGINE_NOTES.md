@@ -8,7 +8,7 @@ were changed in the engine. Each one lists what the bank does about it.
 | An oscillator at level 0 skips rendering, so FM, RM and AM that read it as their modulator get silence. | A patch that uses B only as a modulator (level 0) has no FM or ring mod at all. | Modulator oscillators sit at level 0.002: silent, but rendering. |
 | A free-running DRIFT (smooth random) LFO starts at 0 and only picks its first target after one full cycle. | At 0.25 Hz, a freshly loaded patch doesn't move for about 4 seconds. | DRIFT LFOs retrigger per note (TRIG), which also gives every note its own drift. |
 | The `1/12` sync division is 1/12 of a beat (a 1/48 note), not a triplet eighth (1/3 beat). | Anyone choosing "1/12" for triplets gets a very fast rate. | Unused. Triplet gates are drawn over one beat instead. |
-| Free-running LFOs aren't locked to the host's bar position. | A synced gate or pump in FREE mode drifts against the kick. | Rhythmic LFOs retrigger per note. Presets tell you to start chords on the beat. |
+| ~~Free-running LFOs aren't locked to the host's bar position.~~ Fixed: while a transport plays (LYLLTH, or an AU/VST3 host), synced FREE LFOs, the arpeggiator and SONG performers follow the bar. With the transport stopped they run on their own as before. | A synced gate or pump in FREE mode used to drift against the kick. | Rhythmic LFOs retrigger per note (written before the fix; they still work). |
 | There is no DC blocker in the voice path. | Asymmetric pulse waves and some saturation carry a little DC (about −40 dBFS). | Basses that showed it have a 25 Hz high-pass on filter 2. The gate allows at most 0.006. |
 | The reverb has no low cut. | Any reverb widens the low end. | Low sounds use a narrow reverb (width 0.1–0.3). Every preset is gated on a mono low end. |
 | Comb-filter feedback is capped at 0.96. | A noise-excited "string" dies in about 0.25 s at middle C, too short to be a string. | Plucked strings use an oscillator body with the comb as colour. |
@@ -19,3 +19,24 @@ were changed in the engine. Each one lists what the bank does about it.
 
 Worth fixing in the engine when you decide to: the `1/12` division, the DRIFT
 LFO's cold start, and an optional DC blocker and reverb low cut.
+
+## Added after the bank
+
+- **Song position.** `lysynth_set_song_position` (plug-ins, per render) and
+  `lysynth_set_transport` (LYLLTH, a host-time anchor). The arpeggiator waits
+  for the next grid line unless a chord lands within 15% of a step after one.
+- **Performers.** Two tempo step sequencers, four patterns (A–D) of up to 16
+  steps, a level and a shape per step. SONG follows the bar, NOTE restarts
+  with each note. Four switch keys (from C1 by default) pick the pattern and
+  make no sound.
+- **Trackers.** Two drawn 16-point curves, each reading any source.
+- **Voice inserts.** Two per-voice slots before or after the filters:
+  bitcrush, decimate, sine shaper, fold, rectify (DC-blocked), ring mod,
+  frequency shifter (±2 kHz), comb.
+- **Feedback.** Filter output back into the filter input per voice, with a
+  low-pass, saturation and a DC blocker inside the loop.
+- **Macros 5–8.**
+
+Every new parameter sits after the drawn LFO points, so the plug-ins' host
+parameter ids for older parameters did not move. All 176 factory presets render
+bit-for-bit the same as before these were added.

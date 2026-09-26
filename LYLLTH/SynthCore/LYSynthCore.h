@@ -179,7 +179,60 @@ enum {
 enum { LY_LFO_POINTS = 32 };
 /// Drawn LFO shapes: 4 × LY_LFO_POINTS values, -1…1, after the matrix.
 enum { LY_LFO_POINTS_BASE = LY_MATRIX_BASE + LY_MATRIX_SLOTS * LY_MATRIX_STRIDE };
-enum { LY_PARAM_COUNT = LY_LFO_POINTS_BASE + 4 * LY_LFO_POINTS };
+
+// Added later. Everything from here on sits after the drawn LFO points so the
+// ids above (the plug-ins' host parameter addresses) never move.
+enum {
+    LY_MACRO5 = LY_LFO_POINTS_BASE + 4 * LY_LFO_POINTS, LY_MACRO6, LY_MACRO7, LY_MACRO8,
+
+    // Feedback: the filters' output fed back into their input, per voice.
+    LY_FB_AMOUNT,       // 0…1, 0 is off
+    LY_FB_DRIVE,        // 0…1: saturation inside the loop
+    LY_FB_TONE,         // 0…1: low-pass inside the loop, dark … open
+
+    // Voice inserts: two slots, before or after the filters, per voice.
+    LY_INS1_TYPE,       // LY_INS_*
+    LY_INS1_POSITION,   // 0 before the filters, 1 after
+    LY_INS1_AMOUNT,     // 0…1
+    LY_INS1_FREQ,       // 0…1: ring and comb pitch against the note, or the shifter's Hz
+    LY_INS1_MIX,        // 0…1
+    LY_INS1_END,
+    LY_INS_STRIDE = LY_INS1_END - LY_INS1_TYPE,
+
+    // Performers: tempo step sequencers for modulation, four patterns each.
+    LY_PERF1_MODE = LY_INS1_TYPE + 2 * LY_INS_STRIDE,   // LY_PERFMODE_*
+    LY_PERF1_RATE,      // one step, as a sync division index (like the LFOs)
+    LY_PERF1_STEPS,     // 1…16
+    LY_PERF1_PATTERN,   // 0…3: A–D
+    LY_PERF1_END,
+    LY_PERF_STRIDE = LY_PERF1_END - LY_PERF1_MODE,
+    LY_PERF_KEYSWITCH = LY_PERF1_MODE + 2 * LY_PERF_STRIDE, // 0/1: four keys choose the pattern
+    LY_PERF_KEYROOT,    // 0…124: the lowest switch key (A), the next three B–D
+
+    // Trackers: any source read through a drawn curve.
+    LY_TRACK1_SOURCE,   // LY_SRC_*
+    LY_TRACK2_SOURCE,
+
+    LY_PERF_VALUES_BASE,
+};
+enum { LY_PERF_PATTERNS = 4, LY_PERF_MAX_STEPS = 16, LY_TRACK_POINTS = 16 };
+/// Performer steps, [performer][pattern][step]: values (-1…1), then shapes (LY_PSTEP_*).
+/// Then each tracker's curve: LY_TRACK_POINTS outputs (-1…1) across its input.
+enum {
+    LY_PERF_SHAPES_BASE = LY_PERF_VALUES_BASE + 2 * LY_PERF_PATTERNS * LY_PERF_MAX_STEPS,
+    LY_TRACK_POINTS_BASE = LY_PERF_SHAPES_BASE + 2 * LY_PERF_PATTERNS * LY_PERF_MAX_STEPS,
+    LY_PARAM_COUNT = LY_TRACK_POINTS_BASE + 2 * LY_TRACK_POINTS
+};
+
+enum {
+    LY_INS_OFF = 0, LY_INS_BITCRUSH, LY_INS_DECIMATE, LY_INS_SINE, LY_INS_FOLD, LY_INS_RECTIFY,
+    LY_INS_RING, LY_INS_SHIFT, LY_INS_COMB, LY_INS_COUNT
+};
+enum { LY_PERFMODE_SONG = 0, LY_PERFMODE_TRIG, LY_PERFMODE_COUNT };
+enum {
+    LY_PSTEP_HOLD = 0, LY_PSTEP_RAMP_UP, LY_PSTEP_RAMP_DOWN, LY_PSTEP_TRIANGLE, LY_PSTEP_DECAY,
+    LY_PSTEP_RISE, LY_PSTEP_PULSE, LY_PSTEP_GLIDE, LY_PSTEP_COUNT
+};
 
 // Values may be appended, never reordered: patches store them.
 enum {
@@ -235,6 +288,8 @@ enum {
     LY_SRC_RANDOM, LY_SRC_STEP_CUTOFF, LY_SRC_STEP_RES,
     LY_SRC_PRESSURE, LY_SRC_TIMBRE, LY_SRC_PITCHBEND,
     LY_SRC_ENV4,
+    LY_SRC_MACRO5, LY_SRC_MACRO6, LY_SRC_MACRO7, LY_SRC_MACRO8,
+    LY_SRC_PERF1, LY_SRC_PERF2, LY_SRC_TRACK1, LY_SRC_TRACK2,
     LY_SRC_COUNT
 };
 
@@ -264,6 +319,8 @@ enum {
     LY_DST_FXF_CUTOFF, LY_DST_FXF_RES, LY_DST_FXF_MIX,
     LY_DST_REVERB_SIZE, LY_DST_REVERB_DECAY, LY_DST_REVERB_MIX,
     LY_DST_MASTER,
+    LY_DST_FEEDBACK, LY_DST_FB_TONE,
+    LY_DST_INS1_AMOUNT, LY_DST_INS1_FREQ, LY_DST_INS2_AMOUNT, LY_DST_INS2_FREQ,
     LY_DST_COUNT
 };
 
@@ -290,6 +347,12 @@ typedef struct {
     float fxLevel[LY_FX_COUNT];   // each effect's output peak, 0…1
     int arpStep;                  // arpeggiator step, -1 when idle
     float modulation[LY_DST_COUNT]; // modulation offset per LY_DST_*, newest voice
+    int perfStep[2];              // the step each performer is on, -1 when silent
+    int perfPattern[2];           // the pattern playing, 0…3 (a switch key can change it)
+    float perfValue[2];           // -1…1
+    float trackInput[2];          // where each tracker is reading its curve, 0…1
+    float songBeat;               // the beat the synth is following
+    int songLocked;               // 1 while a host transport is driving it
 } LYSynthDisplay;
 
 LYSynth *lysynth_create(double sampleRate);
@@ -306,6 +369,16 @@ void lysynth_all_notes_off(LYSynth *synth);
 /// pressure, CC 1 (mod wheel), CC 64 (sustain), CC 74 (MPE timbre),
 /// CC 120/123. Any thread; hostTime 0 is now.
 void lysynth_midi(LYSynth *synth, uint8_t status, uint8_t data1, uint8_t data2, uint64_t hostTime);
+
+/// Song position. A plug-in calls this on the audio thread just before each
+/// render with the beat at the start of that render (from the host's
+/// transport); it holds for that render only. Tempo-synced FREE LFOs, the
+/// arpeggiator and SONG performers then line up with the bar.
+void lysynth_set_song_position(LYSynth *synth, double beat, int playing);
+/// The same for an app that knows where its transport is on the host clock:
+/// `beat` is played at `hostTime`. Any thread; lasts until changed. Renders
+/// with a block host time follow it.
+void lysynth_set_transport(LYSynth *synth, int playing, uint64_t hostTime, double beat);
 
 /// Audio thread. `blockHostTime` 0 when the render has no host clock.
 void lysynth_render(LYSynth *synth, float *left, float *right, int frames, uint64_t blockHostTime);

@@ -35,6 +35,26 @@ enum LYSynthParameters {
         LY_MATRIX_BASE + slot * Int(LY_MATRIX_STRIDE) + field
     }
 
+    static func insert(_ index: Int, _ field: Int) -> Int {
+        field + index * Int(LY_INS_STRIDE)
+    }
+
+    static func performer(_ index: Int, _ field: Int) -> Int {
+        field + index * Int(LY_PERF_STRIDE)
+    }
+
+    static func performerStep(_ index: Int, _ pattern: Int, _ step: Int) -> Int {
+        LY_PERF_VALUES_BASE + (index * Int(LY_PERF_PATTERNS) + pattern) * Int(LY_PERF_MAX_STEPS) + step
+    }
+
+    static func performerShape(_ index: Int, _ pattern: Int, _ step: Int) -> Int {
+        LY_PERF_SHAPES_BASE + (index * Int(LY_PERF_PATTERNS) + pattern) * Int(LY_PERF_MAX_STEPS) + step
+    }
+
+    static func trackerPoint(_ index: Int, _ point: Int) -> Int {
+        LY_TRACK_POINTS_BASE + index * Int(LY_TRACK_POINTS) + point
+    }
+
     // Keys are what a saved patch stores. Never rename one.
     static let all: [LYSynthParameter] = {
         var list: [LYSynthParameter] = []
@@ -190,6 +210,45 @@ enum LYSynthParameters {
             add(matrix(slot, LY_MX_CURVE), "mx\(slot).curve", "CURVE", -1...1)
             add(matrix(slot, LY_MX_BIPOLAR), "mx\(slot).bi", "BIPOLAR", 0...1, stepped: true)
         }
+        // Added later; their ids come after everything above.
+        for m in 4..<8 { add(LY_MACRO5 + (m - 4), "macro\(m + 1)", "MACRO \(m + 1)", 0...1) }
+        add(LY_FB_AMOUNT, "fb.amount", "AMOUNT", 0...1)
+        add(LY_FB_DRIVE, "fb.drive", "DRIVE", 0...1)
+        add(LY_FB_TONE, "fb.tone", "TONE", 0...1)
+        for k in 0..<2 {
+            let b = insert(k, LY_INS1_TYPE), n = "ins\(k + 1)"
+            add(b, "\(n).type", "TYPE", 0...Float(LY_INS_COUNT - 1), stepped: true)
+            add(insert(k, LY_INS1_POSITION), "\(n).position", "AFTER FILTER", 0...1, stepped: true)
+            add(insert(k, LY_INS1_AMOUNT), "\(n).amount", "AMOUNT", 0...1)
+            add(insert(k, LY_INS1_FREQ), "\(n).freq", "FREQ", 0...1)
+            add(insert(k, LY_INS1_MIX), "\(n).mix", "MIX", 0...1)
+        }
+        for k in 0..<2 {
+            let n = "perf\(k + 1)"
+            add(performer(k, LY_PERF1_MODE), "\(n).mode", "MODE", 0...Float(LY_PERFMODE_COUNT - 1), stepped: true)
+            add(performer(k, LY_PERF1_RATE), "\(n).rate", "RATE", 0...1)
+            add(performer(k, LY_PERF1_STEPS), "\(n).steps", "STEPS", 1...16, stepped: true)
+            add(performer(k, LY_PERF1_PATTERN), "\(n).pattern", "PATTERN", 0...Float(LY_PERF_PATTERNS - 1), stepped: true)
+        }
+        add(LY_PERF_KEYSWITCH, "perf.keyswitch", "SWITCH KEYS", 0...1, stepped: true)
+        add(LY_PERF_KEYROOT, "perf.keyroot", "SWITCH ROOT", 0...124, stepped: true)
+        add(LY_TRACK1_SOURCE, "track1.source", "SOURCE", 0...Float(LY_SRC_COUNT - 1), stepped: true)
+        add(LY_TRACK2_SOURCE, "track2.source", "SOURCE", 0...Float(LY_SRC_COUNT - 1), stepped: true)
+        for k in 0..<2 {
+            for pattern in 0..<Int(LY_PERF_PATTERNS) {
+                let letter = ["A", "B", "C", "D"][pattern]
+                for step in 0..<Int(LY_PERF_MAX_STEPS) {
+                    add(performerStep(k, pattern, step), "perf\(k + 1).\(letter.lowercased()).v\(step)", "\(letter) STEP \(step + 1)", -1...1)
+                    add(performerShape(k, pattern, step), "perf\(k + 1).\(letter.lowercased()).s\(step)", "\(letter) SHAPE \(step + 1)",
+                        0...Float(LY_PSTEP_COUNT - 1), stepped: true)
+                }
+            }
+        }
+        for t in 0..<2 {
+            for i in 0..<Int(LY_TRACK_POINTS) {
+                add(trackerPoint(t, i), "track\(t + 1).t\(i)", "POINT \(i + 1)", -1...1)
+            }
+        }
         return list
     }()
 
@@ -230,6 +289,9 @@ enum LYSynthNames {
     static let subShapes = ["SINE", "TRI", "SQUARE", "SAW"]
     static let noiseTypes = ["WHITE", "PINK", "BROWN", "CRACKLE", "VINYL", "DIGITAL", "METAL", "BREATH"]
     static let arpModes = ["UP", "DOWN", "UP + DOWN", "AS PLAYED", "RANDOM", "CHORD"]
+    static let inserts = ["OFF", "BITCRUSH", "DECIMATE", "SINE SHAPER", "FOLD", "RECTIFY", "RING MOD", "FREQ SHIFT", "COMB"]
+    static let performerModes = ["SONG", "NOTE"]
+    static let stepShapes = ["HOLD", "RAMP UP", "RAMP DOWN", "TRIANGLE", "DECAY", "RISE", "PULSE", "GLIDE"]
     static let effects = ["HYPER", "DISTORTION", "FLANGER", "PHASER", "CHORUS", "DELAY", "COMPRESSOR", "EQ", "FILTER", "REVERB"]
     static let distortionModes = ["TUBE", "SOFT", "HARD", "DIODE", "LIN FOLD", "SIN FOLD", "ZERO-SQ", "DOWNSAMPLE", "BITCRUSH", "RECTIFY"]
     static let compModes = ["SINGLE", "MULTIBAND"]
@@ -239,10 +301,13 @@ enum LYSynthNames {
                          "ORGAN", "DIGITAL", "VOID FOLD", "GROWL", "CHOIR", "SPECTRAL COMB", "GLASS"]
     static let sources = ["—", "ENV 1", "ENV 2", "ENV 3", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "VELOCITY", "NOTE",
                           "MOD WHEEL", "MACRO 1", "MACRO 2", "MACRO 3", "MACRO 4", "RANDOM", "STEP CUTOFF", "STEP RES",
-                          "PRESSURE", "TIMBRE", "PITCH BEND", "ENV 4"]
+                          "PRESSURE", "TIMBRE", "PITCH BEND", "ENV 4",
+                          "MACRO 5", "MACRO 6", "MACRO 7", "MACRO 8", "PERFORMER 1", "PERFORMER 2", "TRACKER 1", "TRACKER 2"]
     static let sourceOrder = [LY_SRC_NONE, LY_SRC_ENV1, LY_SRC_ENV2, LY_SRC_ENV3, LY_SRC_ENV4,
                               LY_SRC_LFO1, LY_SRC_LFO2, LY_SRC_LFO3, LY_SRC_LFO4,
                               LY_SRC_MACRO1, LY_SRC_MACRO2, LY_SRC_MACRO3, LY_SRC_MACRO4,
+                              LY_SRC_MACRO5, LY_SRC_MACRO6, LY_SRC_MACRO7, LY_SRC_MACRO8,
+                              LY_SRC_PERF1, LY_SRC_PERF2, LY_SRC_TRACK1, LY_SRC_TRACK2,
                               LY_SRC_VELOCITY, LY_SRC_NOTE, LY_SRC_RANDOM, LY_SRC_MODWHEEL, LY_SRC_PITCHBEND,
                               LY_SRC_PRESSURE, LY_SRC_TIMBRE, LY_SRC_STEP_CUTOFF, LY_SRC_STEP_RES].map { Int($0) }
     static let destinations: [String] = {
@@ -264,6 +329,9 @@ enum LYSynthNames {
         ("FILTERS", [(LY_DST_CUTOFF, "CUTOFF"), (LY_DST_RES, "RESONANCE"), (LY_DST_DRIVE, "DRIVE"), (LY_DST_FILTER_MIX, "FILTER MIX"),
                      (LY_DST_F2_CUTOFF, "F2 CUTOFF"), (LY_DST_F2_RES, "F2 RES"), (LY_DST_F2_DRIVE, "F2 DRIVE"), (LY_DST_F2_MIX, "F2 MIX"),
                      (LY_DST_FILTER_PAN, "FILTER PAN")].map { (Int($0.0), $0.1) }),
+        ("VOICE FX", [(LY_DST_FEEDBACK, "FEEDBACK"), (LY_DST_FB_TONE, "FEEDBACK TONE"),
+                      (LY_DST_INS1_AMOUNT, "INSERT 1 AMOUNT"), (LY_DST_INS1_FREQ, "INSERT 1 FREQ"),
+                      (LY_DST_INS2_AMOUNT, "INSERT 2 AMOUNT"), (LY_DST_INS2_FREQ, "INSERT 2 FREQ")].map { (Int($0.0), $0.1) }),
         ("VOICE", [(LY_DST_AMP, "AMP"), (LY_DST_PAN, "PAN"), (LY_DST_PITCH, "PITCH"),
                    (LY_DST_ENV1_ATTACK, "ENV 1 ATTACK"), (LY_DST_ENV1_DECAY, "ENV 1 DECAY"), (LY_DST_ENV1_RELEASE, "ENV 1 RELEASE"),
                    (LY_DST_ENV2_ATTACK, "ENV 2 ATTACK"), (LY_DST_ENV2_DECAY, "ENV 2 DECAY"), (LY_DST_ENV2_RELEASE, "ENV 2 RELEASE"),

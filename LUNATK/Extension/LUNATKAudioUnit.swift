@@ -15,7 +15,9 @@ final class LUNATKAudioUnit: AUAudioUnit {
         var right: UnsafeMutablePointer<Float>
         var capacity: Int
         var bpm: Double = 120
+        var sampleRate: Double = 48_000
         var musicalContext: AUHostMusicalContextBlock?
+        var transportState: AUHostTransportStateBlock?
 
         init(core: OpaquePointer, capacity: Int) {
             self.core = core
@@ -98,12 +100,15 @@ final class LUNATKAudioUnit: AUAudioUnit {
             DispatchQueue.main.async { [weak self] in self?.onInstrumentChange?(current) }
         }
         kernel.resize(Int(maximumFramesToRender))
+        kernel.sampleRate = rate
         kernel.musicalContext = musicalContextBlock
+        kernel.transportState = transportStateBlock
     }
 
     override func deallocateRenderResources() {
         lysynth_all_notes_off(kernel.core)
         kernel.musicalContext = nil
+        kernel.transportState = nil
         super.deallocateRenderResources()
     }
 
@@ -116,14 +121,26 @@ final class LUNATKAudioUnit: AUAudioUnit {
             guard count <= kernel.capacity else { return kAudioUnitErr_TooManyFramesToProcess }
             let core = kernel.core
 
-            // Follow the host's tempo, for synced LFOs, delay and ARP.
+            // Follow the host's tempo and song position, for synced LFOs,
+            // delay, ARP and the performers.
+            var blockBeat: Double?
+            var playing = false
             if let context = kernel.musicalContext {
                 var tempo = 0.0
-                if context(&tempo, nil, nil, nil, nil, nil), tempo > 0, abs(tempo - kernel.bpm) > 0.001 {
-                    kernel.bpm = tempo
-                    lysynth_set_param(core, Int32(LY_BPM), Float(tempo))
+                var beat = 0.0
+                if context(&tempo, nil, nil, &beat, nil, nil) {
+                    if tempo > 0, abs(tempo - kernel.bpm) > 0.001 {
+                        kernel.bpm = tempo
+                        lysynth_set_param(core, Int32(LY_BPM), Float(tempo))
+                    }
+                    blockBeat = beat
                 }
             }
+            if let state = kernel.transportState {
+                var flags = AUHostTransportStateFlags()
+                if state(&flags, nil, nil, nil) { playing = flags.contains(.moving) }
+            }
+            let beatsPerFrame = kernel.bpm / 60 / kernel.sampleRate
 
             let buffers = UnsafeMutableAudioBufferListPointer(outputData)
             if buffers.count >= 1, buffers[0].mData == nil { buffers[0].mData = UnsafeMutableRawPointer(kernel.left) }
@@ -139,6 +156,7 @@ final class LUNATKAudioUnit: AUAudioUnit {
             while let current = event {
                 let offset = Int(max(0, min(Int64(count), current.pointee.head.eventSampleTime - blockStart)))
                 if offset > position {
+                    if let blockBeat { lysynth_set_song_position(core, blockBeat + Double(position) * beatsPerFrame, playing ? 1 : 0) }
                     lysynth_render(core, left + position, right + position, Int32(offset - position), 0)
                     position = offset
                 }
@@ -157,6 +175,7 @@ final class LUNATKAudioUnit: AUAudioUnit {
                 event = UnsafePointer(current.pointee.head.next)
             }
             if count > position {
+                if let blockBeat { lysynth_set_song_position(core, blockBeat + Double(position) * beatsPerFrame, playing ? 1 : 0) }
                 lysynth_render(core, left + position, right + position, Int32(count - position), 0)
             }
             // A mono output gets the left channel; LUNATK is stereo.
@@ -368,14 +387,27 @@ enum LUNATKNames {
             if key.hasPrefix("env") { return "ENV " + key.dropFirst(3) }
             if key.hasPrefix("lfo") { return "LFO " + key.dropFirst(3) }
             if key.hasPrefix("mx") { return "MATRIX " + String(Int(key.dropFirst(2)).map { $0 + 1 } ?? 0) }
-            return key.uppercased()
+            return LUNATKNames.added(key) ?? key.uppercased()
+        }
+    }
+
+    /// Sections added after the first release.
+    static func added(_ key: String) -> String? {
+        switch key {
+        case "fb": return "FEEDBACK"
+        case "perf": return "PERFORMERS"
+        default:
+            if key.hasPrefix("ins") { return "INSERT " + key.dropFirst(3) }
+            if key.hasPrefix("perf") { return "PERFORMER " + key.dropFirst(4) }
+            if key.hasPrefix("track") { return "TRACKER " + key.dropFirst(5) }
+            return nil
         }
     }
 
     static func parameter(_ parameter: LYSynthParameter) -> String {
         guard let section = parameter.key.split(separator: ".").first, parameter.key.contains(".") else { return parameter.label }
         var label = parameter.label
-        if parameter.key.contains(".p"), let point = parameter.key.split(separator: ".").last?.dropFirst() {
+        if parameter.key.contains(".p"), let point = parameter.key.split(separator: ".").last?.dropFirst(), Int(point) != nil {
             label = "POINT " + point
         }
         return self.section(String(section)) + " " + label

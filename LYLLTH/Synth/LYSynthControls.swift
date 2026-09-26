@@ -8,10 +8,10 @@ import SwiftUI
 enum LYSynthSourceColor {
     static func color(_ source: Int) -> Color {
         switch source {
-        case LY_SRC_ENV1, LY_SRC_LFO1, LY_SRC_MACRO1: return LYLLTHTheme.teal
-        case LY_SRC_ENV2, LY_SRC_LFO2, LY_SRC_MACRO2: return LYLLTHTheme.indigo
-        case LY_SRC_ENV3, LY_SRC_LFO3, LY_SRC_MACRO3: return LYLLTHTheme.purple
-        case LY_SRC_ENV4, LY_SRC_LFO4, LY_SRC_MACRO4: return LYLLTHTheme.lavender
+        case LY_SRC_ENV1, LY_SRC_LFO1, LY_SRC_MACRO1, LY_SRC_MACRO5, LY_SRC_PERF1: return LYLLTHTheme.teal
+        case LY_SRC_ENV2, LY_SRC_LFO2, LY_SRC_MACRO2, LY_SRC_MACRO6, LY_SRC_PERF2: return LYLLTHTheme.indigo
+        case LY_SRC_ENV3, LY_SRC_LFO3, LY_SRC_MACRO3, LY_SRC_MACRO7, LY_SRC_TRACK1: return LYLLTHTheme.purple
+        case LY_SRC_ENV4, LY_SRC_LFO4, LY_SRC_MACRO4, LY_SRC_MACRO8, LY_SRC_TRACK2: return LYLLTHTheme.lavender
         default: return LYLLTHTheme.chromeText
         }
     }

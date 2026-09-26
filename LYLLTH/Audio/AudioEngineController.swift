@@ -41,6 +41,8 @@ final class AudioEngineController: ObservableObject {
     /// LUNATK instances by track, and which engine channel each is on.
     private var instruments: [UUID: LYSynthInstrument] = [:]
     private var instrumentOnChannel: [Int: UUID] = [:]
+    /// Keeps every LUNATK told where the bar is while the transport runs.
+    private var synthClock: Timer?
     /// What each engine channel's built-in synth was last set to, so an edit
     /// elsewhere does not re-apply it (which silences held notes).
     private var appliedSynth: [Int: (root: UInt8, preset: SynthPreset)] = [:]
@@ -120,6 +122,7 @@ final class AudioEngineController: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] playing in
                 guard let self else { return }
+                if playing { self.startSynthClock() } else { self.stopSynthClock() }
                 if playing && self.transportMode == .song {
                     self.timeline.start()
                     self.notePlayer.start()
@@ -165,6 +168,33 @@ final class AudioEngineController: ObservableObject {
         timeline.update(session: session, assets: assets, window: window)
         notePlayer.update(session: session, window: window)
         automationPlayer.update(session: session)
+    }
+
+    /// Step 0 of the running transport is a bar line: the song window's start
+    /// in song mode, the pattern's start in pattern mode. Each LUNATK gets
+    /// that anchor so its synced LFOs, arpeggiator and performers sit on the
+    /// bar. Sent every 50 ms, which also covers a synth added mid-play and an
+    /// epoch that moves when the meter or pattern length changes.
+    private func startSynthClock() {
+        guard synthClock == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sendSynthTransport() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        synthClock = timer
+        sendSynthTransport()
+    }
+
+    private func stopSynthClock() {
+        synthClock?.invalidate()
+        synthClock = nil
+        for instrument in instruments.values { instrument.setTransport(playing: false, hostTime: 0, beat: 0) }
+    }
+
+    private func sendSynthTransport() {
+        guard let anchor = engine.transportAnchor() else { return }
+        let beat = transportMode == .song ? songWindow.startBeat : 0
+        for instrument in instruments.values { instrument.setTransport(playing: true, hostTime: anchor.epochHostTime, beat: beat) }
     }
 
     /// The song beat being heard right now, for the arrangement playhead.

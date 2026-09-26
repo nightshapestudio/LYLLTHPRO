@@ -55,6 +55,12 @@ final class LYSynthInstrument {
         lysynth_all_notes_off(core)
     }
 
+    /// Where the song is: `beat` plays at `hostTime`. Synced LFOs, the
+    /// arpeggiator and the performers follow it while `playing`.
+    func setTransport(playing: Bool, hostTime: UInt64, beat: Double) {
+        lysynth_set_transport(core, playing ? 1 : 0, hostTime, beat)
+    }
+
     // MARK: Patch
 
     /// Sends only what changed since the last patch, so turning one knob

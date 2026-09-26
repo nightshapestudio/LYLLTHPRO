@@ -135,6 +135,7 @@ public:
 
     tresult PLUGIN_API setupProcessing(ProcessSetup &setup) SMTG_OVERRIDE {
         core = lunatk_box_set_sample_rate(box, setup.sampleRate);
+        sampleRate = setup.sampleRate;
         return SingleComponentEffect::setupProcessing(setup);
     }
 
@@ -203,9 +204,18 @@ public:
         float *right = hasOutput ? data.outputs[0].channelBuffers32[1] : nullptr;
         const int32 frames = data.numSamples;
         int32 position = 0;
+        // The host's song position, for synced LFOs, ARP and the performers.
+        const ProcessContext *context = data.processContext;
+        const bool hasBeat = context && (context->state & ProcessContext::kProjectTimeMusicValid);
+        const double blockBeat = hasBeat ? context->projectTimeMusic : 0;
+        const int playing = context && (context->state & ProcessContext::kPlaying) ? 1 : 0;
+        const double beatsPerFrame = bpm / 60.0 / std::max(1.0, sampleRate);
         auto renderTo = [&](int32 until) {
             until = std::max(0, std::min(frames, until));
-            if (hasOutput && until > position) lysynth_render(core, left + position, right + position, until - position, 0);
+            if (hasOutput && until > position) {
+                if (hasBeat) lysynth_set_song_position(core, blockBeat + position * beatsPerFrame, playing);
+                lysynth_render(core, left + position, right + position, until - position, 0);
+            }
             position = std::max(position, until);
         };
         for (const Timed &item : timeline) {
@@ -305,6 +315,7 @@ private:
     void *box = nullptr;
     LYSynth *core = nullptr;
     double bpm = 120;
+    double sampleRate = 48000;
     std::vector<Timed> timeline;
 };
 

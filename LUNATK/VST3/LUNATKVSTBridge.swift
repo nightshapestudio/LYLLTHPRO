@@ -282,6 +282,11 @@ enum LUNATKVSTNames {
             if section.hasPrefix("env") { return "ENV " + section.dropFirst(3) }
             if section.hasPrefix("lfo") { return "LFO " + section.dropFirst(3) }
             if section.hasPrefix("mx") { return "MATRIX " + String((Int(section.dropFirst(2)) ?? 0) + 1) }
+            if section == "fb" { return "FEEDBACK" }
+            if section == "perf" { return "PERFORMERS" }
+            if section.hasPrefix("ins") { return "INSERT " + section.dropFirst(3) }
+            if section.hasPrefix("perf") { return "PERFORMER " + section.dropFirst(4) }
+            if section.hasPrefix("track") { return "TRACKER " + section.dropFirst(5) }
             return section.uppercased()
         }
     }

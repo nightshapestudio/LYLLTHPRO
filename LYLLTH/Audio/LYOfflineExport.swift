@@ -424,6 +424,7 @@ struct LYOfflineExport {
                 }
                 let until = next < events.count ? min(Int(events[next].frame - start), count) : count
                 let frames = max(1, until - position)
+                lysynth_set_song_position(core, startBeat + Double(now) / framesPerBeat, 1)
                 lysynth_render(core, left + position, right + position, Int32(frames), 0)
                 position += frames
             }

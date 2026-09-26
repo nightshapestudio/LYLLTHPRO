@@ -380,10 +380,12 @@ struct LYSynthGlobalPage: View {
                     VStack(alignment: .leading, spacing: 6) {
                         fact("OSCILLATORS", "2 WAVETABLE · 16 UNISON · DUAL WARP · STACK")
                         fact("SUB + NOISE", "4 SHAPES · 8 NOISE TYPES")
-                        fact("FILTERS", "2 · SERIAL OR PARALLEL · \(LY_FILTER_COUNT) TYPES")
-                        fact("MODULATION", "4 ENV · 4 LFO · 4 MACROS · \(LY_MATRIX_SLOTS)-SLOT MATRIX")
+                        fact("FILTERS", "2 · SERIAL OR PARALLEL · \(LY_FILTER_COUNT) TYPES · FEEDBACK")
+                        fact("VOICE FX", "2 INSERTS PER NOTE · \(LY_INS_COUNT - 1) TYPES")
+                        fact("MODULATION", "4 ENV · 4 LFO · 8 MACROS · \(LY_MATRIX_SLOTS)-SLOT MATRIX")
+                        fact("PERFORM", "2 PERFORMERS · 2 TRACKERS · SWITCH KEYS")
                         fact("FX", "\(LY_FX_COUNT) EFFECTS · ANY ORDER")
-                        fact("PLAY", "16 VOICES · ARP · MPE · SUSTAIN")
+                        fact("PLAY", "16 VOICES · ARP ON THE BAR · MPE · SUSTAIN")
                     }
                     Spacer(minLength: 0)
                     Text("COMPUTER KEYS A–K PLAY · Z / X OCTAVE · ESC CLOSES")
