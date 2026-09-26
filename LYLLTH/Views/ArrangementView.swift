@@ -28,7 +28,7 @@ struct ArrangementView: View {
 
     @EnvironmentObject private var audio: AudioEngineController
 
-    private let headerWidth: CGFloat = 238
+    private let headerWidth: CGFloat = 272
     private let rulerHeight: CGFloat = 36
     @State private var selectedClipID: UUID?
     @State private var pinchStartZoom: Double?
@@ -1135,7 +1135,7 @@ struct ArrangementView: View {
 
 /// DrumKit's sequencer track cell carried to the timeline: frosted glass,
 /// a 1.5 pt border in the row's positional colour, a square number badge.
-private struct LYTrackHeader: View {
+struct LYTrackHeader: View {
     let number: Int
     let name: String
     let kind: String
@@ -1164,13 +1164,17 @@ private struct LYTrackHeader: View {
                     .tracking(0.7)
                     .foregroundStyle(isMuted ? LYLLTHTheme.dim : LYLLTHTheme.text)
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(name)
                 Text(kind)
                     .font(LYLLTHTheme.label(7, weight: .bold))
                     .tracking(1.3)
                     .foregroundStyle(LYLLTHTheme.dim)
                     .lineLimit(1)
             }
-            Spacer(minLength: 2)
+            .layoutPriority(1)
+            Spacer(minLength: 4)
+            HStack(spacing: 3) {
             if let instrumentIcon {
                 Button(action: openInstrument) {
                     Image(systemName: instrumentIcon)
@@ -1200,6 +1204,8 @@ private struct LYTrackHeader: View {
                     }
                     .help("Show automation lanes")
             }
+            }
+            .fixedSize()
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
