@@ -1,5 +1,6 @@
 import XCTest
 import AVFoundation
+import NightshapeAudioEngine
 @testable import LYLLTH
 
 @MainActor
@@ -16,6 +17,24 @@ final class DemoSongTests: XCTestCase {
         let instruments = session.tracks.filter { $0.kind == .instrument }
         XCTAssertEqual(instruments.count, LYDemoSong.parts.count)
         XCTAssertTrue(instruments.allSatisfy { $0.synth != nil && !$0.clips.isEmpty && $0.clips.allSatisfy(\.isNoteClip) })
+        // Drums are DrumKit drum tracks playing DrumKit's bank, and their
+        // pattern clips reproduce every hit exactly.
+        let drums = session.tracks.filter { $0.kind == .drumkit }
+        XCTAssertEqual(drums.count, LYDemoSong.drumParts.count)
+        for part in LYDemoSong.drumParts {
+            let track = try! XCTUnwrap(drums.first { $0.name == part.name })
+            XCTAssertNotNil(LYDrumSounds.preset(id: track.drumPresetID), "\(part.name): \(part.preset) is not in DrumKit's bank")
+            var played: [Int: Double] = [:]
+            for clip in track.clips {
+                XCTAssertEqual(clip.kind, .pattern)
+                let steps = clip.steps ?? [], locks = clip.stepParameters ?? []
+                let first = Int((clip.startBeat * 4).rounded())
+                for i in 0..<Int((clip.lengthBeats * 4).rounded()) where steps[i % steps.count] {
+                    played[first + i] = locks[i % locks.count].velocity
+                }
+            }
+            XCTAssertEqual(played, part.hits, "\(part.name) plays exactly its hits")
+        }
         // Everything melodic stays in F minor.
         let fMinor: Set<Int> = [5, 7, 8, 10, 0, 1, 3]
         let melodic = ["SUB", "BASS", "STUTTER", "PAD", "SAWS", "ARP", "GLASS", "LEAD", "HOOK", "HOOK HIGH", "SCREAM", "PIANO"]
@@ -27,97 +46,49 @@ final class DemoSongTests: XCTestCase {
         for section in LYDemoSong.sections {
             let start = Double(section.bar) * 4, end = Double(section.bar + section.bars) * 4
             let playing = LYDemoSong.parts.filter { part in part.notes.contains { $0.start >= start && $0.start < end } }
-            XCTAssertGreaterThanOrEqual(playing.count, 4, "\(section.name) is too sparse")
+            let drumming = LYDemoSong.drumParts.filter { part in part.hits.keys.contains { Double($0) / 4 >= start && Double($0) / 4 < end } }
+            XCTAssertGreaterThanOrEqual(playing.count + drumming.count, 4, "\(section.name) is too sparse")
         }
     }
 
-    /// An audition mix of the whole song through LUNATK, written to
-    /// LYLLTH_DEMO_DIR as a WAV with a per-section level report. Track volume
-    /// and pan are applied; the plug-in racks and main bus are not.
-    func testRenderDemoMix() throws {
+    /// The demo through LYLLTH's own offline export (DrumKit drums, LUNATK,
+    /// the main bus): the full mix, drums only and music only, written to
+    /// LYLLTH_DEMO_DIR with a per-section level report.
+    func testRenderDemoMix() async throws {
         guard let dir = ProcessInfo.processInfo.environment["LYLLTH_DEMO_DIR"] else { throw XCTSkip("set LYLLTH_DEMO_DIR") }
-        let rate = 44_100.0
-        let secondsPerBeat = 60 / LYDemoSong.bpm
-        let total = Int((Double(LYDemoSong.bars) * 4 * secondsPerBeat + 4) * rate)
-        var mixL = [Float](repeating: 0, count: total), mixR = mixL
+        let full = LYLLTHSession.demoSong()
+        func only(_ keep: (LYTrack) -> Bool) -> LYLLTHSession {
+            var session = full
+            for i in session.tracks.indices where session.tracks[i].kind != .auxiliary { session.tracks[i].isMuted = !keep(session.tracks[i]) }
+            return session
+        }
         var report: [String] = []
-        for part in LYDemoSong.parts {
-            guard let patch = LYSynthPatch.factory(named: part.sound) else { continue }
-            let synth = LYSynthInstrument(sampleRate: rate)
-            synth.apply(patch, bpm: LYDemoSong.bpm)
-            struct Event { var frame: Int; var on: Bool; var note: Int32; var velocity: Int32 }
-            var events: [Event] = []
-            for n in part.notes {
-                let on = Int(n.start * secondsPerBeat * rate), off = Int(n.end * secondsPerBeat * rate)
-                events.append(Event(frame: on, on: true, note: Int32(n.pitch), velocity: Int32(n.velocity)))
-                events.append(Event(frame: max(off - 1, on + 1), on: false, note: Int32(n.pitch), velocity: 0))
+        for (name, session) in [("NIGHT_SIGNAL_demo", full), ("drums_only", only { $0.kind == .drumkit }),
+                                ("music_only", only { $0.kind != .drumkit })] {
+            let audio = AudioEngineController()
+            let export = try await LYOfflineExport.prepare(session: session, assets: [:], audio: audio)
+            let url = URL(fileURLWithPath: dir + "/\(name).wav")
+            try? FileManager.default.removeItem(at: url)
+            _ = try await LYOfflineExport.render(export.snapshot(stem: nil), to: url, format: .wav32BitFloat,
+                                                 cancellation: OfflineRenderCancellationToken()) { _ in }
+            let file = try AVAudioFile(forReading: url)
+            let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length))!
+            try file.read(into: buffer)
+            let rate = file.processingFormat.sampleRate
+            let l = UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength))
+            let r = UnsafeBufferPointer(start: buffer.floatChannelData![1], count: Int(buffer.frameLength))
+            XCTAssertTrue(l.allSatisfy(\.isFinite), name)
+            let secondsPerBeat = 60 / LYDemoSong.bpm
+            for s in LYDemoSong.sections {
+                let a = min(Int(Double(s.bar) * 4 * secondsPerBeat * rate), l.count), b = min(Int(Double(s.bar + s.bars) * 4 * secondsPerBeat * rate), l.count)
+                var sum = 0.0, peak: Float = 0
+                for k in a..<b { sum += Double(l[k] * l[k] + r[k] * r[k]); peak = max(peak, abs(l[k]), abs(r[k])) }
+                report.append(String(format: "%-18@ %-9@ rms %6.1f dB  peak %6.1f dBFS", name as NSString, s.name as NSString,
+                                     10 * log10(max(sum / Double(max(1, (b - a) * 2)), 1e-12)), 20 * log10(max(peak, 1e-9))))
             }
-            events.sort { $0.frame == $1.frame ? (!$0.on && $1.on) : $0.frame < $1.frame }
-            var left = [Float](repeating: 0, count: total), right = left
-            var position = 0, next = 0
-            left.withUnsafeMutableBufferPointer { l in
-                right.withUnsafeMutableBufferPointer { r in
-                    while position < total {
-                        while next < events.count, events[next].frame <= position {
-                            let e = events[next]
-                            if e.on { lysynth_note_on(synth.core, e.note, e.velocity, 0, 1, 0) } else { lysynth_note_off(synth.core, e.note, 0) }
-                            next += 1
-                        }
-                        var until = min(total, position + 256)
-                        if next < events.count { until = min(until, max(position + 1, events[next].frame)) }
-                        lysynth_set_song_position(synth.core, Double(position) / rate / secondsPerBeat, 1)
-                        lysynth_render(synth.core, l.baseAddress! + position, r.baseAddress! + position, Int32(until - position), 0)
-                        position = until
-                    }
-                }
-            }
-            let gain = Float(pow(10, part.volumeDB / 20))
-            let angle = (Float(part.pan) + 1) * .pi / 4
-            let gl = gain * cos(angle) * 1.4142, gr = gain * sin(angle) * 1.4142
-            var peak: Float = 0
-            for i in 0..<total {
-                mixL[i] += left[i] * gl; mixR[i] += right[i] * gr
-                peak = max(peak, abs(left[i] * gl), abs(right[i] * gr))
-            }
-            XCTAssertTrue(left.allSatisfy(\.isFinite), part.name)
-            // Level while it plays, in the first verse and the first chorus.
-            func level(_ name: String) -> String {
-                guard let s = LYDemoSong.sections.first(where: { $0.name == name }) else { return "" }
-                let a = Int(Double(s.bar) * 4 * secondsPerBeat * rate), b = Int(Double(s.bar + s.bars) * 4 * secondsPerBeat * rate)
-                var sum = 0.0
-                for i in a..<b { let l = Double(left[i] * gl), r = Double(right[i] * gr); sum += l * l + r * r }
-                let db = 10 * log10(max(sum / Double((b - a) * 2), 1e-14))
-                return db < -100 ? "   —  " : String(format: "%6.1f", db)
-            }
-            report.append(String(format: "TRACK %-10@ peak %6.1f dBFS  verse %@  chorus %@", part.name as NSString,
-                                 20 * log10(max(peak, 1e-9)), level("VERSE 1") as NSString, level("CHORUS 1") as NSString))
+            let peak = max(l.map(abs).max() ?? 0, r.map(abs).max() ?? 0)
+            report.append(String(format: "%@ peak %.1f dBFS", name as NSString, 20 * log10(max(peak, 1e-9))))
         }
-        func rmsDB(_ from: Int, _ to: Int) -> Double {
-            var sum = 0.0
-            for i in from..<to { sum += Double(mixL[i] * mixL[i] + mixR[i] * mixR[i]) }
-            return 10 * log10(max(sum / Double(max(1, (to - from) * 2)), 1e-12))
-        }
-        for s in LYDemoSong.sections {
-            let a = Int(Double(s.bar) * 4 * secondsPerBeat * rate), b = Int(Double(s.bar + s.bars) * 4 * secondsPerBeat * rate)
-            let peak = (a..<b).map { max(abs(mixL[$0]), abs(mixR[$0])) }.max() ?? 0
-            report.append(String(format: "SECTION %-9@ rms %6.1f dB  peak %6.1f dBFS", s.name as NSString, rmsDB(a, b), 20 * log10(max(peak, 1e-9))))
-        }
-        let peak = max(mixL.map(abs).max() ?? 0, mixR.map(abs).max() ?? 0)
-        report.append(String(format: "MIX peak %.1f dBFS", 20 * log10(max(peak, 1e-9))))
         try report.joined(separator: "\n").write(toFile: dir + "/demo_report.txt", atomically: true, encoding: .utf8)
-
-        // Normalize the audition file to -1 dBFS peak so it can be played as is.
-        let scale = peak > 0 ? pow(10, -1.0 / 20) / peak : 1
-        let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!
-        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(total))!
-        buffer.frameLength = AVAudioFrameCount(total)
-        for i in 0..<total {
-            buffer.floatChannelData![0][i] = mixL[i] * scale
-            buffer.floatChannelData![1][i] = mixR[i] * scale
-        }
-        let file = try AVAudioFile(forWriting: URL(fileURLWithPath: dir + "/NIGHT_SIGNAL_demo.wav"),
-                                   settings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: rate, AVNumberOfChannelsKey: 2,
-                                              AVLinearPCMBitDepthKey: 24, AVLinearPCMIsFloatKey: false, AVLinearPCMIsNonInterleaved: false])
-        try file.write(from: buffer)
     }
 }

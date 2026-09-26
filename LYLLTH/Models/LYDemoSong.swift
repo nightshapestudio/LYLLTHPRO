@@ -3,9 +3,9 @@ import NightshapeAudioEngine
 
 /// The demo song a new LYLLTH project opens with: a dark synth-pop track in
 /// F minor at 112 BPM, with an intro, two verses, pre-choruses, three
-/// choruses, an industrial bridge and an outro. Every part is a piano-roll
-/// clip played by a LUNATK factory sound, drums included, so the whole song
-/// is editable note by note.
+/// choruses, an industrial bridge and an outro. Drums are DrumKit drum tracks
+/// playing DrumKit's drum bank from step patterns; every other part is a
+/// piano-roll clip played by a LUNATK factory sound.
 enum LYDemoSong {
     static let bpm = 112.0
     static let title = "NIGHT SIGNAL"
@@ -71,16 +71,33 @@ enum LYDemoSong {
         names.flatMap { name -> [Int] in let s = section(name); return Array(s.bar ..< s.bar + s.bars) }
     }
 
-    // MARK: Drums
+    // MARK: Drums (DrumKit)
 
-    static func drums() -> [Part] {
-        var kick = Part(name: "KICK", sound: "PISTON KICK", volumeDB: -11)
-        var snare = Part(name: "SNARE", sound: "ANVIL SNARE", volumeDB: -10)
-        var clap = Part(name: "CLAP", sound: "IRON CLAP", volumeDB: -13, pan: 0.05)
-        var hats = Part(name: "HATS", sound: "STATIC HAT", volumeDB: -16, pan: 0.2)
-        var shaker = Part(name: "CHAINS", sound: "CHAIN SHAKE", volumeDB: -21, pan: -0.25)
-        var metal = Part(name: "METAL", sound: "SHEET METAL", volumeDB: -18, pan: -0.1)
-        var impact = Part(name: "IMPACT", sound: "BODY BLOW", volumeDB: -14)
+    /// A DrumKit drum track: hits on the sixteenth grid, played by a sound
+    /// from DrumKit's drum bank.
+    struct DrumPart {
+        let name: String
+        let preset: String
+        var volumeDB: Double
+        var pan: Double = 0
+        var chokeGroup: Int? = nil
+        /// Velocity (0…1) by song step (a sixteenth).
+        var hits: [Int: Double] = [:]
+
+        mutating func add(_ pitch: Int = 0, at beat: Double, length: Double = 0.25, velocity: Int = 100) {
+            let step = Int((beat * 4).rounded())
+            hits[step] = max(hits[step] ?? 0, Double(min(max(velocity, 1), 127)) / 127)
+        }
+    }
+
+    static func drums() -> [DrumPart] {
+        var kick = DrumPart(name: "KICK", preset: "kick_045", volumeDB: -9)          // DARK POP K
+        var snare = DrumPart(name: "SNARE", preset: "snare_043", volumeDB: -12)       // DARK POP SNR
+        var clap = DrumPart(name: "CLAP", preset: "clap_012", volumeDB: -15, pan: 0.05)   // DARK CLAP
+        var hats = DrumPart(name: "HATS", preset: "closedhat_006", volumeDB: -20, pan: 0.2)  // CHARCOAL
+        var shaker = DrumPart(name: "CHAINS", preset: "closedhat_017", volumeDB: -24, pan: -0.25)  // CHAINLINK
+        var metal = DrumPart(name: "METAL", preset: "perc_010", volumeDB: -19, pan: -0.1)   // METAL STAB
+        var impact = DrumPart(name: "IMPACT", preset: "tom_003", volumeDB: -14)       // THUNDER
 
         // Intro: the kick arrives half-way, then a pulse of hats.
         for bar in 4..<8 {
@@ -152,7 +169,7 @@ enum LYDemoSong {
             if !odd { impact.add(40, at: beat(bar, 3.5), length: 0.4, velocity: 100) }
             for e in 0..<8 { shaker.add(60, at: beat(bar, Double(e) * 0.5), length: 0.1, velocity: e % 2 == 0 ? 60 : 36) }
         }
-        // Into the last chorus: silence for two beats, then everything lands.
+        // Into the last chorus: everything lands together.
         metal.add(60, at: beat(section("CHORUS 3").bar), length: 0.6, velocity: 120)
         impact.add(40, at: beat(section("CHORUS 1").bar), length: 0.4, velocity: 110)
         impact.add(40, at: beat(section("CHORUS 3").bar), length: 0.4, velocity: 120)
@@ -164,6 +181,45 @@ enum LYDemoSong {
             snare.add(50, at: beat(bar, 2), length: 0.25, velocity: 90 - (bar - outro.bar) * 10)
         }
         return [kick, snare, clap, hats, shaker, metal, impact]
+    }
+
+    /// A drum part as DrumKit pattern clips: a 4-bar (64-step) pattern per
+    /// block of each section; identical blocks in a row become one clip that
+    /// repeats its pattern.
+    static func drumTrack(_ part: DrumPart, accent: LYAccent) -> LYTrack {
+        var clips: [LYClip] = []
+        let stepsPerBlock = 64
+        for s in sections {
+            var block = 0
+            var previous: (steps: [Bool], locks: [LYStepParameters])?
+            while block * 4 < s.bars {
+                let firstBar = s.bar + block * 4
+                let bars = min(4, s.bars - block * 4)
+                var steps = Array(repeating: false, count: stepsPerBlock)
+                var locks = Array(repeating: LYStepParameters.default, count: stepsPerBlock)
+                for i in 0..<(bars * 16) {
+                    if let velocity = part.hits[firstBar * 16 + i] {
+                        steps[i] = true
+                        locks[i].velocity = velocity
+                    }
+                }
+                block += 1
+                guard steps.contains(true) else { previous = nil; continue }
+                if let previous, previous.steps == steps, previous.locks == locks, var last = clips.popLast(),
+                   last.startBeat + last.lengthBeats == Double(firstBar) * 4 {
+                    last.lengthBeats += Double(bars) * 4
+                    clips.append(last)
+                } else {
+                    clips.append(LYClip(name: s.name, kind: .pattern, startBeat: Double(firstBar) * 4, lengthBeats: Double(bars) * 4,
+                                        steps: steps, stepParameters: locks))
+                }
+                previous = (steps, locks)
+            }
+        }
+        var track = LYTrack(name: part.name, kind: .drumkit, accent: accent, volumeDB: part.volumeDB, pan: part.pan, clips: clips)
+        track.drumPresetID = part.preset
+        track.chokeGroup = part.chokeGroup
+        return track
     }
 
     // MARK: Bass
@@ -381,11 +437,14 @@ enum LYDemoSong {
         return track
     }
 
-    static var parts: [Part] { drums() + bass() + harmony() + melody() + effects() }
+    static var parts: [Part] { bass() + harmony() + melody() + effects() }
+    static var drumParts: [DrumPart] { drums() }
 
     static func session() -> LYLLTHSession {
         let accents: [LYAccent] = [.teal, .teal, .indigo, .indigo, .purple, .purple]
-        var tracks = parts.enumerated().map { index, part in track(part, accent: accents[index % accents.count]) }
+        var tracks = drumParts.enumerated().map { index, part in drumTrack(part, accent: accents[index % accents.count]) }
+        let first = tracks.count
+        tracks += parts.enumerated().map { index, part in track(part, accent: accents[(first + index) % accents.count]) }
         tracks.append(LYTrack(name: "VOCAL", kind: .audio, accent: accents[tracks.count % accents.count], volumeDB: -6, inputName: "INPUT 1"))
         return LYLLTHSession(
             name: title,
