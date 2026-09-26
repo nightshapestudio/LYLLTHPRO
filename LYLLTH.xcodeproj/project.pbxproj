@@ -7,62 +7,88 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00051A108080B257F8B15E38 /* LUNATKAudioUnit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D22B4C169FF849CDE33BC3F /* LUNATKAudioUnit.swift */; };
 		00CD8A9C08C13F42A6624EDB /* SequencerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8658DEE809F98F0303AC07 /* SequencerModels.swift */; };
 		030D70F445C8B64626C87ACB /* LYSynthCore.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3093988C25143E99CB35645D /* LYSynthCore.cpp */; settings = {COMPILER_FLAGS = "-O3"; }; };
 		03A2D18CC3D75840A1D6AD06 /* LYNotePlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D695E9DF2B63F21EB41F447 /* LYNotePlayer.swift */; };
 		03F2A270049C0F2561F3DDA7 /* ArrangementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0C312174AA965DC7872AAE /* ArrangementView.swift */; };
+		049566FB4B632A62F89D9B1A /* NIGHTSHAPE-Bold_Outline.ttf in Resources */ = {isa = PBXBuildFile; fileRef = BC198D92CC6F7136CA216A6C /* NIGHTSHAPE-Bold_Outline.ttf */; };
+		09898A460ACD50AC69E8AB00 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 44A67A0FF10CBC015DE08F8B /* AudioToolbox.framework */; };
 		0CEC7DBA1215E7248215069A /* LYLLTHTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */; };
 		0F2E7B5C782BAFAFA9C0A000 /* NoteClipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C197A61BD7F9513D6B09D7D3 /* NoteClipTests.swift */; };
 		1100D2673739C29C697A2403 /* LYScroller.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8138DCA1A91395B53951A82 /* LYScroller.swift */; };
+		151531C8C596EA7D3CE4B961 /* LYFrameClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FF19AFA5BCCFB78BBACFE5 /* LYFrameClock.swift */; };
 		154A709FEAD4AA9205A7DBBC /* LYOfflineExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09D35668C634C05CDD514E3C /* LYOfflineExport.swift */; };
 		154CFDC4030483427D92BCE8 /* ExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B68857B9AC741B4807DC37 /* ExportTests.swift */; };
 		162682C9152C4F5217FC0D04 /* SynthCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2F4736A16F53868A4791F0 /* SynthCoreTests.swift */; };
 		1683416DF75FA415C6AC32B8 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 36CE37E3FF75BBDC0DF875F2 /* Accelerate.framework */; };
+		176D2F573031D2A559882730 /* LUNATKExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 25752396635615C9F883448F /* LUNATKExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		197E68D11598EC2B708E6A54 /* LYSynthControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC8025D09EE241120C506F1 /* LYSynthControls.swift */; };
+		1CD6DD6A4CA3030C4B7C1763 /* LYSynthInstrument.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9405C470F3A00F3CB1F2855 /* LYSynthInstrument.swift */; };
 		1EB9AE99B706B7D1C2A6211B /* ReverbModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 543A005C681BF5D44EE192DB /* ReverbModels.swift */; };
 		1F169417CEC23D5306D775ED /* ChannelStripInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 513D2E0A410B83980A7B0903 /* ChannelStripInspector.swift */; };
 		1F234EB5BBD5FB513736A650 /* NightshapeAudioEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 167D8076867A0FD15A3749D3 /* NightshapeAudioEngine */; };
+		20BD4F82CF89B38B334EED27 /* Nightshape-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6DA38B4ADC0D30D3DE76127B /* Nightshape-Bold.ttf */; };
+		267D758B993EA6E3DDCD383E /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 36CE37E3FF75BBDC0DF875F2 /* Accelerate.framework */; };
 		2715202FF2290BB4B30B1DFD /* PianoRoll.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E87A3876A04F43A520B159 /* PianoRoll.swift */; };
+		279CACE1A5FA5615DA396C54 /* LUNATKViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9CD8500ACF2478647F7832A /* LUNATKViewController.swift */; };
 		2B0E806B86EC35725F476C95 /* LYSynthFXPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B03D44787926C50EA6A06C6 /* LYSynthFXPage.swift */; };
+		2B69B203F6F2D87066F153A6 /* LYSynthVisuals.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD4ACCE1DB809DEB2FD7914 /* LYSynthVisuals.swift */; };
 		2D66F4DD8DA2C43A7B698A1A /* CHARGED COMPANIONS.fkit in Resources */ = {isa = PBXBuildFile; fileRef = C18D89386FBB389F94D73831 /* CHARGED COMPANIONS.fkit */; };
 		3904B2CD3898D951F670E9ED /* FilterPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DE9E66DC6125448D57721A6 /* FilterPanelView.swift */; };
-		3ECB3A6665142FE79DE99281 /* ZZRenderProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C26EF89974C1A3C0FDEC21 /* ZZRenderProbe.swift */; };
+		3AC8280BEE1D86A4C7D3A9AF /* Adam-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1703868BDA0F39CBC2D0032D /* Adam-Bold.ttf */; };
 		412158E31F5D815A57A5E577 /* LYSynthInstrument.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9405C470F3A00F3CB1F2855 /* LYSynthInstrument.swift */; };
 		426BA90C5EE003358A9D6E10 /* DrumKitSequencerVisuals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B5A010271292EDECA656A29 /* DrumKitSequencerVisuals.swift */; };
 		43F41B9FECA4D8B43B63D747 /* FXWindowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14EF068925C4572F08ABDF5D /* FXWindowViews.swift */; };
 		443C769B4ED7E689BF291AFA /* LYFKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05B62481262297A4782ECA7B /* LYFKit.swift */; };
+		44E8CBC3E1B63796F4CB34C5 /* Adam-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFAB0361C23B88BFF6CA3B3F /* Adam-Medium.ttf */; };
 		456464F8171454871C42526A /* LYAutomationPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57BE353E11A8378B1B34CC1 /* LYAutomationPlayer.swift */; };
+		47D911EBF2C664376130E06A /* LYScroller.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8138DCA1A91395B53951A82 /* LYScroller.swift */; };
 		4E5DD4763D49716F6035C534 /* BusRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67A45FFE78C9215B9D662390 /* BusRoutingTests.swift */; };
+		52E4372589C80F6D4C89896E /* LYSynthLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A289B564195B5876C2AEE5D /* LYSynthLibrary.swift */; };
 		55B23E27BAAC6FC150BBEC20 /* Adam-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1703868BDA0F39CBC2D0032D /* Adam-Bold.ttf */; };
 		5D4D320FC8AA37F75BCA3B31 /* LYMIDIInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B43134989E942D54830A3A /* LYMIDIInput.swift */; };
 		632CEC6A18455A781C28C16B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A3622C427AB836F95F83FB66 /* Assets.xcassets */; };
+		64F2430B9AB49B49C6B0F87C /* LYSynthCore.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3093988C25143E99CB35645D /* LYSynthCore.cpp */; settings = {COMPILER_FLAGS = "-O3"; }; };
 		65C17AB3FAC85EBFA6A6433C /* FXWindowHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05C3A9FF391869346BFAFED1 /* FXWindowHost.swift */; };
+		6627333E720F6FF964089539 /* FontRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D80641FB01504BDFF2D6E83 /* FontRegistrar.swift */; };
 		67DE335921D0A0627510E076 /* LYSynthPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE654E905CE837E5445AB214 /* LYSynthPages.swift */; };
 		68C4C8D21F4B9B47B08ECBFD /* NIGHT ENGINE.fkit in Resources */ = {isa = PBXBuildFile; fileRef = BE0DDECEF61386FEDB7B39EC /* NIGHT ENGINE.fkit */; };
+		69163D9A2AEDAFB25FF464E6 /* LYSynthEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8249E5B5CE85685DDD1A42 /* LYSynthEditor.swift */; };
 		6E98A0974A6201257826EF93 /* Adam-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD2467CDCE9B421E3430FFFE /* Adam-Light.ttf */; };
 		6F3A38A7891F6397397D6048 /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */; };
 		71DD0860BC3BEA2D486A2662 /* LYSynthPatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EFD5B0EE63778A738F5BBAA /* LYSynthPatch.swift */; };
+		730A52AB5C6BC6E784B76AAC /* FontRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D80641FB01504BDFF2D6E83 /* FontRegistrar.swift */; };
 		747F3788FE2693F4862EDC12 /* SongFXLane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33626D2FD865653F4F23FAE7 /* SongFXLane.swift */; };
 		7759F7B9F7F7186B3C840682 /* LUNATKTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84AE0F65DFC17746EDC090A3 /* LUNATKTests.swift */; };
 		7AAEF9D68A52E5362904BFAA /* LYSynthControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC8025D09EE241120C506F1 /* LYSynthControls.swift */; };
 		7BFE69BA355050096FC198A1 /* AutomationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E616346F0537A425342E176A /* AutomationTests.swift */; };
+		7C1351A5B18DD95366995644 /* Adam-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1703868BDA0F39CBC2D0032D /* Adam-Bold.ttf */; };
 		7D1C76365E9E32FC85F2E8CD /* LYDrumSounds.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6917A8C3DCB7971E1B412205 /* LYDrumSounds.swift */; };
 		7DF88DF9F126EE98522AAD31 /* AudioUnitCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90BF7073365CA38A142C3FA5 /* AudioUnitCatalog.swift */; };
 		8294D8BFBBA557ED35152BE3 /* TimelinePlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67535C49D147B10E190ACCD8 /* TimelinePlayback.swift */; };
 		854046CA26DFA57FB2152650 /* LYSongFX.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90DA54344A0C325DC97A88A /* LYSongFX.swift */; };
 		865DADC7F42A9E3484ABCDAD /* LYLLTHApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */; };
 		86D4A6B8E2C1420D201CD70E /* NIGHTSHAPE-Bold_Outline.ttf in Resources */ = {isa = PBXBuildFile; fileRef = BC198D92CC6F7136CA216A6C /* NIGHTSHAPE-Bold_Outline.ttf */; };
+		8B55114EB71CB656DB4E5440 /* LYSynthFXPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B03D44787926C50EA6A06C6 /* LYSynthFXPage.swift */; };
 		8CEA08B2D479F0190698CA5C /* LYSynthEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8249E5B5CE85685DDD1A42 /* LYSynthEditor.swift */; };
 		8FD0114398BD1F462E32E0FF /* EQEditOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 267002A7921D5C68E2885A20 /* EQEditOverlayView.swift */; };
 		8FF0057A33F063C940883B91 /* SongFXTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4590DBB4A2CB4EEFB8F938C /* SongFXTests.swift */; };
 		98891AB81EB36E829D8D0A9E /* AutomationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EBB01566EC4D356A3D9614E /* AutomationViews.swift */; };
+		997258FD72D3411DA9EB1A7D /* Adam-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD2467CDCE9B421E3430FFFE /* Adam-Light.ttf */; };
 		9AB195A56B1DC6168799741C /* LYSynthLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A289B564195B5876C2AEE5D /* LYSynthLibrary.swift */; };
 		9CEC9247F9086363A88353A1 /* LYWavetableEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0618CFBCAE4DFCA5D4BA204B /* LYWavetableEditor.swift */; };
+		A1CE8F762ABF6D8CE2DC8135 /* LYFrameClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FF19AFA5BCCFB78BBACFE5 /* LYFrameClock.swift */; };
+		A39C671D6850A084E8B900A9 /* LYSynthPatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EFD5B0EE63778A738F5BBAA /* LYSynthPatch.swift */; };
 		A3B2C9A6D7CCF44DEE0683CB /* Nightshape-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6DA38B4ADC0D30D3DE76127B /* Nightshape-Bold.ttf */; };
 		A65BB141E76824F4F93607CE /* SonicDecimatorEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95DE102CFAEFE0774BDF2B06 /* SonicDecimatorEditorView.swift */; };
 		A72727F891A861CF9EBE3149 /* FXRack.swift in Sources */ = {isa = PBXBuildFile; fileRef = F548D526F8DC778B1DCD460A /* FXRack.swift */; };
 		AB673A7B503D67D52EEC2E24 /* DrumKitRootShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D0D01CA5DFBABAF7CB19114 /* DrumKitRootShims.swift */; };
+		AD10EC2866EBAE979DBD6128 /* Adam-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD2467CDCE9B421E3430FFFE /* Adam-Light.ttf */; };
+		ADAECE8CE4D7C0A7F07D6B4B /* LYLLTHTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */; };
 		ADC2DE9209525ABF528B72C5 /* LYNoteRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3584EB3AD88692550DF64DBE /* LYNoteRecording.swift */; };
 		B1123646A4225427ECE8197B /* CompressorWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B60B660A74B0473F5FCECCF /* CompressorWindowView.swift */; };
+		B14A58B7D7F0AD6D37E8D4DD /* LUNATKApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2421861E37D6B47FC46CB6 /* LUNATKApp.swift */; };
 		B63626ABA24F747B3810394F /* LYSynthVisuals.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD4ACCE1DB809DEB2FD7914 /* LYSynthVisuals.swift */; };
 		B7937CF1156F2D4D5449C232 /* CompressorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53DEFCF4361EE40F8F34E692 /* CompressorModels.swift */; };
 		B992E98617D36BDD7C5942BE /* FXWindowsMore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BB13BE327985FF3958F073F /* FXWindowsMore.swift */; };
@@ -70,27 +96,42 @@
 		BEF12851075EA3C677715CCD /* NightshapeTheme+macOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2076405DA45D97F6974188B2 /* NightshapeTheme+macOS.swift */; };
 		C5FC2050CF73E1D9599F3518 /* AudioEngineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC518B98C5E542E07745D166 /* AudioEngineController.swift */; };
 		C619A497E1A0A6EEAEC62A38 /* SessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D2710D240A4FA97144EC0A9 /* SessionModels.swift */; };
+		C7129AFC0F56B91FDD1D1C4B /* CoreAudioKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 302BC1AC68C6273B481FA79A /* CoreAudioKit.framework */; };
 		C9669E21D8851AEC280A6749 /* DrumSoundBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24183797B508D69982E65468 /* DrumSoundBrowser.swift */; };
 		CA26867E55FDA66D9BA5987D /* LYAutomation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40ECA3F5DA20294F1EFBCA15 /* LYAutomation.swift */; };
 		CE3B4B50242937A2DCF7A2C6 /* TransportDisplayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF85EAD4DB1AAE6788D582A /* TransportDisplayState.swift */; };
 		CF07DD883201B31B3568B800 /* LYFrameClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FF19AFA5BCCFB78BBACFE5 /* LYFrameClock.swift */; };
+		CF1C86B0691898B1B5700D03 /* NIGHTSHAPE-Bold_Outline.ttf in Resources */ = {isa = PBXBuildFile; fileRef = BC198D92CC6F7136CA216A6C /* NIGHTSHAPE-Bold_Outline.ttf */; };
+		D080A4732210713E29FE0D56 /* Nightshape-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6DA38B4ADC0D30D3DE76127B /* Nightshape-Bold.ttf */; };
 		DA3AB96313DF53330ACB9F02 /* ZipArchiveWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60D7E4EBAA99B89AB4C6C272 /* ZipArchiveWriter.swift */; };
+		DAE9CF02984BC78784DD65FE /* LYWavetableEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0618CFBCAE4DFCA5D4BA204B /* LYWavetableEditor.swift */; };
 		DF259391AE2D20D1A6B9B323 /* Adam-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFAB0361C23B88BFF6CA3B3F /* Adam-Medium.ttf */; };
 		DFCE1678A800ACE606F90D11 /* FKitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F6FDEB2771DB26C743DA3A2 /* FKitTests.swift */; };
 		E239CC267EFBF4CF608C5B32 /* ZipArchiveReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F5EDEEECA0B5AF0315DC28E /* ZipArchiveReader.swift */; };
 		E6AFE555883CC0E0E74FA6D0 /* SignalBloomModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E67BF43BB0AB1DE22EEB35A8 /* SignalBloomModels.swift */; };
+		EB994BD611F3A6ED6C7B4131 /* LYScroller.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8138DCA1A91395B53951A82 /* LYScroller.swift */; };
 		ECA8EDA23F1164FC2719CA0C /* FontRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D80641FB01504BDFF2D6E83 /* FontRegistrar.swift */; };
 		EFD5BBF99458A4F73ACC3359 /* SynthFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A1922DA06A54E7620D26B2E /* SynthFeatureTests.swift */; };
+		F05D848A6A80E1AF2C4A9703 /* LYSynthPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE654E905CE837E5445AB214 /* LYSynthPages.swift */; };
 		F2182A2AF3D1917E59FE6119 /* ParameterResetTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08B80E1422DCC935BC5E59E1 /* ParameterResetTap.swift */; };
 		F2B1793B2708C9009DAE7244 /* ExperimentalFXNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0673CFA15F6912BAF84B725 /* ExperimentalFXNavigation.swift */; };
+		F2D9DF615E644F09E63100B9 /* Adam-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFAB0361C23B88BFF6CA3B3F /* Adam-Medium.ttf */; };
 		F3072584030C31119C4860C6 /* LYLLTHSessionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */; };
 		F3B64D71CED48EEFD02691B4 /* LYRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16D07685D250C91B37E5CD8F /* LYRecorder.swift */; };
 		F5073A5322475A1DCD36C06D /* LYBounce.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26A43024412B8FC79FFECBA7 /* LYBounce.swift */; };
 		F5914CB573EBA8C4B066278D /* OfflineExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6FFC78FDE604528578BAEF /* OfflineExportTests.swift */; };
+		FC8796D60AE99AEA97677A1E /* LYLLTHTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */; };
 		FDA597E345BBC5A57BA5F2C0 /* DecimatorMotionDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63BA1223576AF041D954B929 /* DecimatorMotionDisplay.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		61366BFCC6A2AE71122113BA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C7C43796E74D4EA3417CDB36 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4D02338D3D85FA16C94299C4;
+			remoteInfo = LUNATKExtension;
+		};
 		FDFEA3E4D80AEE38DA1ABCEE /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C7C43796E74D4EA3417CDB36 /* Project object */;
@@ -99,6 +140,20 @@
 			remoteInfo = LYLLTH;
 		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		ADC1D6BE8B1F6FE0E01877B0 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				176D2F573031D2A559882730 /* LUNATKExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		03B43134989E942D54830A3A /* LYMIDIInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYMIDIInput.swift; sourceTree = "<group>"; };
@@ -118,11 +173,13 @@
 		1F14758F6049E1F10613908E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		2076405DA45D97F6974188B2 /* NightshapeTheme+macOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NightshapeTheme+macOS.swift"; sourceTree = "<group>"; };
 		24183797B508D69982E65468 /* DrumSoundBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumSoundBrowser.swift; sourceTree = "<group>"; };
+		25752396635615C9F883448F /* LUNATKExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LUNATKExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		267002A7921D5C68E2885A20 /* EQEditOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EQEditOverlayView.swift; path = "../nightshape-drumkit-ios/Views/Components/EQEditOverlayView.swift"; sourceTree = "<group>"; };
 		26A43024412B8FC79FFECBA7 /* LYBounce.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYBounce.swift; sourceTree = "<group>"; };
 		2B03D44787926C50EA6A06C6 /* LYSynthFXPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthFXPage.swift; sourceTree = "<group>"; };
 		2B60B660A74B0473F5FCECCF /* CompressorWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompressorWindowView.swift; path = "../nightshape-drumkit-ios/Views/Components/CompressorWindowView.swift"; sourceTree = "<group>"; };
 		2EBB01566EC4D356A3D9614E /* AutomationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationViews.swift; sourceTree = "<group>"; };
+		302BC1AC68C6273B481FA79A /* CoreAudioKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudioKit.framework; path = System/Library/Frameworks/CoreAudioKit.framework; sourceTree = SDKROOT; };
 		3093988C25143E99CB35645D /* LYSynthCore.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = LYSynthCore.cpp; sourceTree = "<group>"; };
 		33626D2FD865653F4F23FAE7 /* SongFXLane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongFXLane.swift; sourceTree = "<group>"; };
 		34B68857B9AC741B4807DC37 /* ExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportTests.swift; sourceTree = "<group>"; };
@@ -132,6 +189,7 @@
 		3BF85EAD4DB1AAE6788D582A /* TransportDisplayState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportDisplayState.swift; sourceTree = "<group>"; };
 		3D695E9DF2B63F21EB41F447 /* LYNotePlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYNotePlayer.swift; sourceTree = "<group>"; };
 		40ECA3F5DA20294F1EFBCA15 /* LYAutomation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYAutomation.swift; sourceTree = "<group>"; };
+		44A67A0FF10CBC015DE08F8B /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		4DE9E66DC6125448D57721A6 /* FilterPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FilterPanelView.swift; path = "../nightshape-drumkit-ios/Views/Components/FilterPanelView.swift"; sourceTree = "<group>"; };
 		513D2E0A410B83980A7B0903 /* ChannelStripInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelStripInspector.swift; sourceTree = "<group>"; };
 		53DEFCF4361EE40F8F34E692 /* CompressorModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompressorModels.swift; path = "../nightshape-drumkit-ios/Models/CompressorModels.swift"; sourceTree = "<group>"; };
@@ -145,6 +203,7 @@
 		67535C49D147B10E190ACCD8 /* TimelinePlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelinePlayback.swift; sourceTree = "<group>"; };
 		67A45FFE78C9215B9D662390 /* BusRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BusRoutingTests.swift; sourceTree = "<group>"; };
 		6917A8C3DCB7971E1B412205 /* LYDrumSounds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYDrumSounds.swift; sourceTree = "<group>"; };
+		6D22B4C169FF849CDE33BC3F /* LUNATKAudioUnit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUNATKAudioUnit.swift; sourceTree = "<group>"; };
 		6DA38B4ADC0D30D3DE76127B /* Nightshape-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Nightshape-Bold.ttf"; sourceTree = "<group>"; };
 		6EFD5B0EE63778A738F5BBAA /* LYSynthPatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthPatch.swift; sourceTree = "<group>"; };
 		6F5EDEEECA0B5AF0315DC28E /* ZipArchiveReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ZipArchiveReader.swift; path = "../nightshape-drumkit-ios/Services/ZipArchiveReader.swift"; sourceTree = "<group>"; };
@@ -164,25 +223,28 @@
 		A57BE353E11A8378B1B34CC1 /* LYAutomationPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYAutomationPlayer.swift; sourceTree = "<group>"; };
 		A90DA54344A0C325DC97A88A /* LYSongFX.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSongFX.swift; sourceTree = "<group>"; };
 		BC198D92CC6F7136CA216A6C /* NIGHTSHAPE-Bold_Outline.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "NIGHTSHAPE-Bold_Outline.ttf"; sourceTree = "<group>"; };
+		BD84A69775F7990A7D38D1EB /* LUNATK.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LUNATK.entitlements; sourceTree = "<group>"; };
 		BE0DDECEF61386FEDB7B39EC /* NIGHT ENGINE.fkit */ = {isa = PBXFileReference; path = "NIGHT ENGINE.fkit"; sourceTree = "<group>"; };
 		BE654E905CE837E5445AB214 /* LYSynthPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthPages.swift; sourceTree = "<group>"; };
 		C0673CFA15F6912BAF84B725 /* ExperimentalFXNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ExperimentalFXNavigation.swift; path = "../nightshape-drumkit-ios/Views/Components/ExperimentalFXNavigation.swift"; sourceTree = "<group>"; };
 		C18D89386FBB389F94D73831 /* CHARGED COMPANIONS.fkit */ = {isa = PBXFileReference; path = "CHARGED COMPANIONS.fkit"; sourceTree = "<group>"; };
 		C197A61BD7F9513D6B09D7D3 /* NoteClipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteClipTests.swift; sourceTree = "<group>"; };
-		C4C26EF89974C1A3C0FDEC21 /* ZZRenderProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZZRenderProbe.swift; sourceTree = "<group>"; };
 		C8E87A3876A04F43A520B159 /* PianoRoll.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PianoRoll.swift; sourceTree = "<group>"; };
+		CD75AE6990E7D0225C0190F1 /* LUNATK.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LUNATK.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CDD4ACCE1DB809DEB2FD7914 /* LYSynthVisuals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthVisuals.swift; sourceTree = "<group>"; };
 		CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYLLTHApp.swift; sourceTree = "<group>"; };
 		CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDocumentTests.swift; sourceTree = "<group>"; };
 		CE8658DEE809F98F0303AC07 /* SequencerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SequencerModels.swift; path = "../nightshape-drumkit-ios/Models/SequencerModels.swift"; sourceTree = "<group>"; };
 		D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYLLTHSessionDocument.swift; sourceTree = "<group>"; };
 		D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
+		D9CD8500ACF2478647F7832A /* LUNATKViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUNATKViewController.swift; sourceTree = "<group>"; };
 		DD2467CDCE9B421E3430FFFE /* Adam-Light.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Adam-Light.ttf"; sourceTree = "<group>"; };
 		DEAA1E35780E10604349C74F /* NightshapeAudioEngine */ = {isa = PBXFileReference; lastKnownFileType = folder; name = NightshapeAudioEngine; path = "../nightshape-drumkit-ios/NightshapeAudioEngine"; sourceTree = SOURCE_ROOT; };
 		DFAB0361C23B88BFF6CA3B3F /* Adam-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Adam-Medium.ttf"; sourceTree = "<group>"; };
 		E4590DBB4A2CB4EEFB8F938C /* SongFXTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongFXTests.swift; sourceTree = "<group>"; };
 		E616346F0537A425342E176A /* AutomationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationTests.swift; sourceTree = "<group>"; };
 		E67BF43BB0AB1DE22EEB35A8 /* SignalBloomModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SignalBloomModels.swift; path = "../nightshape-drumkit-ios/Models/SignalBloomModels.swift"; sourceTree = "<group>"; };
+		EC2421861E37D6B47FC46CB6 /* LUNATKApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUNATKApp.swift; sourceTree = "<group>"; };
 		EC518B98C5E542E07745D166 /* AudioEngineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngineController.swift; sourceTree = "<group>"; };
 		F088CDEC96A8952CA5A2AEC8 /* LYLLTHTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYLLTHTheme.swift; sourceTree = "<group>"; };
 		F548D526F8DC778B1DCD460A /* FXRack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXRack.swift; sourceTree = "<group>"; };
@@ -192,6 +254,16 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		BBDBE7604925E63575947B23 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				267D758B993EA6E3DDCD383E /* Accelerate.framework in Frameworks */,
+				C7129AFC0F56B91FDD1D1C4B /* CoreAudioKit.framework in Frameworks */,
+				09898A460ACD50AC69E8AB00 /* AudioToolbox.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CDE0433D07E39ED6E444AE9D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -218,10 +290,21 @@
 		0E7EF4FA1A9AE3442B86B6DD /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				CD75AE6990E7D0225C0190F1 /* LUNATK.app */,
+				25752396635615C9F883448F /* LUNATKExtension.appex */,
 				35CE53FE7A1928E34EFCCC92 /* LYLLTH.app */,
 				960F211F505A6A045668116C /* LYLLTHTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		1591D387DE721A9511E465F6 /* Extension */ = {
+			isa = PBXGroup;
+			children = (
+				6D22B4C169FF849CDE33BC3F /* LUNATKAudioUnit.swift */,
+				D9CD8500ACF2478647F7832A /* LUNATKViewController.swift */,
+			);
+			path = Extension;
 			sourceTree = "<group>";
 		};
 		1EB24E43F1D3318DFC2B9D89 /* DrumKitShared */ = {
@@ -258,6 +341,7 @@
 			isa = PBXGroup;
 			children = (
 				1EB24E43F1D3318DFC2B9D89 /* DrumKitShared */,
+				7E5761FC5FA0CF71B18DF87C /* LUNATK */,
 				E5608A2A3E1F97D7BA44E634 /* LYLLTH */,
 				9385064ED7CD067273BE87BA /* LYLLTHTests */,
 				550C88F7AC5A0D3C95881789 /* Packages */,
@@ -299,6 +383,15 @@
 			path = Fonts;
 			sourceTree = "<group>";
 		};
+		7E5761FC5FA0CF71B18DF87C /* LUNATK */ = {
+			isa = PBXGroup;
+			children = (
+				9813C50A17BACC9F6F29704A /* App */,
+				1591D387DE721A9511E465F6 /* Extension */,
+			);
+			path = LUNATK;
+			sourceTree = "<group>";
+		};
 		9385064ED7CD067273BE87BA /* LYLLTHTests */ = {
 			isa = PBXGroup;
 			children = (
@@ -313,10 +406,18 @@
 				E4590DBB4A2CB4EEFB8F938C /* SongFXTests.swift */,
 				1A2F4736A16F53868A4791F0 /* SynthCoreTests.swift */,
 				1A1922DA06A54E7620D26B2E /* SynthFeatureTests.swift */,
-				C4C26EF89974C1A3C0FDEC21 /* ZZRenderProbe.swift */,
 				297C287AF96441E0A0F9CFA4 /* Fixtures */,
 			);
 			path = LYLLTHTests;
+			sourceTree = "<group>";
+		};
+		9813C50A17BACC9F6F29704A /* App */ = {
+			isa = PBXGroup;
+			children = (
+				BD84A69775F7990A7D38D1EB /* LUNATK.entitlements */,
+				EC2421861E37D6B47FC46CB6 /* LUNATKApp.swift */,
+			);
+			path = App;
 			sourceTree = "<group>";
 		};
 		A43D261B3252B9EC7CE2F875 /* Resources */ = {
@@ -342,6 +443,8 @@
 			isa = PBXGroup;
 			children = (
 				36CE37E3FF75BBDC0DF875F2 /* Accelerate.framework */,
+				44A67A0FF10CBC015DE08F8B /* AudioToolbox.framework */,
+				302BC1AC68C6273B481FA79A /* CoreAudioKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -468,6 +571,45 @@
 			productReference = 35CE53FE7A1928E34EFCCC92 /* LYLLTH.app */;
 			productType = "com.apple.product-type.application";
 		};
+		4D02338D3D85FA16C94299C4 /* LUNATKExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C2ACE4FDD5657710362E7A8A /* Build configuration list for PBXNativeTarget "LUNATKExtension" */;
+			buildPhases = (
+				7E8779DF4D086306369C3B81 /* Sources */,
+				ACC575C3A66169D7C5E434AA /* Resources */,
+				BBDBE7604925E63575947B23 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LUNATKExtension;
+			packageProductDependencies = (
+			);
+			productName = LUNATKExtension;
+			productReference = 25752396635615C9F883448F /* LUNATKExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		97129E52C7245B865340A9E0 /* LUNATK */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DC7A54CDDFE1906DD1EC6366 /* Build configuration list for PBXNativeTarget "LUNATK" */;
+			buildPhases = (
+				44ADEBED6404F02FBEA1A604 /* Sources */,
+				6239D81CEF512BADD508C4CE /* Resources */,
+				ADC1D6BE8B1F6FE0E01877B0 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				502658BDD63CAAF11DC09FA2 /* PBXTargetDependency */,
+			);
+			name = LUNATK;
+			packageProductDependencies = (
+			);
+			productName = LUNATK;
+			productReference = CD75AE6990E7D0225C0190F1 /* LUNATK.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -478,6 +620,12 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					26929814AE213AE5513C6D36 = {
+						ProvisioningStyle = Automatic;
+					};
+					4D02338D3D85FA16C94299C4 = {
+						ProvisioningStyle = Automatic;
+					};
+					97129E52C7245B865340A9E0 = {
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -499,6 +647,8 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				97129E52C7245B865340A9E0 /* LUNATK */,
+				4D02338D3D85FA16C94299C4 /* LUNATKExtension */,
 				26929814AE213AE5513C6D36 /* LYLLTH */,
 				0C49A6CE6FF0DFCED6957ED1 /* LYLLTHTests */,
 			);
@@ -506,6 +656,30 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		6239D81CEF512BADD508C4CE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7C1351A5B18DD95366995644 /* Adam-Bold.ttf in Resources */,
+				997258FD72D3411DA9EB1A7D /* Adam-Light.ttf in Resources */,
+				44E8CBC3E1B63796F4CB34C5 /* Adam-Medium.ttf in Resources */,
+				049566FB4B632A62F89D9B1A /* NIGHTSHAPE-Bold_Outline.ttf in Resources */,
+				20BD4F82CF89B38B334EED27 /* Nightshape-Bold.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ACC575C3A66169D7C5E434AA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3AC8280BEE1D86A4C7D3A9AF /* Adam-Bold.ttf in Resources */,
+				AD10EC2866EBAE979DBD6128 /* Adam-Light.ttf in Resources */,
+				F2D9DF615E644F09E63100B9 /* Adam-Medium.ttf in Resources */,
+				CF1C86B0691898B1B5700D03 /* NIGHTSHAPE-Bold_Outline.ttf in Resources */,
+				D080A4732210713E29FE0D56 /* Nightshape-Bold.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B98CE6324B07D2228E4AD739 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -531,6 +705,41 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		44ADEBED6404F02FBEA1A604 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6627333E720F6FF964089539 /* FontRegistrar.swift in Sources */,
+				B14A58B7D7F0AD6D37E8D4DD /* LUNATKApp.swift in Sources */,
+				A1CE8F762ABF6D8CE2DC8135 /* LYFrameClock.swift in Sources */,
+				FC8796D60AE99AEA97677A1E /* LYLLTHTheme.swift in Sources */,
+				47D911EBF2C664376130E06A /* LYScroller.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7E8779DF4D086306369C3B81 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				730A52AB5C6BC6E784B76AAC /* FontRegistrar.swift in Sources */,
+				00051A108080B257F8B15E38 /* LUNATKAudioUnit.swift in Sources */,
+				279CACE1A5FA5615DA396C54 /* LUNATKViewController.swift in Sources */,
+				151531C8C596EA7D3CE4B961 /* LYFrameClock.swift in Sources */,
+				ADAECE8CE4D7C0A7F07D6B4B /* LYLLTHTheme.swift in Sources */,
+				EB994BD611F3A6ED6C7B4131 /* LYScroller.swift in Sources */,
+				197E68D11598EC2B708E6A54 /* LYSynthControls.swift in Sources */,
+				64F2430B9AB49B49C6B0F87C /* LYSynthCore.cpp in Sources */,
+				69163D9A2AEDAFB25FF464E6 /* LYSynthEditor.swift in Sources */,
+				8B55114EB71CB656DB4E5440 /* LYSynthFXPage.swift in Sources */,
+				1CD6DD6A4CA3030C4B7C1763 /* LYSynthInstrument.swift in Sources */,
+				52E4372589C80F6D4C89896E /* LYSynthLibrary.swift in Sources */,
+				F05D848A6A80E1AF2C4A9703 /* LYSynthPages.swift in Sources */,
+				A39C671D6850A084E8B900A9 /* LYSynthPatch.swift in Sources */,
+				2B69B203F6F2D87066F153A6 /* LYSynthVisuals.swift in Sources */,
+				DAE9CF02984BC78784DD65FE /* LYWavetableEditor.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		BA361C9CFDA8F1A5359B5BE6 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -546,7 +755,6 @@
 				8FF0057A33F063C940883B91 /* SongFXTests.swift in Sources */,
 				162682C9152C4F5217FC0D04 /* SynthCoreTests.swift in Sources */,
 				EFD5BBF99458A4F73ACC3359 /* SynthFeatureTests.swift in Sources */,
-				3ECB3A6665142FE79DE99281 /* ZZRenderProbe.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -624,9 +832,40 @@
 			target = 26929814AE213AE5513C6D36 /* LYLLTH */;
 			targetProxy = FDFEA3E4D80AEE38DA1ABCEE /* PBXContainerItemProxy */;
 		};
+		502658BDD63CAAF11DC09FA2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4D02338D3D85FA16C94299C4 /* LUNATKExtension */;
+			targetProxy = 61366BFCC6A2AE71122113BA /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		27F76942B825D590090A8504 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CODE_SIGN_ENTITLEMENTS = LUNATK/Extension/LUNATKExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = LUNATK/Extension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = net.nightshape.lunatk.audiounit;
+				PRODUCT_NAME = LUNATKExtension;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) LUNATK_PLUGIN";
+				SWIFT_OBJC_BRIDGING_HEADER = "LYLLTH/SynthCore/LYLLTH-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		39ADDC7950BC8D43A3FDF1BF /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -645,6 +884,32 @@
 				PRODUCT_BUNDLE_IDENTIFIER = net.nightshape.lyllth;
 				PRODUCT_NAME = LYLLTH;
 				SDKROOT = macosx;
+				SWIFT_OBJC_BRIDGING_HEADER = "LYLLTH/SynthCore/LYLLTH-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		4081FF92F2315CB369319058 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CODE_SIGN_ENTITLEMENTS = LUNATK/Extension/LUNATKExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = LUNATK/Extension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = net.nightshape.lunatk.audiounit;
+				PRODUCT_NAME = LUNATKExtension;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) LUNATK_PLUGIN";
 				SWIFT_OBJC_BRIDGING_HEADER = "LYLLTH/SynthCore/LYLLTH-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
@@ -688,6 +953,31 @@
 				PRODUCT_BUNDLE_IDENTIFIER = net.nightshape.lyllth.tests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LYLLTH.app/Contents/MacOS/LYLLTH";
+			};
+			name = Release;
+		};
+		8DE34D733DD658404F7000FC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LUNATK/App/LUNATK.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = LUNATK;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = net.nightshape.lunatk;
+				PRODUCT_NAME = LUNATK;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
@@ -750,6 +1040,31 @@
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		BF53463BF9AA3312A38654EB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LUNATK/App/LUNATK.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = LUNATK;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = net.nightshape.lunatk;
+				PRODUCT_NAME = LUNATK;
+				SDKROOT = macosx;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -854,6 +1169,24 @@
 			buildConfigurations = (
 				39ADDC7950BC8D43A3FDF1BF /* Debug */,
 				60253A43A3B8BDDA3DD3ABB1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C2ACE4FDD5657710362E7A8A /* Build configuration list for PBXNativeTarget "LUNATKExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4081FF92F2315CB369319058 /* Debug */,
+				27F76942B825D590090A8504 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DC7A54CDDFE1906DD1EC6366 /* Build configuration list for PBXNativeTarget "LUNATK" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BF53463BF9AA3312A38654EB /* Debug */,
+				8DE34D733DD658404F7000FC /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

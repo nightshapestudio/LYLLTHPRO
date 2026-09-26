@@ -1,12 +1,17 @@
 import AVFoundation
+#if !LUNATK_PLUGIN
 import NightshapeAudioEngine
+#endif
 
 /// One LUNATK on one track. Owns the C++ core and the source node the
-/// engine plugs into the track's channel.
-final class LYSynthInstrument: NightshapeTrackInstrument {
+/// engine plugs into the track's channel. The LUNATK plug-in uses the same
+/// class to own its core.
+final class LYSynthInstrument {
     static let sampleRate = 44_100.0
 
     let core: OpaquePointer
+    /// The rate the core renders at.
+    let coreSampleRate: Double
     private(set) var patch: LYSynthPatch?
     private(set) var bpm: Double = 0
 
@@ -28,6 +33,7 @@ final class LYSynthInstrument: NightshapeTrackInstrument {
     /// `sampleRate` other than the live one is for offline renders, which
     /// drive the core directly and never use `sourceNode`.
     init(sampleRate: Double = LYSynthInstrument.sampleRate) {
+        coreSampleRate = sampleRate
         core = lysynth_create(sampleRate)
     }
 
@@ -97,3 +103,7 @@ final class LYSynthInstrument: NightshapeTrackInstrument {
         return samples
     }
 }
+
+#if !LUNATK_PLUGIN
+extension LYSynthInstrument: NightshapeTrackInstrument {}
+#endif

@@ -17,12 +17,6 @@ enum LYTrackKind: String, Codable, CaseIterable {
     }
 }
 
-enum LYAccent: String, Codable, CaseIterable {
-    case teal
-    case indigo
-    case purple
-}
-
 enum LYArrangementSnapMode: String, Codable, CaseIterable, Identifiable {
     case smart
     case bar

@@ -88,6 +88,73 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES
 
+  # LUNATK as an Audio Unit: a container app and the AUv3 instrument
+  # extension inside it. The extension compiles LYLLTH's synth, core and
+  # theme from the same files, so the plug-in and LYLLTH never drift.
+  LUNATK:
+    type: application
+    platform: macOS
+    sources:
+      - path: LUNATK/App
+      - path: LYLLTH/Theme
+      - path: LYLLTH/Resources/Fonts
+        buildPhase: resources
+    dependencies:
+      - target: LUNATKExtension
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.nightshape.lunatk
+        PRODUCT_NAME: LUNATK
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: LUNATK
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
+        CODE_SIGN_ENTITLEMENTS: LUNATK/App/LUNATK.entitlements
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+
+  LUNATKExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: LUNATK/Extension
+        excludes:
+          - Info.plist
+          - "*.entitlements"
+      - path: LYLLTH/Synth
+      - path: LYLLTH/Theme
+      - path: LYLLTH/SynthCore
+        excludes:
+          - "*.cpp"
+      - path: LYLLTH/SynthCore/LYSynthCore.cpp
+        compilerFlags: ["-O3"]
+      - path: LYLLTH/Resources/Fonts
+        buildPhase: resources
+    dependencies:
+      - sdk: Accelerate.framework
+      - sdk: CoreAudioKit.framework
+      - sdk: AudioToolbox.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.nightshape.lunatk.audiounit
+        PRODUCT_NAME: LUNATKExtension
+        INFOPLIST_FILE: LUNATK/Extension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: LUNATK/Extension/LUNATKExtension.entitlements
+        SWIFT_OBJC_BRIDGING_HEADER: LYLLTH/SynthCore/LYLLTH-Bridging-Header.h
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) LUNATK_PLUGIN"
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+
 schemes:
   LYLLTH:
     build:
@@ -97,3 +164,8 @@ schemes:
     test:
       targets:
         - LYLLTHTests
+  LUNATK:
+    build:
+      targets:
+        LUNATK: all
+        LUNATKExtension: all

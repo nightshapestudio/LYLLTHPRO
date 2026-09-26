@@ -522,3 +522,10 @@ extension View {
         modifier(LYNightshapeMenuChrome(accent: accent))
     }
 }
+
+/// The three accent tokens a track or panel can carry.
+enum LYAccent: String, Codable, CaseIterable {
+    case teal
+    case indigo
+    case purple
+}
