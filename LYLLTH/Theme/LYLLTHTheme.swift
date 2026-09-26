@@ -289,8 +289,11 @@ struct LYFloatingWindow<Content: View>: View {
         GeometryReader { geo in
             let width = size.width * scale
             let height = size.height * scale + Self.barHeight
-            let offset = clamped(CGSize(width: storedX + drag.width, height: storedY + drag.height),
-                                 window: CGSize(width: width, height: height), in: geo.size)
+            let window = CGSize(width: width, height: height)
+            let resting = clamped(CGSize(width: storedX, height: storedY), window: window, in: geo.size)
+            // While dragging, only an offset changes: the window moves as a
+            // finished image and its contents are not laid out again.
+            let live = clamped(CGSize(width: resting.width + drag.width, height: resting.height + drag.height), window: window, in: geo.size)
             VStack(spacing: 0) {
                 titleBar
                     .frame(width: width, height: Self.barHeight)
@@ -298,8 +301,8 @@ struct LYFloatingWindow<Content: View>: View {
                         DragGesture(minimumDistance: 1, coordinateSpace: .global)
                             .onChanged { drag = $0.translation }
                             .onEnded { value in
-                                let final = clamped(CGSize(width: storedX + value.translation.width, height: storedY + value.translation.height),
-                                                    window: CGSize(width: width, height: height), in: geo.size)
+                                let final = clamped(CGSize(width: resting.width + value.translation.width, height: resting.height + value.translation.height),
+                                                    window: window, in: geo.size)
                                 storedX = final.width
                                 storedY = final.height
                                 drag = .zero
@@ -310,8 +313,16 @@ struct LYFloatingWindow<Content: View>: View {
                     .scaleEffect(scale)
                     .frame(width: width, height: size.height * scale)
             }
-            .shadow(color: Color.black.opacity(0.6), radius: 24, x: 0, y: 12)
-            .position(x: geo.size.width / 2 + offset.width, y: geo.size.height / 2 + offset.height)
+            // One shadow from a plain rectangle. A shadow on the stack itself
+            // gives every control inside its own blurred shadow, redrawn on
+            // every frame of a drag.
+            .background {
+                Rectangle()
+                    .fill(Color.black)
+                    .shadow(color: Color.black.opacity(0.6), radius: 24, x: 0, y: 12)
+            }
+            .position(x: geo.size.width / 2 + resting.width, y: geo.size.height / 2 + resting.height)
+            .offset(x: live.width - resting.width, y: live.height - resting.height)
         }
     }
 
@@ -513,6 +524,8 @@ private struct LYNightshapeMenuChrome: ViewModifier {
             .background(LYLLTHTheme.panel)
             .overlay { Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1) }
             .overlay(alignment: .top) { Rectangle().fill(accent.opacity(0.72)).frame(height: 1) }
+            // One layer, one shadow: without it every row casts its own.
+            .compositingGroup()
             .shadow(color: Color.black.opacity(0.48), radius: 9, x: 0, y: 3)
     }
 }

@@ -416,6 +416,8 @@ struct LYSynthMenuView: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(Color(hex: 0x07080D).opacity(0.98))
         .overlay(Rectangle().stroke(request.accent.opacity(0.7), lineWidth: 1))
+        // One layer, one shadow: without it every option casts its own.
+        .compositingGroup()
         .shadow(color: .black.opacity(0.6), radius: 14, y: 6)
     }
 }
