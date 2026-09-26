@@ -517,13 +517,10 @@ void processInsert(InsertState &st, int type, float *L, float *R, int n, float a
         break;
     }
     case LY_INS_RECTIFY: {
-        // Rectifying makes DC; a blocker takes it back out.
         for (int c = 0; c < 2; ++c) for (int i = 0; i < n; ++i) {
             const float x = ch[c][i];
             const float y = x + (std::fabs(x) - x) * amount;
-            const float out = y - st.dcX[c] + 0.995f * st.dcY[c];
-            st.dcX[c] = y; st.dcY[c] = flushf(out);
-            ch[c][i] = x + (out - x) * mix;
+            ch[c][i] = x + (y - x) * mix;
         }
         break;
     }
@@ -583,6 +580,18 @@ void processInsert(InsertState &st, int type, float *L, float *R, int n, float a
         break;
     }
     default: break;
+    }
+    // Shaping a signal that is not symmetric (a note over its sub, anything
+    // rectified) leaves DC behind. A blocker at 5 Hz takes it out without
+    // touching a bass note's fundamental.
+    if (type == LY_INS_RECTIFY || type == LY_INS_FOLD || type == LY_INS_SINE || type == LY_INS_BITCRUSH || type == LY_INS_DECIMATE) {
+        const float r = 1.f - (float)(kTwoPi * 5.0 / sampleRate);
+        for (int c = 0; c < 2; ++c) for (int i = 0; i < n; ++i) {
+            const float x = ch[c][i];
+            const float y = x - st.dcX[c] + r * st.dcY[c];
+            st.dcX[c] = x; st.dcY[c] = flushf(y);
+            ch[c][i] = y;
+        }
     }
 }
 
@@ -1805,6 +1814,9 @@ LYSynth *lysynth_create(double sampleRate) {
     }
     for (auto &d : s->display) d.store(0, std::memory_order_relaxed);
     prepareEffects(s);
+    // Free-running random LFOs pick their first target now, so DRIFT moves
+    // from the start instead of sitting still for its first cycle.
+    for (auto &lfo : s->globalLFO) lfo.retrigger(s->random, 0);
     lysynth_use_factory_table(s, 0, LY_TABLE_BASIC);
     lysynth_use_factory_table(s, 1, LY_TABLE_BASIC);
     return s;

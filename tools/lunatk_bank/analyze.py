@@ -97,6 +97,8 @@ def f0_estimate(mono):
         a, b, c = corr[peak - 1], corr[peak], corr[peak + 1]
         denom = a - 2 * b + c
         shift = 0.5 * (a - c) / denom if abs(denom) > 1e-12 else 0
+        # A flat or one-sided peak makes the parabola meaningless.
+        shift = max(-0.5, min(0.5, shift))
     else:
         shift = 0
     return SR / (peak + shift)
@@ -248,6 +250,8 @@ def pitch_gate(x, note, flags):
     f0 = f0_estimate(seg)
     if f0 is None:
         return ["held note is silent"], None
+    if f0 <= 0:
+        return ["no clear pitch on a held note"], None
     expected = 440 * 2 ** ((note - 69) / 12)
     cents = 1200 * math.log2(f0 / expected)
     folded = ((cents + 600) % 1200) - 600

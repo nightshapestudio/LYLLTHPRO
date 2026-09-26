@@ -34,7 +34,9 @@ import soundfile_shim as sf  # noqa: E402
 
 ROOT = L.ROOT
 WORK = os.environ.get("LUNATK_WORK", os.path.join(ROOT, "build", "lunatk_bank"))
-LEVELS = os.path.join(HERE, "levels.json")
+# Which bank to build: bank2 (the current one) or bank (the first, kept for reference).
+BANK = os.environ.get("LUNATK_BANK", "bank2")
+LEVELS = os.path.join(HERE, "levels.json" if BANK == "bank" else f"levels_{BANK}.json")
 RESOURCE = os.path.join(ROOT, "LYLLTH", "Synth", "LUNATKFactory.json")
 DOCS = os.path.join(ROOT, "LUNATK", "FACTORY_BANK.md")
 DERIVED = os.environ.get("LUNATK_DERIVED", os.path.join(ROOT, "build", "DerivedData"))
@@ -57,12 +59,12 @@ def load_bank():
     presets = []
     # ARP was added after the rest; it goes last so the plug-ins' factory
     # preset numbers for the other categories stay where they were.
-    paths = sorted(glob.glob(os.path.join(HERE, "bank", "*.py")), key=lambda path: (path.endswith("/arp.py"), path))
+    paths = sorted(glob.glob(os.path.join(HERE, BANK, "*.py")), key=lambda path: (path.endswith("/arp.py"), path))
     for path in paths:
         name = os.path.splitext(os.path.basename(path))[0]
         if name.startswith("_"):
             continue
-        module = importlib.import_module("bank." + name)
+        module = importlib.import_module(f"{BANK}." + name)
         presets.extend(module.presets())
     names = [p.name for p in presets]
     dupes = {n for n in names if names.count(n) > 1}
@@ -153,6 +155,8 @@ def evaluate(p, main, timings):
         if peak > -0.1:
             fails.append(f"MACRO {index + 1} at {int(value)} peaks at {peak:.1f} dBFS")
     # MOTION must be able to stop the movement.
+    if p.category in L.MOVING and not p.test.get("still") and not uses_motion(p):
+        fails.append("no movement on MOTION")
     if uses_motion(p):
         w0, w1 = p.test.get("motion_window", DEFAULT_WINDOW.get(p.category, (0.8, 4.3)))
         still = A.motion_index(r("still"), w0, w1)
@@ -166,9 +170,17 @@ def evaluate(p, main, timings):
         else:
             change = A.spectral_difference(r("still"), r("moving"), w0, w1)
         m["motion"].append(round(change, 2))
+        # Moving categories must already move at the default setting.
+        if p.category in L.MOVING and not p.test.get("still"):
+            moving = A.spectral_difference(r("still"), r("pitch"), w0, w1)
+            m["motion"].append(round(moving, 2))
+            if moving < 0.8:
+                fails.append(f"barely moves at the default MOTION ({moving:.2f} dB from still)")
         if change < 1.0:
             fails.append(f"MOTION changes the sound by only {change:.2f} dB between 0 and 1")
-        if p.category not in ("FX",) and still > default + max(0.4, 0.12 * default):
+        # A decaying note's own fade dominates this measure; those only need
+        # MOTION to change the sound.
+        if p.category not in ("FX",) and not p.test.get("decays") and still > default + max(0.4, 0.12 * default):
             fails.append(f"MOTION at 0 moves more than the default ({still:.3f} vs {default:.3f})")
     if p.category in A.VELOCITY_CATEGORIES and not p.test.get("no_velocity"):
         y = r("soft")
@@ -219,7 +231,10 @@ def main():
 
     os.makedirs(WORK, exist_ok=True)
     params = os.path.join(WORK, "params.json")
-    if not os.path.exists(params):
+    table = os.path.join(ROOT, "LYLLTH", "Synth", "LYSynthPatch.swift")
+    # The parameter table is exported by the render run; export it again when
+    # the app's table is newer than the copy here.
+    if not os.path.exists(params) or os.path.getmtime(params) < os.path.getmtime(table):
         if os.path.exists(os.path.join(WORK, "plan.json")):
             os.remove(os.path.join(WORK, "plan.json"))
         run_renders()
@@ -230,6 +245,9 @@ def main():
     for p in bank:
         apply_levels(p, levels.get(p.name))
     errors = {p.name: e for p in bank for e in [p.validate()] if e}
+    clean = [p.name for p in bank if p.test.get("clean")]
+    if len(clean) > 12:
+        errors["BANK"] = [f"{len(clean)} presets marked clean; at most 12"]
     if errors:
         for name, e in errors.items():
             print(f"INVALID {name}: {'; '.join(e)}")

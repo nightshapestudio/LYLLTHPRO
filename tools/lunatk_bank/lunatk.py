@@ -97,6 +97,8 @@ def lfo_hz(hz):
 
 CATEGORIES = ["BASS", "LEAD", "PAD", "KEYS", "PLUCK", "ARP", "MOTION", "DRONE", "PERC", "FX"]
 LAYERS = ["FOREGROUND", "SUPPORT", "RHYTHM", "TEXTURE", "TRANSITION"]
+# Categories whose sounds move at the default MOTION setting.
+MOVING = {"LEAD", "PAD", "ARP", "MOTION", "DRONE", "FX"}
 
 
 class Preset:
@@ -309,8 +311,43 @@ class Preset:
     def phaser(self, mix=0.4, rate=0.2, depth=0.5, freq=0.45, feedback=0.3):
         return self._fx("phaser", mix=mix, rate=rate, depth=depth, freq=freq, feedback=feedback)
 
-    def chorus(self, mix=0.3, rate=0.25, delay=0.35, depth=0.45, feedback=0.0, tone=0.8):
+    def chorus(self, mix=0.3, rate=0.25, delay=0.35, depth=0.45, feedback=0.0, tone=0.8, mode="CLASSIC", width=0.75):
+        """mode CLASSIC, or the track chorus's Juno modes SUBTLE / WIDE / DEEP
+        (those use rate 0.05*70^rate Hz, depth, width and mix)."""
+        self.set("chorus.mode", enum("LY_CHORUS_" + mode)).set("chorus.width", width)
         return self._fx("chorus", mix=mix, rate=rate, delay=delay, depth=depth, feedback=feedback, tone=tone)
+
+    # -- voice damage ---------------------------------------------------
+    def insert(self, slot, type, after=False, amount=0.5, freq=0.5, mix=1.0):
+        """Per-voice insert 1 or 2: BITCRUSH DECIMATE SINE FOLD RECTIFY RING SHIFT COMB.
+        freq: ring/comb pitch against the note (0.5 = the note), shifter Hz
+        ((freq-0.5)*2)^2 * 2000 with sign."""
+        k = f"ins{slot}"
+        self.set(f"{k}.type", enum("LY_INS_" + type)).set(f"{k}.position", 1 if after else 0)
+        return self.set(f"{k}.amount", amount).set(f"{k}.freq", freq).set(f"{k}.mix", mix)
+
+    def feedback(self, amount=0.3, drive=0.3, tone=0.7):
+        """Filter output back into the filter input, per voice."""
+        return self.set("fb.amount", amount).set("fb.drive", drive).set("fb.tone", tone)
+
+    def performer(self, k, patterns, mode="SONG", rate="1/16", steps=16, pattern=0):
+        """patterns: {0..3: [(value, shape), ...]} with shapes HOLD RAMP_UP
+        RAMP_DOWN TRIANGLE DECAY RISE PULSE GLIDE."""
+        n = f"perf{k}"
+        self.set(f"{n}.mode", enum("LY_PERFMODE_" + mode)).set(f"{n}.rate", division(rate))
+        self.set(f"{n}.steps", steps).set(f"{n}.pattern", pattern)
+        for index, cells in patterns.items():
+            letter = "abcd"[index]
+            for i, (value, shape) in enumerate(cells):
+                self.set(f"{n}.{letter}.v{i}", value).set(f"{n}.{letter}.s{i}", enum("LY_PSTEP_" + shape))
+        return self
+
+    def tracker(self, t, source, points):
+        assert len(points) == 16
+        self.set(f"track{t}.source", enum("LY_SRC_" + source))
+        for i, v in enumerate(points):
+            self.set(f"track{t}.t{i}", v)
+        return self
 
     def delay(self, time="1/8", mix=0.2, feedback=0.35, pingpong=False, width=0.3, lowcut=0.25, highcut=0.55):
         self.set("delay.time", division(time)).set("delay.pingpong", 1 if pingpong else 0)
@@ -372,6 +409,33 @@ class Preset:
         self.test.update(kwargs)
         return self
 
+    # -- character ------------------------------------------------------
+    def damage(self):
+        """What gives the sound its character before any macro is touched."""
+        items = []
+        for slot in (1, 2):
+            if self.get(f"ins{slot}.type") > 0.5 and self.get(f"ins{slot}.mix") > 0.1:
+                items.append(f"insert {slot}")
+        if self.get("fb.amount") > 0.05:
+            items.append("feedback")
+        if self.get("dist.on") > 0.5 and self.get("dist.mix") >= 0.15:
+            items.append("distortion")
+        for k in ("a", "b"):
+            if self.get(f"{k}.on") > 0.5 and self.get(f"{k}.level") > 0.01:
+                for mode, amount in (("warpmode", "warp"), ("warpmode2", "warp2")):
+                    if self.get(f"{k}.{mode}") > 0.5 and self.get(f"{k}.{amount}") >= 0.12:
+                        items.append(f"{k} warp")
+        if self.get("noise.on") > 0.5 and self.get("noise.level") >= 0.04:
+            items.append("noise")
+        special = {enum("LY_FILTER_COMB_POS"), enum("LY_FILTER_COMB_NEG"), enum("LY_FILTER_FORMANT"), enum("LY_FILTER_PHASER")}
+        for prefix in ("filter", "filter2"):
+            if self.get(f"{prefix}.on") > 0.5:
+                if int(self.get(f"{prefix}.type")) in special:
+                    items.append(f"{prefix} {int(self.get(f'{prefix}.type'))}")
+                if self.get(f"{prefix}.drive") >= 0.3:
+                    items.append(f"{prefix} drive")
+        return items
+
     # -- output ---------------------------------------------------------
     def validate(self):
         errors = []
@@ -386,6 +450,13 @@ class Preset:
                 errors.append(f"{key}={value} must be whole")
         if not self.info:
             errors.append("no documentation")
+        # Character by default: at least two sources of damage or texture
+        # (one for the few presets marked clean).
+        need = 1 if self.test.get("clean") else 2
+        if len(self.damage()) < need:
+            errors.append(f"too clean: {self.damage()} (needs {need} of insert, feedback, distortion, warp, noise, special filter, filter drive)")
+        if self.category in MOVING and self.get("macro2") < 0.3 and not self.test.get("still"):
+            errors.append(f"MOTION defaults to {self.get('macro2')}; {self.category} sounds move by default (0.3 or more)")
         if self.category == "ARP" and self.get("arp.on") < 0.5:
             errors.append("an ARP preset must have the arpeggiator on")
         # Design-time safety: no bare screaming resonance outside the

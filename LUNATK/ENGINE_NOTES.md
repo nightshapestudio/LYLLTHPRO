@@ -6,7 +6,7 @@ were changed in the engine. Each one lists what the bank does about it.
 | What happens | Why it matters | What the bank does |
 |---|---|---|
 | An oscillator at level 0 skips rendering, so FM, RM and AM that read it as their modulator get silence. | A patch that uses B only as a modulator (level 0) has no FM or ring mod at all. | Modulator oscillators sit at level 0.002: silent, but rendering. |
-| A free-running DRIFT (smooth random) LFO starts at 0 and only picks its first target after one full cycle. | At 0.25 Hz, a freshly loaded patch doesn't move for about 4 seconds. | DRIFT LFOs retrigger per note (TRIG), which also gives every note its own drift. |
+| ~~A free-running DRIFT (smooth random) LFO starts at 0 and only picks its first target after one full cycle.~~ Fixed: free LFOs pick a target when the synth is created. | At 0.25 Hz, a freshly loaded patch doesn't move for about 4 seconds. | DRIFT LFOs retrigger per note (TRIG), which also gives every note its own drift. |
 | The `1/12` sync division is 1/12 of a beat (a 1/48 note), not a triplet eighth (1/3 beat). | Anyone choosing "1/12" for triplets gets a very fast rate. | Unused. Triplet gates are drawn over one beat instead. |
 | ~~Free-running LFOs aren't locked to the host's bar position.~~ Fixed: while a transport plays (LYLLTH, or an AU/VST3 host), synced FREE LFOs, the arpeggiator and SONG performers follow the bar. With the transport stopped they run on their own as before. | A synced gate or pump in FREE mode used to drift against the kick. | Rhythmic LFOs retrigger per note (written before the fix; they still work). |
 | There is no DC blocker in the voice path. | Asymmetric pulse waves and some saturation carry a little DC (about −40 dBFS). | Basses that showed it have a 25 Hz high-pass on filter 2. The gate allows at most 0.006. |
@@ -17,8 +17,8 @@ were changed in the engine. Each one lists what the bank does about it.
 | Every arpeggiator step starts a new voice, so a TRIG LFO restarts on each step. | A 2-bar filter sweep on an arp never gets past its first sixteenth; the sound doesn't move. | ARP presets run every LFO FREE. |
 | MASTER plus modulation is clamped to 1. | Level compensation can't push past full MASTER. | The leveler adds clean makeup gain with the compressor at a 0 dBFS threshold. |
 
-Worth fixing in the engine when you decide to: the `1/12` division, the DRIFT
-LFO's cold start, and an optional DC blocker and reverb low cut.
+Worth fixing in the engine when you decide to: the `1/12` division, and an
+optional DC blocker and reverb low cut. (The voice inserts now have their own DC blocker.)
 
 ## Added after the bank
 

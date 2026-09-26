@@ -75,7 +75,9 @@ final class LUNATKBankRenderTests: XCTestCase {
         instrument.apply(patch, bpm: render.bpm)
         let core = instrument.core
         if let macros = render.macros {
-            for (index, value) in macros.enumerated() where index < 4 { lysynth_set_param(core, Int32(LY_MACRO1 + index), value) }
+            for (index, value) in macros.enumerated() where index < 8 {
+                lysynth_set_param(core, Int32(index < 4 ? LY_MACRO1 + index : LY_MACRO5 + index - 4), value)
+            }
         }
         if let wheel = render.modwheel { lysynth_set_param(core, Int32(LY_MODWHEEL), wheel) }
 
@@ -105,6 +107,9 @@ final class LUNATKBankRenderTests: XCTestCase {
                     }
                     var until = min(total, position + block)
                     if next < events.count { until = min(until, max(position + 1, events[next].frame)) }
+                    // The phrase starts on a bar line with the song playing, so
+                    // bar-locked performers, LFOs and arps sound as in a song.
+                    lysynth_set_song_position(core, Double(position) / sampleRate * render.bpm / 60, 1)
                     lysynth_render(core, l.baseAddress! + position, r.baseAddress! + position, Int32(until - position), 0)
                     position = until
                 }
