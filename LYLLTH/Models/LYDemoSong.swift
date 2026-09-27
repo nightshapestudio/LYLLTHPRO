@@ -233,9 +233,9 @@ enum LYDemoSong {
     // MARK: Bass
 
     static func bass() -> [Part] {
-        var sub = Part(name: "SUB", sound: "WOUND SUB", volumeDB: -12, fx: FX.tape(0.35))
-        var drive = Part(name: "BASS", sound: "CORRODE LINE", volumeDB: -13, grit: 0.4, fx: FX.amp(0.45))
-        var stutter = Part(name: "STUTTER", sound: "SEIZURE", volumeDB: -16, grit: 0.5)
+        var sub = Part(name: "SUB", sound: "WOUND SUB", volumeDB: -17)
+        var drive = Part(name: "BASS", sound: "BODY MACHINE", volumeDB: -12)
+        var stutter = Part(name: "STUTTER", sound: "FRACTURED ENGINE", volumeDB: -15)
 
         func subRoot(_ root: Int) -> Int { root - 12 >= 26 ? root - 12 : root }
         /// A bar of driving eighths on the root, the sub under the top line.
@@ -275,17 +275,24 @@ enum LYDemoSong {
         stutter.automation = [Lanes.sweep(from: 0.18, to: 1, bars: bridge.bar ..< bridge.bar + bridge.bars)]
         drive.fx = FX.filtered(drive.fx, mode: .highPass, resonance: 0.3)
         drive.automation = [Lanes.sweep(from: 0, to: 0.55, bars: bridge.bar - 1 ..< section("CHORUS 3").bar, snapBack: 0)]
+        // The mod wheel: BODY MACHINE's verse bass turns into its chorus monster.
+        drive.automation.append(Lanes.lane(.synth("modwheel"), [
+            (Double(section("PRE 1").bar), 0), (Double(section("CHORUS 1").bar), 0.5), (Double(section("CHORUS 1").bar) + 0.01, 0.6),
+            (Double(section("VERSE 2").bar) - 0.01, 0.6), (Double(section("VERSE 2").bar), 0),
+            (Double(section("PRE 2").bar), 0), (Double(section("CHORUS 2").bar), 0.5), (Double(section("CHORUS 2").bar) + 0.01, 0.6),
+            (Double(section("BRIDGE").bar), 0.3), (Double(section("CHORUS 3").bar), 0.85), (Double(section("OUTRO").bar), 0.85),
+            (Double(section("OUTRO").bar) + 0.01, 0)]))
         return [sub, drive, stutter]
     }
 
     // MARK: Chords, arp, pluck
 
     static func harmony() -> [Part] {
-        var pad = Part(name: "PAD", sound: "WET CONCRETE", volumeDB: -15, grit: 0.3, fx: FX.tape(0.4))
-        var saws = Part(name: "SAWS", sound: "NERVE FIELD", volumeDB: -9, grit: 0.45, fx: FX.tape(0.5))
-        var arp = Part(name: "ARP", sound: "MACHINE LOOM", volumeDB: -16, pan: 0.2, grit: 0.4)
-        var wall = Part(name: "WALL", sound: "SLOW BLEED", volumeDB: -11, grit: 0.35, fx: FX.tape(0.45))
-        var pluck = Part(name: "GLASS", sound: "ICICLE", volumeDB: -12, pan: -0.25, fx: FX.shimmer)
+        var pad = Part(name: "PAD", sound: "BLACK GLASS", volumeDB: -14)
+        var saws = Part(name: "SAWS", sound: "STEEL WALL", volumeDB: -10)
+        var arp = Part(name: "ARP", sound: "NIGHTCLUB MACHINE", volumeDB: -15, pan: 0.15)
+        var wall = Part(name: "WALL", sound: "METAL HALO", volumeDB: -12)
+        var pluck = Part(name: "GLASS", sound: "GLASS HEART", volumeDB: -13, pan: -0.25, fx: FX.shimmer)
 
         // Pad: under intro, verses, bridge and outro, a bar per chord.
         for bar in barsOf(["INTRO", "VERSE 1", "VERSE 2", "OUTRO"]) {
@@ -347,6 +354,10 @@ enum LYDemoSong {
             sends += [(last, 0.35), (last + 0.5, 0.8), (last + 1, 0.8), (last + 1.25, 0.35)]
         }
         pluck.automation = [Lanes.lane(.fx("reverb.send"), sends)]
+        // The last chorus pushes the synth guitars' wheel.
+        let c3 = section("CHORUS 3")
+        saws.automation.append(Lanes.lane(.synth("modwheel"), [(Double(c3.bar) - 0.01, 0), (Double(c3.bar), 0.55),
+                                                               (Double(c3.bar + c3.bars) - 0.01, 0.55), (Double(c3.bar + c3.bars), 0)]))
         return [pad, saws, wall, arp, pluck]
     }
 
@@ -397,11 +408,11 @@ enum LYDemoSong {
     ]
 
     static func melody() -> [Part] {
-        var voice = Part(name: "LEAD", sound: "DEAD FREQUENCY", volumeDB: -14, grit: 0.35)
-        var hookLead = Part(name: "HOOK", sound: "SHATTERED GLIDE", volumeDB: -13, grit: 0.2, fx: FX.tape(0.35))
-        var hookHigh = Part(name: "HOOK HIGH", sound: "CATHODE", volumeDB: -19, pan: 0.15, grit: 0.4)
-        var scream = Part(name: "SCREAM", sound: "SCREAMING WIRE", volumeDB: -16, grit: 0.6)
-        var piano = Part(name: "PIANO", sound: "SCORCHED EP", volumeDB: -15, pan: -0.1, grit: 0.35)
+        var voice = Part(name: "LEAD", sound: "GHOSTWIRE", volumeDB: -14)
+        var hookLead = Part(name: "HOOK", sound: "NIGHTSHAPE SCREAM", volumeDB: -13)
+        var hookHigh = Part(name: "HOOK HIGH", sound: "GLASS VENOM", volumeDB: -19, pan: 0.15)
+        var scream = Part(name: "SCREAM", sound: "SCREAM CIRCUIT", volumeDB: -15)
+        var piano = Part(name: "PIANO", sound: "STATIC PIANO", volumeDB: -15, pan: -0.1)
 
         func play(_ phrase: Phrase, into part: inout Part, at bar: Int, transpose: Int = 0, velocity: Int = 100, until: Double = .infinity) {
             for (start, length, pitch) in phrase where start < until {
@@ -436,6 +447,10 @@ enum LYDemoSong {
         for bar in stride(from: bridge, to: bridge + 8, by: 2) {
             piano.add(chord(at: bar).root + 12, at: beat(bar), length: 7.5, velocity: 88)
         }
+        // The hook screams harder in the last chorus.
+        let lastChorus = section("CHORUS 3")
+        hookLead.automation.append(Lanes.lane(.synth("modwheel"), [(Double(lastChorus.bar) - 0.01, 0.15), (Double(lastChorus.bar), 0.6),
+                                                                   (Double(lastChorus.bar + lastChorus.bars) - 0.01, 0.6), (Double(lastChorus.bar + lastChorus.bars), 0)]))
         return [voice, hookLead, hookHigh, scream, piano]
     }
 
@@ -505,6 +520,7 @@ enum LYDemoSong {
             arrangementEditor: .default,
             tracks: tracks
         )
+        mix(&session.tracks)
         session.mainFX = FX.main
         return session
     }
@@ -636,15 +652,65 @@ enum LYDemoSong {
             var comp = punch(threshold: -18, attack: 20, release: 160, distortion: .off)
             comp.ratio = 2
             comp.circuit = .vca
-            comp.makeup = 2
+            comp.makeup = 3
             rack.compressor = comp
             var finale = FinaleState()
-            finale.mode = 2
-            finale.gainDb = 6
+            finale.mode = 1          // PUNCH: holds the kick's transient
+            finale.gainDb = 10.5
+            finale.ceilingDb = -0.8
+            finale.lookaheadMs = 5
             finale.isBypassed = false
             rack.finale = finale
+            var cut = EQCutState()
+            cut.lowCut = 28          // nothing useful lives under 28 Hz
+            rack.eqCut = cut
             rack.order = [.eq, .comp, .tape, .reverb, .finale]
             return rack
+        }
+
+        /// A track's high-pass, so only the kick, SUB and BASS own the bottom.
+        static func lowCut(_ rack: LYFXRack?, _ hz: Float) -> LYFXRack {
+            var rack = rack ?? LYFXRack()
+            var cut = rack.eqCut ?? EQCutState()
+            cut.lowCut = hz
+            rack.eqCut = cut
+            return rack
+        }
+
+        /// Kick-keyed ducking: fast attack, a release that breathes with a
+        /// four-on-the-floor at 112 BPM. Keeps the chain's other inserts.
+        static func ducked(_ rack: LYFXRack?, by kick: UUID, depth threshold: Float) -> LYFXRack {
+            var rack = rack ?? LYFXRack()
+            var comp = CompressorState()
+            comp.threshold = threshold
+            comp.ratio = 4
+            comp.attackMilliseconds = 2
+            comp.releaseMilliseconds = 140
+            comp.circuit = .vca
+            comp.sidechainSourceID = kick
+            comp.isBypassed = false
+            rack.compressor = comp
+            var order = rack.chain(isMain: false)
+            if !order.contains(.comp) { order.insert(.comp, at: order.firstIndex(of: .eq).map { $0 + 1 } ?? 0) }
+            rack.order = order
+            return rack
+        }
+    }
+
+    /// The mix pass: high-passes on everything above the bass, kick-keyed
+    /// ducking on the low and wide parts.
+    static func mix(_ tracks: inout [LYTrack]) {
+        guard let kick = tracks.first(where: { $0.name == "KICK" })?.id else { return }
+        let highPass: [String: Float] = [
+            "CLAP": 150, "HATS": 400, "CHAINS": 350, "METAL": 250, "SNARE": 90,
+            "PAD": 150, "SAWS": 140, "WALL": 180, "ARP": 150, "GLASS": 250, "STUTTER": 45, "BASS": 30,
+            "LEAD": 160, "HOOK": 150, "HOOK HIGH": 250, "SCREAM": 160, "PIANO": 120,
+            "RADIO": 200, "RISER": 150, "TAPE STOP": 120,
+        ]
+        let duck: [String: Float] = ["SUB": -24, "BASS": -20, "SAWS": -18, "WALL": -18, "PAD": -20]
+        for i in tracks.indices {
+            if let hz = highPass[tracks[i].name] { tracks[i].fx = FX.lowCut(tracks[i].fx, hz) }
+            if let threshold = duck[tracks[i].name] { tracks[i].fx = FX.ducked(tracks[i].fx, by: kick, depth: threshold) }
         }
     }
 }
