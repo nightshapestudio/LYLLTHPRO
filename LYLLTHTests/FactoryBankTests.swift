@@ -4,15 +4,29 @@ import XCTest
 final class FactoryBankTests: XCTestCase {
     func testTheBankLoadsWithEveryCategoryAndItsDocumentation() {
         let bank = LYSynthFactoryBank.presets
-        XCTAssertEqual(bank.count, 176)
+        XCTAssertEqual(bank.count, 274)
         let counts = Dictionary(grouping: bank, by: { $0.category ?? "" }).mapValues(\.count)
-        XCTAssertEqual(counts, ["BASS": 24, "LEAD": 17, "PAD": 22, "KEYS": 16, "PLUCK": 16, "ARP": 17, "MOTION": 18, "DRONE": 18, "PERC": 12, "FX": 16])
+        XCTAssertEqual(counts, ["BASS": 48, "LEAD": 41, "PAD": 47, "KEYS": 16, "PLUCK": 16, "ARP": 42, "MOTION": 18, "DRONE": 18, "PERC": 12, "FX": 16])
         XCTAssertTrue(bank.allSatisfy { $0.info != nil && !($0.info?.mix.isEmpty ?? true) })
-        XCTAssertEqual(Set(bank.map(\.name)).count, 176, "names are unique")
+        XCTAssertEqual(Set(bank.map(\.name)).count, 274, "names are unique")
         // Every stored value is a real parameter.
         for patch in bank { for key in patch.values.keys { XCTAssertNotNil(LYSynthParameters.byKey[key], "\(patch.name): \(key)") } }
         // INIT, the bank, then the originals.
         XCTAssertEqual(LYSynthPatch.factory.first?.name, "INIT")
         XCTAssertEqual(LYSynthPatch.factory.filter { $0.category == "ORIGINAL" }.count, LYSynthPatch.original.count)
+    }
+
+    /// The showcase presets play NIGHTSHAPE's own wavetables; every one they
+    /// name must ship in the bundle and load.
+    @MainActor
+    func testFactoryWavetablesShipAndResolve() {
+        let library = LYWavetableLibrary.shared
+        XCTAssertEqual(library.factoryNames.count, 12)
+        let used = Set(LYSynthFactoryBank.presets.flatMap { [$0.customTableA, $0.customTableB].compactMap { $0 } })
+        XCTAssertFalse(used.isEmpty)
+        for name in used {
+            XCTAssertTrue(library.factoryNames.contains(name), name)
+            XCTAssertEqual(library.frameCount(name), 64, name)
+        }
     }
 }

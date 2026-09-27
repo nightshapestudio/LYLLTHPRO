@@ -59,13 +59,19 @@ def load_bank():
     presets = []
     # ARP was added after the rest; it goes last so the plug-ins' factory
     # preset numbers for the other categories stay where they were.
-    paths = sorted(glob.glob(os.path.join(HERE, BANK, "*.py")), key=lambda path: (path.endswith("/arp.py"), path))
+    # The showcase files (show_*) come after everything, for the same reason.
+    order = ["show_pad.py", "show_bass.py", "show_lead.py", "show_arp.py"]
+    paths = sorted(glob.glob(os.path.join(HERE, BANK, "*.py")),
+                   key=lambda path: (os.path.basename(path) in order, order.index(os.path.basename(path)) if os.path.basename(path) in order else 0,
+                                     path.endswith("/arp.py"), path))
     for path in paths:
         name = os.path.splitext(os.path.basename(path))[0]
         if name.startswith("_"):
             continue
         module = importlib.import_module(f"{BANK}." + name)
-        presets.extend(module.presets())
+        for p in module.presets():
+            p.module = name
+            presets.append(p)
     names = [p.name for p in presets]
     # The app lists the bank beside its original presets; names must not clash.
     swift = open(os.path.join(ROOT, "LYLLTH", "Synth", "LYSynthPatch.swift")).read()
@@ -73,6 +79,10 @@ def load_bank():
     clash = sorted(set(names) & originals)
     if clash:
         raise SystemExit(f"names used by the original presets: {clash}")
+    from wavetables import TABLES
+    missing = sorted({t for p in presets for t in (p.custom_a, p.custom_b) if t and t not in TABLES})
+    if missing:
+        raise SystemExit(f"unknown factory wavetables: {missing}")
     dupes = {n for n in names if names.count(n) > 1}
     if dupes:
         raise SystemExit(f"duplicate names: {sorted(dupes)}")
@@ -230,6 +240,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--category")
+    ap.add_argument("--module", help="one bank file, e.g. show_pad")
     ap.add_argument("--level", action="store_true")
     ap.add_argument("--ship", action="store_true")
     ap.add_argument("--no-render", action="store_true")
@@ -260,7 +271,8 @@ def main():
         raise SystemExit(1)
 
     selected = [p for p in bank if (not args.only or p.name in [o.upper() for o in args.only])
-                and (not args.category or p.category == args.category)]
+                and (not args.category or p.category == args.category)
+                and (not args.module or p.module == args.module)]
     plans = {}
     plan = {"sampleRate": 48000, "presets": []}
     for p in selected:

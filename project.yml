@@ -19,6 +19,10 @@ targets:
         excludes:
           - Resources
           - SynthCore/*.cpp
+          - Synth/Wavetables
+      - path: LYLLTH/Synth/Wavetables
+        type: folder
+        buildPhase: resources
       # The synth core is always built optimised: Debug-speed C++ DSP would
       # make every Debug session sound and measure unlike the real thing.
       - path: LYLLTH/SynthCore/LYSynthCore.cpp
@@ -127,6 +131,11 @@ targets:
           - Info.plist
           - "*.entitlements"
       - path: LYLLTH/Synth
+        excludes:
+          - Wavetables
+      - path: LYLLTH/Synth/Wavetables
+        type: folder
+        buildPhase: resources
       - path: LYLLTH/Theme
       - path: LYLLTH/SynthCore
         excludes:
@@ -168,6 +177,11 @@ targets:
         excludes:
           - Info.plist
       - path: LYLLTH/Synth
+        excludes:
+          - Wavetables
+      - path: LYLLTH/Synth/Wavetables
+        type: folder
+        buildPhase: resources
       - path: LYLLTH/Theme
       - path: LYLLTH/SynthCore
         excludes:

@@ -208,28 +208,6 @@ def presets():
           "The beating is the point; for a tighter low end high-pass the shifted copy with TONE down")
     out.append(p)
 
-    p = B("IRON LUNG", "FORMANT", "ANALOG")
-    p.osc(0, level=0.7, wt=0.3)
-    p.osc(1, level=0.35, wt=0.9, octave=-1)
-    p.noise(0.08, type="BREATH", color=0.4)
-    p.filter("FORMANT", cut=0.35, res=0.3, keytrack=0.2, env=0.15)
-    p.filter2("LP24", hz=1800)
-    p.feedback(amount=0.22, drive=0.4, tone=0.5)
-    p.env(1, a=0.004, d=0.4, s=0.85, r=0.1)
-    p.env(2, a=0.001, d=0.4, s=0.3, r=0.1)
-    mono(p, glide=0.04)
-    velocity(p, 0.75, 0.3)
-    p.tone("CUTOFF", 0.2)
-    p.lfo(1, "TRIANGLE", sync="1 BAR", mode="FREE")
-    p.set("macro2", 0.45)
-    p.motion("LFO1", "CUTOFF", 0.18)
-    dry_space(p)
-    grit(p, mode="TUBE", drive=0.4, tone=0.5, amount=0.45, base=0.15)
-    p.doc("A breathing, vowel-shaped bass that opens and closes over the bar", "E0–E2", "Industrial, trip-hop, horror, darkwave",
-          "Held notes and slow riffs", "FOREGROUND",
-          "The vowel lives at 400–900 Hz; keep vocals out of that band or automate TONE down under them")
-    out.append(p)
-
     p = B("STATIC PRESSURE", "ANALOG", "BASIC")
     p.osc(0, level=0.8, wt=1.0)
     p.sub(0.4, "SINE")

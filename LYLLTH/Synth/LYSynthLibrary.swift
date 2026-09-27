@@ -17,6 +17,9 @@ final class LYWavetableLibrary: ObservableObject {
 
     @Published private(set) var names: [String] = []
     private var tables: [String: [Float]] = [:]
+    /// NIGHTSHAPE's own tables, shipped in the bundle (tools/lunatk_bank/wavetables.py).
+    /// Read-only: saving under one of these names saves a copy instead.
+    private(set) var factoryNames: Set<String> = []
 
     static var folder: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -26,7 +29,22 @@ final class LYWavetableLibrary: ObservableObject {
     }
 
     private init() {
+        loadFactoryTables()
         reloadFolder()
+    }
+
+    private func loadFactoryTables() {
+        // Bundle(for:) is the app, the AU extension or the VST3 bundle,
+        // whichever this code was built into.
+        guard let folder = Bundle(for: LYWavetableLibrary.self).url(forResource: "Wavetables", withExtension: nil),
+              let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return }
+        for file in files where file.pathExtension.lowercased() == "wav" {
+            let name = file.deletingPathExtension().lastPathComponent.uppercased()
+            if let frames = try? Self.decodeFrames(from: file) {
+                tables[name] = frames
+                factoryNames.insert(name)
+            }
+        }
     }
 
     func reloadFolder() {
@@ -46,7 +64,8 @@ final class LYWavetableLibrary: ObservableObject {
     /// it was stored under.
     @discardableResult
     func store(_ frames: [Float], named proposed: String, writeToFolder: Bool = true) -> String {
-        let name = proposed.uppercased().trimmingCharacters(in: .whitespaces).isEmpty ? "UNTITLED TABLE" : proposed.uppercased()
+        var name = proposed.uppercased().trimmingCharacters(in: .whitespaces).isEmpty ? "UNTITLED TABLE" : proposed.uppercased()
+        if factoryNames.contains(name) { name += " COPY" }
         tables[name] = frames
         if writeToFolder { try? Self.writeWAV(frames, to: Self.folder.appendingPathComponent(name).appendingPathExtension("wav")) }
         names = tables.keys.sorted()

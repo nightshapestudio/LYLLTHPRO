@@ -95,6 +95,7 @@ def lfo_hz(hz):
     return max(0.0, min(1.0, math.log(hz / 0.02) / math.log(1500.0)))
 
 
+DAMAGED_TABLES = {"NS OBSIDIAN", "NS FRACTURE", "NS SERPENT", "NS GRINDSTONE", "NS SCAR PULSE", "NS TENDON"}
 CATEGORIES = ["BASS", "LEAD", "PAD", "KEYS", "PLUCK", "ARP", "MOTION", "DRONE", "PERC", "FX"]
 LAYERS = ["FOREGROUND", "SUPPORT", "RHYTHM", "TEXTURE", "TRANSITION"]
 # Categories whose sounds move at the default MOTION setting.
@@ -106,8 +107,12 @@ class Preset:
         assert category in CATEGORIES, category
         self.name = name.upper()
         self.category = category
-        self.table_a = enum("LY_TABLE_" + table_a)
-        self.table_b = enum("LY_TABLE_" + table_b)
+        # "NS ..." names are NIGHTSHAPE factory wavetables (wavetables.py),
+        # shipped as files and carried as the patch's custom table.
+        self.custom_a = table_a if table_a.startswith("NS ") else None
+        self.custom_b = table_b if table_b.startswith("NS ") else None
+        self.table_a = enum("LY_TABLE_" + ("BASIC" if self.custom_a else table_a))
+        self.table_b = enum("LY_TABLE_" + ("BASIC" if self.custom_b else table_b))
         self.values = {}
         self.slots = []
         self.info = {}
@@ -425,6 +430,13 @@ class Preset:
                 for mode, amount in (("warpmode", "warp"), ("warpmode2", "warp2")):
                     if self.get(f"{k}.{mode}") > 0.5 and self.get(f"{k}.{amount}") >= 0.12:
                         items.append(f"{k} warp")
+        # The filter's saturation stage, and the NIGHTSHAPE tables that are
+        # damaged by design (fold, crush, sync, FM, a scarred pulse).
+        if self.get("fsat.type") > 0.5 and self.get("fsat.drive") >= 0.3 and self.get("fsat.mix") >= 0.3:
+            items.append("filter saturation")
+        for k, custom in (("a", self.custom_a), ("b", self.custom_b)):
+            if custom in DAMAGED_TABLES and self.get(f"{k}.on") > 0.5 and self.get(f"{k}.level") > 0.1:
+                items.append(f"{k} table")
         if self.get("noise.on") > 0.5 and self.get("noise.level") >= 0.04:
             items.append("noise")
         special = {enum("LY_FILTER_COMB_POS"), enum("LY_FILTER_COMB_NEG"), enum("LY_FILTER_FORMANT"), enum("LY_FILTER_PHASER")}
@@ -478,7 +490,12 @@ class Preset:
 
     def patch(self):
         values = {k: round(v, 5) for k, v in sorted(self.values.items())}
-        return {"name": self.name, "values": values, "tableA": self.table_a, "tableB": self.table_b}
+        patch = {"name": self.name, "values": values, "tableA": self.table_a, "tableB": self.table_b}
+        if self.custom_a:
+            patch["customTableA"] = self.custom_a
+        if self.custom_b:
+            patch["customTableB"] = self.custom_b
+        return patch
 
     def entry(self):
         return {"name": self.name, "category": self.category, "info": self.info, "patch": self.patch()}
