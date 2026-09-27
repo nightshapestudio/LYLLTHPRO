@@ -1180,6 +1180,24 @@ struct LYLLTHSession: Codable, Equatable {
         return session
     }
 
+    /// A new song: the starter's tracks and sounds with nothing programmed.
+    /// One empty pattern per track, already in the song, so what gets
+    /// programmed plays in SONG too.
+    static func blank() -> LYLLTHSession {
+        var session = starter()
+        session.name = "UNTITLED"
+        for t in session.tracks.indices {
+            guard session.tracks[t].kind == .drumkit || session.tracks[t].kind == .instrument else { continue }
+            guard var first = session.tracks[t].clips.first(where: \.isSequenced) else { continue }
+            first.name = session.tracks[t].isChordTrack == true ? "CHORD BED 01" : "PATTERN 01"
+            first.startBeat = 0
+            first.steps = Array(repeating: false, count: first.steps?.count ?? 16)
+            first.stepParameters = Array(repeating: .default, count: first.steps?.count ?? 16)
+            session.tracks[t].clips = [first]
+        }
+        return session
+    }
+
     /// Version 1's starter project auto-played one held chord root. Extending
     /// the pattern padded chord locks with `nil` (HOLD), so a 32-step pattern
     /// became 8/16 steps of rhythm followed by a lone sustained synth note.

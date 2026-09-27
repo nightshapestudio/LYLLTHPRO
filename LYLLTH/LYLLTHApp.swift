@@ -12,14 +12,31 @@ struct LYLLTHApp: App {
     }
 
     var body: some Scene {
-        // A new song opens on the demo song.
-        DocumentGroup(newDocument: LYLLTHSessionDocument(session: .demoSong())) { configuration in
+        // A new song is blank; DEMO SONG in the song menu asks for the demo.
+        DocumentGroup(newDocument: LYLLTHSessionDocument(session: LYNewSong.take())) { configuration in
             LYDocumentWorkspace(document: configuration.$document, fileURL: configuration.fileURL)
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
             LYProjectCommands()
         }
+    }
+}
+
+/// What the next new song window starts as. NEW is always blank; DEMO SONG
+/// sets `demo` just before asking for a new window.
+@MainActor
+enum LYNewSong {
+    static var demo = false
+
+    static func take() -> LYLLTHSession {
+        defer { demo = false }
+        return demo ? .demoSong() : .blank()
+    }
+
+    static func openDemo() {
+        demo = true
+        NSDocumentController.shared.newDocument(nil)
     }
 }
 

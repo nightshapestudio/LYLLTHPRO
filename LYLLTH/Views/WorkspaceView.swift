@@ -1406,6 +1406,7 @@ struct WorkspaceView: View {
         // Document commands go to this window's document through AppKit.
         switch action {
         case .new: NSDocumentController.shared.newDocument(nil)
+        case .demo: LYNewSong.openDemo()
         case .open: NSDocumentController.shared.openDocument(nil)
         case .save: saveDocument(as: false)
         case .saveAs: saveDocument(as: true)
@@ -2347,7 +2348,7 @@ struct LYViewSwitch: View {
 
 /// The song menu under the project name.
 struct ProjectPanel: View {
-    enum Action { case new, open, save, saveAs, openFKit, saveFKit, export }
+    enum Action { case new, demo, open, save, saveAs, openFKit, saveFKit, export }
 
     let name: String
     let run: (Action) -> Void
@@ -2358,7 +2359,8 @@ struct ProjectPanel: View {
             LYNightshapeMenuHeader(eyebrow: "SONG", title: name, accent: LYLLTHTheme.teal, close: close)
             LYNightshapeMenuDivider()
             VStack(spacing: 6) {
-                row("doc.badge.plus", "NEW SONG", "⌘N", .new)
+                row("doc.badge.plus", "NEW SONG", "⌘N  ·  BLANK", .new)
+                row("music.note.list", "DEMO SONG", "NIGHT SIGNAL  ·  OPENS AS A NEW SONG", .demo)
                 row("folder", "OPEN…", "⌘O  ·  LYLLTH SONGS", .open)
                 row("square.and.arrow.down", "SAVE", "⌘S", .save)
                 row("square.and.arrow.down.on.square", "SAVE AS…", "⇧⌘S", .saveAs)

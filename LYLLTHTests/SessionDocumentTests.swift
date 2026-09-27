@@ -583,3 +583,18 @@ final class DrumRenderCacheTests: XCTestCase {
         XCTAssertNotEqual(LYDrumSounds.cacheKey(for: preset), LYDrumSounds.cacheKey(for: other))
     }
 }
+
+final class BlankSongTests: XCTestCase {
+    func testBlankSongHasTracksButNothingProgrammed() {
+        let session = LYLLTHSession.blank()
+        let musical = session.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }
+        XCTAssertFalse(musical.isEmpty)
+        for track in musical {
+            XCTAssertEqual(track.patterns.count, 1, track.name)
+            XCTAssertFalse(track.patterns[0].steps?.contains(true) ?? false, track.name)
+            XCTAssertTrue(track.patterns[0].stepParameters?.allSatisfy { $0.chord == nil } ?? true, track.name)
+            XCTAssertEqual(track.songRegions.count, 1, track.name)
+        }
+        XCTAssertFalse(session.hasPatternsOutsideSong)
+    }
+}
