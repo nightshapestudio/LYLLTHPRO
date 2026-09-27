@@ -65,7 +65,7 @@ def load_bank():
 
     def rank(path):
         base = os.path.basename(path)
-        if base.startswith("x2_"):
+        if base.startswith(("x2_", "x3_")):
             return (2, 0, False, base)
         if base in order:
             return (1, order.index(base), False, base)
@@ -135,6 +135,10 @@ def plan_for(p):
         macros[index] = value
         renders.append(dict(file=f"{safe(p.name)}__m{index + 1}_{int(value)}.wav", bpm=main["bpm"], seconds=main["seconds"],
                             notes=main["notes"], macros=macros))
+    if p.test.get("wheel"):
+        # The mod wheel at full, over the whole phrase.
+        renders.append(dict(file=f"{safe(p.name)}__mw1.wav", bpm=main["bpm"], seconds=main["seconds"],
+                            notes=main["notes"], macros=base, modwheel=1.0))
     if p.category in A.VELOCITY_CATEGORIES:
         soft = [[n[0], n[1], max(1, int(n[2] * 0.35)), n[3]] for n in main["notes"]]
         renders.append(dict(file=f"{safe(p.name)}__soft.wav", bpm=main["bpm"], seconds=main["seconds"], notes=soft))
@@ -177,6 +181,22 @@ def evaluate(p, main, timings):
             fails.append(f"MACRO {index + 1} at {int(value)} moves the level {level - m['lufs']:+.1f} dB")
         if peak > -0.1:
             fails.append(f"MACRO {index + 1} at {int(value)} peaks at {peak:.1f} dBFS")
+    # The mod wheel must transform the sound, not just turn it up, and
+    # must never clip. Its peak joins the macro peaks the level stage uses.
+    if p.test.get("wheel"):
+        y = r("mw1")
+        level = A.lufs(y)
+        peak = 20 * math.log10(max(np.max(np.abs(y)), 1e-9))
+        change = A.spectral_difference(x, y, 0.0, last_off)
+        m["macros"]["MW=1"] = round(level - m["lufs"], 1)
+        m["macros"]["MW=1 peak"] = round(peak, 1)
+        m["wheel"] = round(change, 2)
+        if change < 2.5:
+            fails.append(f"mod wheel changes the sound by only {change:.2f} dB")
+        if not -4 <= level - m["lufs"] <= 4:
+            fails.append(f"mod wheel moves the level {level - m['lufs']:+.1f} dB")
+        if peak > -0.1:
+            fails.append(f"mod wheel peaks at {peak:.1f} dBFS")
     # MOTION must be able to stop the movement.
     if p.category in L.MOVING and not p.test.get("still") and not uses_motion(p):
         fails.append("no movement on MOTION")

@@ -1,6 +1,6 @@
 # LUNATK factory bank
 
-374 presets. Every one is rendered through the engine in a musical phrase and mixed against a reference arrangement, then gated on loudness, headroom, low end, top end, width, mono fold-down, tails, tuning, macro range, MOTION, velocity and CPU (`tools/lunatk_bank/build.py`).
+424 presets. Every one is rendered through the engine in a musical phrase and mixed against a reference arrangement, then gated on loudness, headroom, low end, top end, width, mono fold-down, tails, tuning, macro range, MOTION, velocity and CPU (`tools/lunatk_bank/build.py`).
 
 ## Macros (every preset)
 
@@ -9,7 +9,7 @@
 - **MACRO 3 SPACE**: drier below its default, wetter above.
 - **MACRO 4 GRIT**: 0 is the designed tone; up adds drive and damage.
 
-## BASS (58)
+## BASS (68)
 
 | Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
 |---|---|---|---|---|---|---|
@@ -71,8 +71,18 @@
 | **BEDROCK** | Overwhelming weight with modest real sub: rectified and sine-shaped harmonics, band-compressed, do the heavy lifting | E0–E2 | FOREGROUND | Dark pop, film, trap-adjacent industrial | Long roots | Measures lighter than it sounds; leaves the kick room at 50 Hz |
 | **SERPENT MACHINE** | A bass that slithers: the sync serpent is scanned by a snap envelope, a slow rise and a free sine, while a flipped saw rolls under it | E0–E2 | FOREGROUND | Dark electro, industrial pop | Held notes and legato slides | The fundamental stays put; every movement is in the sync ratio |
 | **THE DEVOURER** | The flagship industrial bass: grindstone FM, a folded saw and a rectified octave fed through a diode ladder loop; wheel and pressure make it perform | E0–E2 | FOREGROUND | Industrial, trailers, dark pop choruses | One note is the demo; the wheel is the chorus | Below 100 Hz it is only the clean sine; everything that devours is above |
+| **RAZORBLADE** | A serrated line bass for eighths and sixteenths: sync edges and a fold over a rock-solid sine; each repeat lands a little differently | E0–E2 | FOREGROUND | Industrial pop, EBM, dark dance | Fast eighth and sixteenth lines | Wheel: the sync opens, the fold digs in and a resonant snarl rises, and the sub never moves |
+| **TEETH ON STEEL** | Teeth on every note (a 40 ms FM-and-ring spike) over a metal-cored saw and a round sine; distortion builds harmonics, not fuzz | E0–E2 | FOREGROUND | Industrial pop, alt-rock electronics | Syncopated riffs | Wheel: more metal, more resonance, more drive, and a shorter, more violent filter snap |
+| **IRON TREADMILL** | A relentless eighth-note bass: a pulse-wave ladder with a sixteenth tick in its filter that keeps long runs alive | E0–E2 | FOREGROUND | Dark dance, industrial pop, techno-rock | Straight eighths under a four-on-the-floor | Wheel: an octave saw joins and its brightness starts moving in sixteenths |
+| **KNIFE MOTOR** | A saturated, dense centre with a razor spinning in the mids: two saws beating nine cents apart, a folder flickering at nine hertz | E0–E2 | FOREGROUND | Industrial, EBM, dark dance | Held notes and eighths | Wheel: the beating widens, the band-pass steps forward and the fold nearly tears; sub untouched |
+| **SHOCK COLLAR** | A short, nasty hook bass: an instant punched strike, a dense short body, and harder playing folds it rather than turning it up | E0–E2 | FOREGROUND | Industrial pop, electro-punk | Punchy bass hooks | Wheel: a resonant bite and a scarred-pulse layer through zero-square drive make it feel electrically charged |
+| **CUTTHROAT** | A bass that survives a phone speaker: a rectified octave and a 900 Hz lift carry the pitch; the real sub is modest | E0–E2 | FOREGROUND | Industrial pop, alt-dance | Any line; it reads anywhere | Wheel: from controlled and punchy to snarling diode-and-obsidian distortion |
+| **CHROME ARTERY** | A thick clean low note wrapped in a chrome artery: a comb that flicks on short notes and slowly slides through held ones | E0–E2 | FOREGROUND | Industrial pop, dark dance, electro-rock | Short notes and held roots | Wheel: more metal, more resonance, and the metal layer (only) spreads in stereo |
+| **DEADLY SIMPLE** | One saw and a sine, made enormous by a punched attack and filter saturation: sleek at rest | E0–E2 | FOREGROUND | Dark pop, industrial pop, anything | Anything | Wheel: sleek to filthy: the filter opens into a fold and the tube stage overdrives |
+| **CRUSH LINE** | A root-octave bass: accents open the filter and bring in a crushed grindstone octave, so they hit harder without jumping in level | E0–E2 | FOREGROUND | Industrial pop, EBM, electro-rock | Root-octave eighths | Wheel: the octave layer comes all the way in, harder: the chorus version of the same line |
+| **BODY MACHINE** | The flagship industrial-pop bass: obsidian and grindstone tables moving against each other through a diode ladder loop, a punch that fights the kick without clicking | E0–E2 | FOREGROUND | Industrial pop, dark dance, electro-rock | Verse bass that becomes the chorus | Wheel: the grindstone opens, the fold and the loop dig in: a filthy chorus monster, still on pitch |
 
-## LEAD (64)
+## LEAD (74)
 
 | Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
 |---|---|---|---|---|---|---|
@@ -140,6 +150,16 @@
 | **DIGITAL ORGANISM** | A digital creature that moves like something alive: trackers bend velocity and a random through drawn curves into the vowel table and the FM | C3–C5 | FOREGROUND | Art pop, electronica, film | Melodies | The trackers make the response non-linear: similar velocities can sound quite different |
 | **CONTROLLED CHAOS** | Chaos on a leash: a stepped random on the fold, a smooth random on the loop, a triangle on the tendon table; the wheel speeds the chaos up | C3–C5 | FOREGROUND | Industrial, noise pop | Held notes and riffs | Each modulator is bounded; nothing runs away from the pitch |
 | **ELECTRIC PHANTOM** | An eerie melodic ghost: a hollow table mirrored and bent by two warps that drift on their own, breath around it, a pitch that never quite settles | C3–C5 | FOREGROUND | Film, dark pop, horror | Slow melodies | Two warps in series; each drifts on its own clock, so the shape keeps shifting |
+| **SCREAM CIRCUIT** | A synth screaming on pitch: a resonant ladder with a feedback loop keytracked to the note, just below oscillation | C3–C5 | FOREGROUND | Industrial rock, synth metal | Held notes and bends | Wheel: the loop and the resonance head toward controlled feedback; the note never wanders |
+| **RAZOR VOICE** | A lead that articulates like a voice without a formant trick: each note's filter opens and closes like a syllable; wide bends, dramatic glide | C3–C5 | FOREGROUND | Dark pop, industrial pop | Expressive melodies; bend a fifth | Bend range is seven semitones. Wheel: scream, resonance, saturation and a hint of pitch instability |
+| **SOLAR WOUND** | A chorus-sized emotional lead: a strong centre saw and burning radiant edges an octave up, shaped and saturated | C3–C5 | FOREGROUND | Industrial pop choruses | Big melodies | Wheel: the edges widen and brighten while the centre is pushed harder into saturation |
+| **ELECTRIC KNIFE** | Cuts through a full band by focus: an octave-down body, a band-passed blade at 2.4 kHz, the painful top rolled off | C3–C5 | FOREGROUND | Industrial rock, electro-rock | Riffs and hooks over guitars | Wheel: more blade, more bite, more harmonics, not more treble |
+| **SHOCK ANGEL** | A luminous, polished lead that the wheel turns feral: fold, rectify and diode drive all arrive at once | C3–C6 | FOREGROUND | Dark pop, industrial pop | Melodies that turn on the listener | At rest it is nearly clean; the danger is entirely in the wheel |
+| **BLACK SIREN** | A dark siren for held notes: a vowel-and-saw voice that drifts, sings a late vibrato and bends an octave | C3–C5 | FOREGROUND | Dark pop, industrial ballads | Long notes and octave bends | Seductive rather than sci-fi. Wheel: distortion and a resonant scream rise underneath |
+| **SIGNAL DAMAGE** | A playable melody voice with corruption built into it: a fracture layer and sample-rate damage inside the filter | C3–C5 | FOREGROUND | Glitch pop, industrial pop | Melodies | Wheel: the fracture layer starts stepping and the rate damage deepens; tracking never breaks |
+| **SHARP OBJECT** | A fast lead with a very defined point: a 50 ms sync strike and punch, then a thick octave-down sustain; every note articulates | C3–C5 | FOREGROUND | Electro-rock, industrial pop | Rhythmic melodies and hooks | Wheel: aggressive saturation and a wider harmonic layer underneath |
+| **TUNGSTEN** | Dense metal that is sophisticated, not a bell: an FM-flicked saw through a keytracked comb, cathedral-metal partials drifting on a second clock | C3–C5 | FOREGROUND | Industrial, electro-rock | Melodies | Wheel: FM depth, comb resonance and saturation tighten the metal's grip |
+| **NIGHTSHAPE SCREAM** | The flagship chorus lead: obsidian and grindstone tables, folded, combed and shaped inside a ladder loop, blooming wide after two seconds | C3–C5 | FOREGROUND | Industrial pop choruses, anything that needs a scream | The chorus melody | Wheel: the loop, fold, resonance and shaper all climb: barely under control, still on pitch |
 
 ## PAD (62)
 
@@ -208,7 +228,7 @@
 | **THE IMPOSSIBLE ENGINE** | The engine at its limit and still playable: dual-warped custom tables, comb and ring inserts, parallel morph and comb filters, a loop, two slow envelopes, two performers, a tracker | C3–C5 | TEXTURE | Film, experimental pop | Chords held for bars | Every module is working, each gently; the result is dense, not chaotic |
 | **NIGHTSHAPE: TOTAL SYSTEM** | The whole system in one sound: FM-flicked obsidian over a wide grindstone layer, fold and comb, a diode ladder loop, an 11-step timbre walk, three clocks, blooming after seven seconds | C3–C5 | FOREGROUND | Everything NIGHTSHAPE makes | Chords or lines; velocity, wheel, pressure and MPE timbre all transform it | Centre and lows mono and steady; the width, the growl and the bloom are all above |
 
-## KEYS (36)
+## KEYS (55)
 
 | Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
 |---|---|---|---|---|---|---|
@@ -248,6 +268,25 @@
 | **SOFT DESTRUCTION** | Beautiful at rest; the mod wheel destroys it in three stages: first a fold, then the fracture layer crushes, and last the hard drive | C2–C5 | FOREGROUND | Dark pop, industrial pop | Ride the wheel through a section | Curves are staggered so each stage arrives in turn; level is trimmed as it goes |
 | **THE BEAUTIFUL DISEASE** | Immediately lovely, then you notice the infection: each note carries its own slightly different off-ratio ring, never twice the same | C3–C5 | FOREGROUND | Dark pop, art pop | Chords and melodies | The ring's pitch and depth are drawn per note; subtle, and unmistakable once heard |
 | **BEAUTIFUL MALFUNCTION** | An emotional keyboard that malfunctions beautifully: every note lands a hair off, folds a little differently, and its fracture layer stumbles | C3–C5 | FOREGROUND | Art pop, dark pop, film | Chords and melodies | The pitch randomness is a fraction of a cent; it reads as alive, not out of tune |
+| **STEEL WALL** | A synth that does a rhythm guitar's job: picked comb-string saws, a wide obsidian octave, hard drive and a cab-style voice. Power chords land huge | C2–C5 | FOREGROUND | Industrial rock, electro-rock | Power chords and chugs | High-passed at 140 Hz so the bass keeps its space. Wheel: harder drive, wider top, more upper-mid bite |
+| **CHROME GUITAR** | Polished chrome rhythm: random-spread saws (not a supersaw), a metal comb an octave up, a shaper stage and a tube | C2–C5 | FOREGROUND | Industrial pop, synth rock | Rhythmic chord patterns | Wheel: from controlled rhythm tone to a screaming, damaged wall |
+| **SAW BLADE WALL** | Layered saw blades through expensive processing: a tight punched attack, an octave pair six cents apart, a filter loop holding the sustain up | C2–C5 | FOREGROUND | Industrial rock, trailers | Chord hits and sustained walls | Wheel: drive and resonant upper harmonics rise; the loop starts to sing |
+| **MACHINE RIFF** | For riffs: short notes punch with a pick; long notes grow as the tendon table folds and the loop rises. Single notes or power intervals | C2–C4 | FOREGROUND | Industrial rock, EBM, electro-rock | Riffs and two-note power intervals | Four voices: enough for fifths and octaves. Wheel: a savage fold stage and a shiver of instability |
+| **METAL HALO** | Rhythm-guitar weight in the centre, a halo of moving metal two octaves up at the edges: a lush, heavy chord synth | C2–C5 | FOREGROUND | Industrial pop, synth rock, cinematic rock | Sustained power chords | Wheel: the halo widens and brightens and the centre drives harder |
+| **FERROUS** | Metal as part of the instrument, not a bell: a low off-ratio ring through a diode filter stage, voiced dark | C2–C5 | FOREGROUND | Industrial, metal-electronic | Chords and riffs | Wheel: resonance and drive climb until the ring's harmonics scream |
+| **BURNING SAW** | An expensive saw before anything touches it, then a tube stage whose heat shifts every eighth: made for driving eighth-note chords | C2–C5 | FOREGROUND | Industrial pop, synth rock | Eighth-note chord patterns | Wheel: a screaming climax version of the same chord |
+| **INDUSTRIAL POWER CHORD** | Built for root-fifth-octave voicings: high-passed at 180 Hz so stacked notes never mud up, a picked, punched front | C2–C5 | FOREGROUND | Industrial rock, electro-rock | Power chords | Wheel: a grindstone octave-stack reinforces every chord and the drive climbs |
+| **HOT TUBES** | An overdriven instrument that answers the hands: soft playing is dense and controlled, hard playing breaks up and bites | C2–C5 | FOREGROUND | Industrial rock, alt-rock | Dynamic chord playing | Wheel: the virtual amp pushed far past its limit; pitch stays clear |
+| **GOD GUITAR** | The ultimate synth-guitar: picked comb strings and a wide obsidian octave through a diode ladder loop and a tube amp; soft playing closes up like palm-muting | C2–C5 | FOREGROUND | Electronic rock, industrial, trailers | Power chords, chugs, screaming single notes; pressure bends | Wheel: rhythm tone into a screaming wall of harmonic distortion |
+| **STOMP SYNTH** | Huge offbeat chords against a four-on-the-floor: a snapping ladder, a dense saw stack and an obsidian octave, clear of the kick | C3–C5 | RHYTHM | Industrial pop, dark dance | Offbeat or eighth-note chords | Wheel: harder drive, more resonance, wider |
+| **BLACK JACKHAMMER** | One-note industrial hooks that hit like a jackhammer: a punch, a tiny pitch blip and a fold that differs on every repeat | C2–C4 | RHYTHM | Industrial, EBM | Repeated single notes | Physical, not percussive: it is a pitched note every time. Wheel: denser, harder, snappier |
+| **BODY PULSE** | A low-mid pulse that pushes air: a driven saw and a pulse an octave down, each hit with its own soft filter swell | C2–C4 | RHYTHM | Dark dance, industrial pop | Eighth-note pulses | Wheel: the spectrum opens and the diode drive rises |
+| **MACHINE CHORD** | Chords that hit like machinery: a fast punched strike, then a metal comb rings in 80 ms later and fades | C3–C5 | RHYTHM | Industrial pop, electro-rock | Chord hits | Wheel: more metal damage and the metal layer spreads in stereo |
+| **CRUSHED STROBE** | Hold a chord and it strobes in sixteenths: gated on the grid, fracture-crushed, every strike expensive and brutal | C3–C5 | RHYTHM | Dark dance, industrial pop | Held chords or eighth/sixteenth playing | MOTION 0 removes the gate for played patterns. Wheel: more crush, and the filter starts moving with the gate |
+| **STEEL DISCO** | A dark dance chord: exponential saw stack and a hollow comb octave, pumping on the beat, band-compressed, no disco cliché | C3–C5 | RHYTHM | Dark dance, industrial pop | Held or offbeat chords under a four-on-the-floor | The pump only ducks; MOTION sets its depth. Wheel: heavy distorted club aggression |
+| **VIOLENT GLITTER** | Glitter over filth: a folded, driven low-mid saw and a shining radiant layer two octaves up, kept just short of harsh | C3–C5 | RHYTHM | Industrial pop, dark dance | Stabs and chords | Wheel: more sheen and more distortion at the same time |
+| **MIDNIGHT ENGINE** | A dark verse pulse that carries the groove and leaves the vocal alone: a pulse-and-vowel pair, a sixteenth tick, a hole at 2 kHz | C3–C5 | SUPPORT | Dark pop, industrial pop verses | Pulsing chords under a vocal | Wheel: opens, widens, fills the vocal hole: the chorus-ready version |
+| **MAIN STAGE DAMAGE** | The ultimate rhythmic preset: picked obsidian and grindstone layers through a folded, combed diode ladder loop; bass riffs, hooks, power chords, stabs | C2–C5 | FOREGROUND | Industrial pop, electro-rock, dark dance | Anything rhythmic | Wheel in two stages: to 50% it gets bigger, wider and more animated; past 50% the fold, comb, loop and resonance turn it filthy and screaming |
 
 ## PLUCK (16)
 
@@ -270,7 +309,7 @@
 | **TWITCH** | A resonant pluck whose accents follow a syncopated pattern locked to the bar | C3–C6 | RHYTHM | Industrial techno, EBM, acid | Straight sixteenth notes; the accents make the groove | Pattern B is on the eighths; MOTION 0 plays every note the same |
 | **PIANO WIRE** | A plucked piano wire: bright, ringing, a little crushed | C3–C6 | FOREGROUND | Gothic, film, industrial | Arpeggios and counterpoint | Rings for half a second; keep patterns open |
 
-## ARP (52)
+## ARP (63)
 
 | Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
 |---|---|---|---|---|---|---|
@@ -326,6 +365,17 @@
 | **DARK MATHEMATICS** | Three cycles at once: a sixteen-step arp, a five-step filter accent and a seven-step wavetable walk; they only realign every 560 steps | C3–C5 | RHYTHM | Electronica, film, dark techno | Hold chords for a long section | The arp has one pattern length; the cross-rhythm comes from two performers with their own step counts |
 | **PRESSURE FRACTURE** | Pressure building every bar: notes shorten, accents rise and the steps climb to an octave and a twelfth, each accent folding the tendon table harder | C3–C5 | FOREGROUND | Industrial, trailers, pre-choruses | Hold a note or a fifth | The same bar every time; the tension is written into it, not into automation |
 | **NIGHTSHAPE PROTOCOL** | The flagship sequence: fourteen programmed steps (rests, a tie, octave and twelfth leaps) against a nine-step timbre walk and a sixteen-step fold accent | C3–C5 | FOREGROUND | Everything NIGHTSHAPE makes | One held chord; wheel for the loop, pressure for drive | 14 against 9 against 16: it keeps developing for a long time before it repeats exactly |
+| **BITE SEQUENCE** | A biting sixteenth sequence built to lock with a kick: anchors, ghosts, a fifth, octave hits and two gaps, all with a sync snap | C3–C5 | RHYTHM | Industrial pop, dark dance | Hold a note or a fifth under a four-on-the-floor | Wheel: more drive, shorter notes, brighter, and the accents alone get a harder drive |
+| **STEEL RUNNER** | Forward motion: repeated anchors, an octave hit, and a fourth-fifth-octave turn at the end of the bar that makes it a phrase | C3–C5 | RHYTHM | Industrial pop, synth rock | Hold a note under vocals | Wheel: a resonant metal layer steps in and its harmonics start moving |
+| **BLACK STROBE** | A strobe in sixteenths: very short gated steps, hard accents against quiet ghosts, a scarred pulse and a rubbing saw | C3–C5 | RHYTHM | Dark dance, industrial pop | Hold chords | Wheel: zero-square drive and the scar get denser and the top widens through the hyper stage |
+| **MACHINE DESIRE** | A sexy, loose sequence: a twelve-step descent (octave, fifth, fourth, down a fourth) with long notes between short ones, a little swing | C3–C5 | FOREGROUND | Dark pop, alt-dance | Hold chords | Wheel: the filter opens, saturation rises and only the accents gain resonance |
+| **RAZOR GRID** | A sixteen-step grid played like a drummer: accents, ghost notes, octave flams, gaps and an unexpected low hit | C3–C5 | RHYTHM | Industrial pop, electro-rock | Hold a note or fifth | Wheel: a harder snap, more resonance and drive, and the serpent layer spreads |
+| **VOLTAGE HOOK** | A real hook: a two-bar eighth-note line that answers itself (octave, fifth, fourth; then up to the twelfth), built from intervals that follow any chord | C3–C5 | FOREGROUND | Industrial pop, dark pop | Hold one note per chord; the line transposes with it | Wheel: an octave-down layer steps in and the whole line gets dirtier |
+| **PANIC DISCO** | Urgency without tempo change: the bar starts sparse and ends in a rush of short, loud steps climbing to the twelfth | C3–C5 | RHYTHM | Dark dance, industrial pop pre-choruses | Hold a note | Wheel: the fracture layer crushes harder and the filter starts jumping in sixteenths |
+| **IRON HEARTBEAT** | A heartbeat note on every other sixteenth with tension and release moving around it: fifth, octave, twelfth, fourth, the octave below | C3–C5 | RHYTHM | Industrial pop, dark dance | Hold a note | Wheel: the tendon folds harder around the anchor; the anchor stays solid |
+| **STATIC DANCER** | A tight dance pattern with static in its skin: a ring and a digital crackle stepping at 1/32, never loosening the groove | C3–C5 | RHYTHM | Dark dance, glitch pop | Hold chords | Wheel: the ring and static intensify, resonance and crush rise; timing stays exact |
+| **NIGHTCLUB MACHINE** | The flagship dance-industrial arp: a fourteen-step phrase with rests, a tie and octave/fifth/twelfth moves over a twelve-step timbre walk: a track's backbone from one chord | C3–C5 | FOREGROUND | Industrial pop, dark dance, electro-rock | Hold a chord for the whole section | Wheel: the grindstone opens, the fold bites, the top widens: same phrase, far more dangerous |
+| **HEAVY SEQUENCE** | Half bass, half stab, half arp: low roots and mid stabs alternating in an eight-step pattern that can run a whole arrangement | C2–C4 | RHYTHM | Industrial pop, EBM, electro-rock | Hold one note per chord | Wheel: from tight and focused to huge and chaotic |
 
 ## MOTION (29)
 

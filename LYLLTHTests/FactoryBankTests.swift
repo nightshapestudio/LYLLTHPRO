@@ -4,11 +4,11 @@ import XCTest
 final class FactoryBankTests: XCTestCase {
     func testTheBankLoadsWithEveryCategoryAndItsDocumentation() {
         let bank = LYSynthFactoryBank.presets
-        XCTAssertEqual(bank.count, 374)
+        XCTAssertEqual(bank.count, 424)
         let counts = Dictionary(grouping: bank, by: { $0.category ?? "" }).mapValues(\.count)
-        XCTAssertEqual(counts, ["BASS": 58, "LEAD": 64, "PAD": 62, "KEYS": 36, "PLUCK": 16, "ARP": 52, "MOTION": 29, "DRONE": 29, "PERC": 12, "FX": 16])
+        XCTAssertEqual(counts, ["BASS": 68, "LEAD": 74, "PAD": 62, "KEYS": 55, "PLUCK": 16, "ARP": 63, "MOTION": 29, "DRONE": 29, "PERC": 12, "FX": 16])
         XCTAssertTrue(bank.allSatisfy { $0.info != nil && !($0.info?.mix.isEmpty ?? true) })
-        XCTAssertEqual(Set(bank.map(\.name)).count, 374, "names are unique")
+        XCTAssertEqual(Set(bank.map(\.name)).count, 424, "names are unique")
         // Every stored value is a real parameter.
         for patch in bank { for key in patch.values.keys { XCTAssertNotNil(LYSynthParameters.byKey[key], "\(patch.name): \(key)") } }
         // INIT, the bank, then the originals.
