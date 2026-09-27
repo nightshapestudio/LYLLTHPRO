@@ -24,12 +24,14 @@
 		0F2E7B5C782BAFAFA9C0A000 /* NoteClipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C197A61BD7F9513D6B09D7D3 /* NoteClipTests.swift */; };
 		1100D2673739C29C697A2403 /* LYScroller.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8138DCA1A91395B53951A82 /* LYScroller.swift */; };
 		11AC08B77CB656D082E09CDE /* FontRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D80641FB01504BDFF2D6E83 /* FontRegistrar.swift */; };
+		137AB719ADDD4013BDC10CEB /* Wavetables in Resources */ = {isa = PBXBuildFile; fileRef = D3095AAD7D398111E93FE26C /* Wavetables */; };
 		151531C8C596EA7D3CE4B961 /* LYFrameClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FF19AFA5BCCFB78BBACFE5 /* LYFrameClock.swift */; };
 		154A709FEAD4AA9205A7DBBC /* LYOfflineExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09D35668C634C05CDD514E3C /* LYOfflineExport.swift */; };
 		154CFDC4030483427D92BCE8 /* ExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B68857B9AC741B4807DC37 /* ExportTests.swift */; };
 		162682C9152C4F5217FC0D04 /* SynthCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2F4736A16F53868A4791F0 /* SynthCoreTests.swift */; };
 		1683416DF75FA415C6AC32B8 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 36CE37E3FF75BBDC0DF875F2 /* Accelerate.framework */; };
 		176D2F573031D2A559882730 /* LUNATKExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 25752396635615C9F883448F /* LUNATKExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		17E1C10612DF2079FB436D94 /* Wavetables in Resources */ = {isa = PBXBuildFile; fileRef = D3095AAD7D398111E93FE26C /* Wavetables */; };
 		197E68D11598EC2B708E6A54 /* LYSynthControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC8025D09EE241120C506F1 /* LYSynthControls.swift */; };
 		1BDF9823521D005F1AA60B26 /* LYSynthLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A289B564195B5876C2AEE5D /* LYSynthLibrary.swift */; };
 		1C364D37908ACAA2DB3FABDA /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 762CC1543C2324F346E902F2 /* Cocoa.framework */; };
@@ -100,6 +102,7 @@
 		8FF0057A33F063C940883B91 /* SongFXTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4590DBB4A2CB4EEFB8F938C /* SongFXTests.swift */; };
 		96152E8EFF72B913A27AEC0F /* NIGHTSHAPE-Bold_Outline.ttf in Resources */ = {isa = PBXBuildFile; fileRef = BC198D92CC6F7136CA216A6C /* NIGHTSHAPE-Bold_Outline.ttf */; };
 		96D3C183C9CBEADB3627D388 /* Adam-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1703868BDA0F39CBC2D0032D /* Adam-Bold.ttf */; };
+		97192A2BAC5E851F7A5FECF4 /* Wavetables in Resources */ = {isa = PBXBuildFile; fileRef = D3095AAD7D398111E93FE26C /* Wavetables */; };
 		98891AB81EB36E829D8D0A9E /* AutomationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EBB01566EC4D356A3D9614E /* AutomationViews.swift */; };
 		997258FD72D3411DA9EB1A7D /* Adam-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD2467CDCE9B421E3430FFFE /* Adam-Light.ttf */; };
 		9AB195A56B1DC6168799741C /* LYSynthLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A289B564195B5876C2AEE5D /* LYSynthLibrary.swift */; };
@@ -291,6 +294,7 @@
 		CDF2943D40AB3BDEC33CF4EC /* LYLLTHApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYLLTHApp.swift; sourceTree = "<group>"; };
 		CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDocumentTests.swift; sourceTree = "<group>"; };
 		CE8658DEE809F98F0303AC07 /* SequencerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SequencerModels.swift; path = "../nightshape-drumkit-ios/Models/SequencerModels.swift"; sourceTree = "<group>"; };
+		D3095AAD7D398111E93FE26C /* Wavetables */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Wavetables; path = LYLLTH/Synth/Wavetables; sourceTree = SOURCE_ROOT; };
 		D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYLLTHSessionDocument.swift; sourceTree = "<group>"; };
 		D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
 		D9CD8500ACF2478647F7832A /* LUNATKViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUNATKViewController.swift; sourceTree = "<group>"; };
@@ -563,6 +567,7 @@
 				C13D40D6A946FAB5F9E84500 /* LYSynthPerformPages.swift */,
 				CDD4ACCE1DB809DEB2FD7914 /* LYSynthVisuals.swift */,
 				0618CFBCAE4DFCA5D4BA204B /* LYWavetableEditor.swift */,
+				D3095AAD7D398111E93FE26C /* Wavetables */,
 			);
 			path = Synth;
 			sourceTree = "<group>";
@@ -804,6 +809,7 @@
 				01156E7FA13BE5096D075B31 /* LUNATKFactory.json in Resources */,
 				CF1C86B0691898B1B5700D03 /* NIGHTSHAPE-Bold_Outline.ttf in Resources */,
 				D080A4732210713E29FE0D56 /* Nightshape-Bold.ttf in Resources */,
+				97192A2BAC5E851F7A5FECF4 /* Wavetables in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -818,6 +824,7 @@
 				0AE3A66A4B0E745106D5B856 /* LUNATKFactory.json in Resources */,
 				86D4A6B8E2C1420D201CD70E /* NIGHTSHAPE-Bold_Outline.ttf in Resources */,
 				A3B2C9A6D7CCF44DEE0683CB /* Nightshape-Bold.ttf in Resources */,
+				137AB719ADDD4013BDC10CEB /* Wavetables in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -831,6 +838,7 @@
 				2D86B85D88AC3E3368FE7C00 /* LUNATKFactory.json in Resources */,
 				96152E8EFF72B913A27AEC0F /* NIGHTSHAPE-Bold_Outline.ttf in Resources */,
 				B734AFBF4E89290CBF9041C1 /* Nightshape-Bold.ttf in Resources */,
+				17E1C10612DF2079FB436D94 /* Wavetables in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
