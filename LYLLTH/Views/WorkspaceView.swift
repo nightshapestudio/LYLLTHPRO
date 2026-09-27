@@ -207,6 +207,8 @@ private struct LYAudioImportTarget {
 
 struct WorkspaceView: View {
     @Binding var document: LYLLTHSessionDocument
+    /// Where the song is saved; nil until it has been saved once.
+    var fileURL: URL? = nil
     @EnvironmentObject private var audio: AudioEngineController
     @EnvironmentObject private var plugins: AudioUnitCatalog
     @EnvironmentObject private var audioUnits: LYAudioUnitHost
@@ -285,6 +287,7 @@ struct WorkspaceView: View {
                         showInspector: $showInspector,
                         showMixer: $showMixer,
                         projectName: document.session.name,
+                        isSaved: fileURL != nil,
                         openTrackMenu: { presentMenu(.addTrack, from: "stripTrack") },
                         export: presentExport
                     )
@@ -1404,11 +1407,22 @@ struct WorkspaceView: View {
         switch action {
         case .new: NSDocumentController.shared.newDocument(nil)
         case .open: NSDocumentController.shared.openDocument(nil)
-        case .save: NSApp.sendAction(#selector(NSDocument.save(_:)), to: nil, from: nil)
-        case .saveAs: NSApp.sendAction(#selector(NSDocument.saveAs(_:)), to: nil, from: nil)
+        case .save: saveDocument(as: false)
+        case .saveAs: saveDocument(as: true)
         case .openFKit: openDrumKitProject()
         case .saveFKit: saveDrumKitProject()
         case .export: presentExport()
+        }
+    }
+
+    /// Saves this window's song; an unsaved one asks where. Sent to the
+    /// document itself: a nil-targeted action from an overlay could miss it.
+    private func saveDocument(as newCopy: Bool) {
+        let window = NSApp.keyWindow ?? NSApp.mainWindow
+        if let doc = window.flatMap({ NSDocumentController.shared.document(for: $0) }) ?? NSDocumentController.shared.currentDocument {
+            newCopy ? doc.saveAs(nil) : doc.save(nil)
+        } else {
+            NSApp.sendAction(newCopy ? #selector(NSDocument.saveAs(_:)) : #selector(NSDocument.save(_:)), to: nil, from: nil)
         }
     }
 
@@ -2205,6 +2219,7 @@ struct WorkspaceStrip: View {
     @Binding var showInspector: Bool
     @Binding var showMixer: Bool
     let projectName: String
+    var isSaved = true
     let openTrackMenu: () -> Void
     let export: () -> Void
 
@@ -2223,6 +2238,14 @@ struct WorkspaceStrip: View {
                     .tracking(1.5)
                     .foregroundStyle(LYLLTHTheme.text)
                     .lineLimit(1)
+                    if !isSaved {
+                        Text("NOT SAVED")
+                            .font(LYLLTHTheme.label(7.5, weight: .bold))
+                            .tracking(1.3)
+                            .foregroundStyle(LYLLTHTheme.purple)
+                            .lyBloom(LYLLTHTheme.purple)
+                            .fixedSize()
+                    }
                     Image(systemName: "chevron.down")
                         .font(.system(size: 7.5, weight: .bold))
                         .foregroundStyle(LYLLTHTheme.dim)
@@ -2234,7 +2257,7 @@ struct WorkspaceStrip: View {
             }
             .buttonStyle(.plain)
             .lyMenuAnchor("stripProject")
-            .help("Song: new, open, save, DrumKit .fkit, export")
+            .help(isSaved ? "Song: new, open, save, DrumKit .fkit, export" : "This song has never been saved. Open this menu and choose SAVE")
 
             LYViewSwitch(activeWorkspace: $activeWorkspace)
 

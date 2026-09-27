@@ -14,7 +14,7 @@ struct LYLLTHApp: App {
     var body: some Scene {
         // A new song opens on the demo song.
         DocumentGroup(newDocument: LYLLTHSessionDocument(session: .demoSong())) { configuration in
-            LYDocumentWorkspace(document: configuration.$document)
+            LYDocumentWorkspace(document: configuration.$document, fileURL: configuration.fileURL)
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
@@ -28,17 +28,19 @@ struct LYLLTHApp: App {
 /// undo history and recovery journal instead of sharing global state.
 private struct LYDocumentWorkspace: View {
     @Binding var document: LYLLTHSessionDocument
+    let fileURL: URL?
     @StateObject private var audio: AudioEngineController
     @StateObject private var plugins = AudioUnitCatalog()
     @StateObject private var audioUnits = LYAudioUnitHost()
 
-    init(document: Binding<LYLLTHSessionDocument>) {
+    init(document: Binding<LYLLTHSessionDocument>, fileURL: URL?) {
         _document = document
+        self.fileURL = fileURL
         _audio = StateObject(wrappedValue: AudioEngineController())
     }
 
     var body: some View {
-        WorkspaceView(document: $document)
+        WorkspaceView(document: $document, fileURL: fileURL)
             .environmentObject(audio)
             .environmentObject(plugins)
             .environmentObject(audioUnits)
