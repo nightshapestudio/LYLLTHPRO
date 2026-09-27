@@ -100,7 +100,7 @@ enum LYDemoSong {
         var kick = DrumPart(name: "KICK", preset: "user_nit_kick", volumeDB: -3, fx: FX.kick)       // CHARGED KICK
         var snare = DrumPart(name: "SNARE", preset: "user_nit_snare", volumeDB: -6, fx: FX.snare)  // CHARGED SNARE
         var clap = DrumPart(name: "CLAP", preset: "clap_012", volumeDB: -9, pan: 0.05, fx: FX.tape(0.5))   // DARK CLAP
-        var hats = DrumPart(name: "HATS", preset: "closedhat_006", volumeDB: -14, pan: 0.2, fx: FX.tape(0.45))  // CHARCOAL
+        var hats = DrumPart(name: "HATS", preset: "closedhat_004", volumeDB: -16, pan: 0.2, fx: FX.tape(0.3))  // SEQUIN: a noise hat; CHARCOAL was a tonal click that read as a wood block
         var shaker = DrumPart(name: "CHAINS", preset: "closedhat_017", volumeDB: -18, pan: -0.25)  // CHAINLINK
         var metal = DrumPart(name: "METAL", preset: "perc_010", volumeDB: -13, pan: -0.1, fx: FX.decimated(0.35))   // METAL STAB
         var impact = DrumPart(name: "IMPACT", preset: "tom_003", volumeDB: -8, fx: FX.tape(0.6))       // THUNDER
