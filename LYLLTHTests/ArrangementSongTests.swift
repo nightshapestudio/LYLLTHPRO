@@ -13,6 +13,8 @@ final class ArrangementSongTests: XCTestCase {
         struct Section: Decodable { var name: String; var bar: Int; var bars: Int }
         struct Drum: Decodable {
             var name: String; var preset: String; var volumeDB: Double; var pan: Double?; var chokeGroup: Int?
+            /// A drum sound of the song's own (a DrumKit preset), played instead of `preset`.
+            var customPreset: DrumSynthPreset?
             /// Five EQ band gains (dB) for DrumKit's bands, a matching EQ.
             var eq: [Double]?
             /// A gain (dB) per section, on top of volumeDB, drawn as volume automation.
@@ -78,6 +80,10 @@ final class ArrangementSongTests: XCTestCase {
             for (k, v) in drum.hits { if let step = Int(k) { hits[step] = v } }
             var track = drumTrack(drum.name, preset: drum.preset, volumeDB: drum.volumeDB, pan: drum.pan ?? 0,
                                   choke: drum.chokeGroup, hits: hits, sections: a.sections, accent: accents[tracks.count % 6])
+            if let custom = drum.customPreset {
+                track.customDrumPreset = custom
+                track.drumPresetID = custom.id
+            }
             finish(&track, eq: drum.eq, gains: drum.sectionGainDB, sections: a.sections)
             tracks.append(track)
         }
