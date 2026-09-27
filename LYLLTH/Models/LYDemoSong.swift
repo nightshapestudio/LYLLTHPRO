@@ -102,9 +102,9 @@ enum LYDemoSong {
         var kick = DrumPart(name: "KICK", preset: "user_nit_kick", volumeDB: -3, fx: FX.kick)       // CHARGED KICK
         var snare = DrumPart(name: "SNARE", preset: "user_nit_snare", volumeDB: -6, fx: FX.snare)  // CHARGED SNARE
         var clap = DrumPart(name: "CLAP", preset: "clap_012", volumeDB: -9, pan: 0.05, fx: FX.tape(0.5))   // DARK CLAP
-        var hats = DrumPart(name: "HATS", preset: "closedhat_004", volumeDB: -16, pan: 0.2, fx: FX.tape(0.3))  // SEQUIN: a noise hat; CHARCOAL was a tonal click that read as a wood block
-        var shaker = DrumPart(name: "CHAINS", preset: "closedhat_017", volumeDB: -18, pan: -0.25)  // CHAINLINK
-        var metal = DrumPart(name: "METAL", preset: "perc_010", volumeDB: -13, pan: -0.1, fx: FX.decimated(0.35))   // METAL STAB
+        var hats = DrumPart(name: "HATS", preset: "closedhat_001", volumeDB: -19, pan: 0.2)  // PINLIGHT: noise, no tonal peak
+        var shaker = DrumPart(name: "CHAINS", preset: "closedhat_002", volumeDB: -24, pan: -0.25)  // SLIVER; CHAINLINK rang at 2.9 kHz like a wood block
+        var metal = DrumPart(name: "METAL", preset: "perc_010", volumeDB: -22, pan: -0.1, fx: FX.sent(FX.decimated(0.35), 0.4))   // METAL STAB, in the room
         var impact = DrumPart(name: "IMPACT", preset: "tom_003", volumeDB: -8, fx: FX.tape(0.6))       // THUNDER
         // Short and tight; its own choke group so each hit cuts the last one's tail.
         var roll = DrumPart(name: "ROLL", preset: "snare_024", volumeDB: -9, chokeGroup: 3, fx: FX.tape(0.4))  // RIVETER
@@ -428,7 +428,7 @@ enum LYDemoSong {
     ]
 
     static func melody() -> [Part] {
-        var voice = Part(name: "LEAD", sound: "GHOSTWIRE", volumeDB: -14)
+        var voice = Part(name: "LEAD", sound: "AFTER MIDNIGHT", volumeDB: -14)
         var hookLead = Part(name: "HOOK", sound: "NIGHTSHAPE SCREAM", volumeDB: -13)
         var hookHigh = Part(name: "HOOK HIGH", sound: "GLASS VENOM", volumeDB: -19, pan: 0.15)
         var scream = Part(name: "SCREAM", sound: "SCREAM CIRCUIT", volumeDB: -15)
@@ -542,6 +542,7 @@ enum LYDemoSong {
         )
         mix(&session.tracks)
         session.mainFX = FX.main
+        session.reverb = FX.room(kick: session.tracks.first { $0.name == "KICK" }?.id)
         glitches(&session)
         return session
     }
@@ -689,6 +690,29 @@ enum LYDemoSong {
             return rack
         }
 
+        /// A reverb send on an existing rack.
+        static func sent(_ rack: LYFXRack, _ amount: Float) -> LYFXRack {
+            var rack = rack
+            rack.reverbSend = amount
+            return rack
+        }
+
+        /// The shared reverb every send feeds: a dark hall, low-cut so it
+        /// never touches the bass, ducked by the kick so the tails pump.
+        static func room(kick: UUID?) -> ReverbState {
+            var room = ReverbState()
+            room.mode = .hall
+            room.decay = 0.55
+            room.size = 0.65
+            room.preDelay = 0.03
+            room.lowCut = 300
+            room.highCut = 7_500
+            room.duckSourceID = kick
+            room.duck = kick == nil ? 0 : 0.35
+            room.isBypassed = false
+            return room
+        }
+
         /// FRACTURE engaged with an empty grid, placed before the reverb.
         static func fractured(_ rack: LYFXRack?, isMain: Bool) -> LYFXRack {
             var rack = rack ?? LYFXRack()
@@ -734,19 +758,19 @@ enum LYDemoSong {
     static func glitches(_ session: inout LYLLTHSession) {
         func id(_ name: String) -> UUID? { session.tracks.first { $0.name == name }?.id }
         let moves: [(SongFXMove, String?, Double, Double)] = [
-            (.reverse, nil, beat(7, 3), 1),                         // sucks back into VERSE 1
+            (.roll, nil, beat(7, 3), 1),                            // rolls into VERSE 1
             (.stutter, "LEAD", beat(11, 3.5), 0.5),                 // verse phrase endings
             (.stutter, "LEAD", beat(19, 3.5), 0.5),
             (.crush, "ARP", beat(section("PRE 1").bar + 6), 8),     // the arp rots into the chorus
-            (.gate, "SAWS", beat(section("CHORUS 1").bar + 15, 2), 2),
+            (.stutter, "SAWS", beat(section("CHORUS 1").bar + 15, 2), 1),
             (.stutter, nil, beat(section("CHORUS 1").bar + 15, 3.5), 0.5),
-            (.reverse, "PIANO", beat(section("VERSE 2").bar + 3, 3), 1),
+            (.stutter, "PIANO", beat(section("VERSE 2").bar + 3, 3), 1),
             (.crush, "ARP", beat(section("PRE 2").bar + 6), 8),
             (.stutter, "KICK", beat(section("BRIDGE").bar - 1, 3), 1),  // under the tape stop
             (.crush, "STUTTER", beat(section("BRIDGE").bar + 4), 4),
             (.stutter, "SCREAM", beat(section("BRIDGE").bar + 6, 3), 1),
-            (.drop, nil, beat(section("CHORUS 3").bar - 1, 3.5), 0.5),  // a hole before the last chorus
-            (.gate, "BASS", beat(section("CHORUS 3").bar + 7, 2), 2),
+            (.roll, nil, beat(section("CHORUS 3").bar - 1, 3), 1),     // rolls into the last chorus
+            (.crush, "BASS", beat(section("CHORUS 3").bar + 7, 2), 2),
             (.stutter, "HOOK", beat(section("CHORUS 3").bar + 11, 3), 1),
             (.crush, "RADIO", beat(section("OUTRO").bar + 4), 8),
         ]
