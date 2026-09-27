@@ -573,3 +573,13 @@ final class PatternPlacementTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(regions[1].startBeat, regions[0].startBeat + regions[0].lengthBeats - 0.001)
     }
 }
+
+final class DrumRenderCacheTests: XCTestCase {
+    func testCacheKeyIsStableAndFollowsSettings() throws {
+        let preset = try XCTUnwrap(LYDrumSounds.presets.first)
+        XCTAssertEqual(LYDrumSounds.cacheKey(for: preset), LYDrumSounds.cacheKey(for: preset))
+        XCTAssertEqual(LYDrumSounds.cacheKey(for: preset).count, 16)
+        let other = try XCTUnwrap(LYDrumSounds.presets.dropFirst().first)
+        XCTAssertNotEqual(LYDrumSounds.cacheKey(for: preset), LYDrumSounds.cacheKey(for: other))
+    }
+}
