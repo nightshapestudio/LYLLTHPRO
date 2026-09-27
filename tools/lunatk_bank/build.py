@@ -60,10 +60,17 @@ def load_bank():
     # ARP was added after the rest; it goes last so the plug-ins' factory
     # preset numbers for the other categories stay where they were.
     # The showcase files (show_*) come after everything, for the same reason.
+    # Expansion 02 (x2_*) follows, in file order.
     order = ["show_pad.py", "show_bass.py", "show_lead.py", "show_arp.py"]
-    paths = sorted(glob.glob(os.path.join(HERE, BANK, "*.py")),
-                   key=lambda path: (os.path.basename(path) in order, order.index(os.path.basename(path)) if os.path.basename(path) in order else 0,
-                                     path.endswith("/arp.py"), path))
+
+    def rank(path):
+        base = os.path.basename(path)
+        if base.startswith("x2_"):
+            return (2, 0, False, base)
+        if base in order:
+            return (1, order.index(base), False, base)
+        return (0, 0, base == "arp.py", base)
+    paths = sorted(glob.glob(os.path.join(HERE, BANK, "*.py")), key=rank)
     for path in paths:
         name = os.path.splitext(os.path.basename(path))[0]
         if name.startswith("_"):
@@ -272,7 +279,7 @@ def main():
 
     selected = [p for p in bank if (not args.only or p.name in [o.upper() for o in args.only])
                 and (not args.category or p.category == args.category)
-                and (not args.module or p.module == args.module)]
+                and (not args.module or p.module.startswith(args.module))]
     plans = {}
     plan = {"sampleRate": 48000, "presets": []}
     for p in selected:
