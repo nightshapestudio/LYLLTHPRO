@@ -37,7 +37,7 @@ final class DemoSongTests: XCTestCase {
         }
         // Everything melodic stays in F minor.
         let fMinor: Set<Int> = [5, 7, 8, 10, 0, 1, 3]
-        let melodic = ["SUB", "BASS", "STUTTER", "PAD", "SAWS", "ARP", "GLASS", "LEAD", "HOOK", "HOOK HIGH", "SCREAM", "PIANO"]
+        let melodic = ["SUB", "BASS", "STUTTER", "PAD", "SAWS", "WALL", "ARP", "GLASS", "LEAD", "HOOK", "HOOK HIGH", "SCREAM", "PIANO"]
         for part in LYDemoSong.parts where melodic.contains(part.name) {
             let outside = part.notes.filter { !fMinor.contains($0.pitch % 12) }
             XCTAssertTrue(outside.isEmpty, "\(part.name) has notes outside F minor: \(outside.map(\.pitch))")

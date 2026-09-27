@@ -41,28 +41,6 @@ def presets():
           "The scream lives at 2–4 kHz. Cut there on the guitars, not on this")
     out.append(p)
 
-    p = L("TORN SIREN", "SYNC_SWEEP", "BASIC")
-    p.osc(0, level=0.75, wt=0.3)
-    p.insert(1, "RING", after=True, amount=0.5, freq=0.625, mix=0.35)
-    p.filter("LP24", hz=4200, res=0.15, keytrack=0.4)
-    p.filter2("HP12", hz=200)
-    p.env(1, a=0.003, d=0.5, s=0.85, r=0.15)
-    p.env(3, a=0.001, d=0.6, s=0.2, r=0.2)
-    p.mod("ENV3", "A_WTPOS", 0.45)
-    mono(p, glide=0.06)
-    velocity(p, 0.5, 0.12)
-    vibrato(p)
-    p.tone("A_WTPOS", 0.2)
-    p.lfo(1, "SINE", hz=0.35, mode="TRIG")
-    p.set("macro2", 0.4)
-    p.motion("LFO1", "A_WTPOS", 0.2)
-    echo(p, time="1/8", mix=0.12, feedback=0.3, amount=0.12, pingpong=True)
-    grit(p, mode="HARD", drive=0.45, tone=0.5, amount=0.4, base=0.3)
-    p.doc("Hard-sync lead that rips on the attack, with a metal ring an octave up", "C3–C5",
-          "Industrial, synthwave, electro, game", "Short phrases; every note rips", "FOREGROUND",
-          "The rip is loud for a moment; a fast compressor on the lead evens it out")
-    out.append(p)
-
     p = L("GLASS NERVE", "BASIC", "BASIC")
     p.osc(0, level=0.75, wt=0.0)
     p.insert(1, "RECTIFY", after=True, amount=0.55, mix=0.5)

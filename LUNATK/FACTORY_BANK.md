@@ -1,6 +1,6 @@
 # LUNATK factory bank
 
-177 presets. Every one is rendered through the engine in a musical phrase and mixed against a reference arrangement, then gated on loudness, headroom, low end, top end, width, mono fold-down, tails, tuning, macro range, MOTION, velocity and CPU (`tools/lunatk_bank/build.py`).
+176 presets. Every one is rendered through the engine in a musical phrase and mixed against a reference arrangement, then gated on loudness, headroom, low end, top end, width, mono fold-down, tails, tuning, macro range, MOTION, velocity and CPU (`tools/lunatk_bank/build.py`).
 
 ## Macros (every preset)
 
@@ -43,7 +43,6 @@
 | Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
 |---|---|---|---|---|---|---|
 | **SCREAMING WIRE** | Saw lead through a resonant filter feeding back on itself: it screams as it opens | C3–C5 | FOREGROUND | Industrial rock, noise, trailer, cyberpunk | Held notes and slow melodies; mod wheel for vibrato | The scream lives at 2–4 kHz. Cut there on the guitars, not on this |
-| **TORN SIREN** | Hard-sync lead that rips on the attack, with a metal ring an octave up | C3–C5 | FOREGROUND | Industrial, synthwave, electro, game | Short phrases; every note rips | The rip is loud for a moment; a fast compressor on the lead evens it out |
 | **GLASS NERVE** | A pure sine that frays: a rectified octave edge and a copy shifted a few hertz off, beating slowly | C4–C6 | FOREGROUND | Film score, ambient, trip-hop, industrial ballads | Slow melodies with space between notes | Uneasy on purpose. MOTION 0 stops the drift; SPACE up for the score version |
 | **RUST HORN** | A breathy, rusted brass voice that opens into a vowel as it holds | C3–C5 | FOREGROUND | Industrial, darkwave, cinematic, doom | Slow swells and held melodies | The vowel sits where a singer does: use it instead of a vocal line, or duck it under one |
 | **DEAD FREQUENCY** | A lead through a broken radio: band-passed, crushed, with static that jumps in time | C3–C5 | FOREGROUND | Industrial, trip-hop, hip-hop, horror | Short melodic hooks | Band-passed, so it never clouds the lows; push it louder than you think |

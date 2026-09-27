@@ -55,6 +55,7 @@ enum LYDemoSong {
         /// LUNATK's MACRO 4 (GRIT): 0 is the preset as designed.
         var grit: Float = 0
         var fx: LYFXRack? = nil
+        var automation: [LYAutomationLane] = []
         var notes: [LYNote] = []
 
         mutating func add(_ pitch: Int, at beat: Double, length: Double, velocity: Int = 100) {
@@ -85,6 +86,7 @@ enum LYDemoSong {
         var pan: Double = 0
         var chokeGroup: Int? = nil
         var fx: LYFXRack? = nil
+        var automation: [LYAutomationLane] = []
         /// Velocity (0…1) by song step (a sixteenth).
         var hits: [Int: Double] = [:]
 
@@ -95,13 +97,13 @@ enum LYDemoSong {
     }
 
     static func drums() -> [DrumPart] {
-        var kick = DrumPart(name: "KICK", preset: "user_nit_kick", volumeDB: -9, fx: FX.kick)       // CHARGED KICK
-        var snare = DrumPart(name: "SNARE", preset: "user_nit_snare", volumeDB: -12, fx: FX.snare)  // CHARGED SNARE
-        var clap = DrumPart(name: "CLAP", preset: "clap_012", volumeDB: -15, pan: 0.05, fx: FX.tape(0.5))   // DARK CLAP
-        var hats = DrumPart(name: "HATS", preset: "closedhat_006", volumeDB: -20, pan: 0.2, fx: FX.tape(0.45))  // CHARCOAL
-        var shaker = DrumPart(name: "CHAINS", preset: "closedhat_017", volumeDB: -24, pan: -0.25)  // CHAINLINK
-        var metal = DrumPart(name: "METAL", preset: "perc_010", volumeDB: -19, pan: -0.1, fx: FX.decimated(0.35))   // METAL STAB
-        var impact = DrumPart(name: "IMPACT", preset: "tom_003", volumeDB: -14, fx: FX.tape(0.6))       // THUNDER
+        var kick = DrumPart(name: "KICK", preset: "user_nit_kick", volumeDB: -3, fx: FX.kick)       // CHARGED KICK
+        var snare = DrumPart(name: "SNARE", preset: "user_nit_snare", volumeDB: -6, fx: FX.snare)  // CHARGED SNARE
+        var clap = DrumPart(name: "CLAP", preset: "clap_012", volumeDB: -9, pan: 0.05, fx: FX.tape(0.5))   // DARK CLAP
+        var hats = DrumPart(name: "HATS", preset: "closedhat_006", volumeDB: -14, pan: 0.2, fx: FX.tape(0.45))  // CHARCOAL
+        var shaker = DrumPart(name: "CHAINS", preset: "closedhat_017", volumeDB: -18, pan: -0.25)  // CHAINLINK
+        var metal = DrumPart(name: "METAL", preset: "perc_010", volumeDB: -13, pan: -0.1, fx: FX.decimated(0.35))   // METAL STAB
+        var impact = DrumPart(name: "IMPACT", preset: "tom_003", volumeDB: -8, fx: FX.tape(0.6))       // THUNDER
 
         // Intro: the kick arrives half-way, then a pulse of hats.
         for bar in 4..<8 {
@@ -224,6 +226,7 @@ enum LYDemoSong {
         track.drumPresetID = part.preset
         track.chokeGroup = part.chokeGroup
         track.fx = part.fx
+        if !part.automation.isEmpty { track.automation = part.automation }
         return track
     }
 
@@ -231,44 +234,47 @@ enum LYDemoSong {
 
     static func bass() -> [Part] {
         var sub = Part(name: "SUB", sound: "WOUND SUB", volumeDB: -12, fx: FX.tape(0.35))
-        var drive = Part(name: "BASS", sound: "RUSTED PISTON", volumeDB: -13, grit: 0.45, fx: FX.amp(0.55))
+        var drive = Part(name: "BASS", sound: "CORRODE LINE", volumeDB: -13, grit: 0.4, fx: FX.amp(0.45))
         var stutter = Part(name: "STUTTER", sound: "SEIZURE", volumeDB: -16, grit: 0.5)
 
         func subRoot(_ root: Int) -> Int { root - 12 >= 26 ? root - 12 : root }
-
-        // Verses: long sub notes that push into the next bar.
-        for bar in barsOf(["VERSE 1", "VERSE 2"]) {
+        /// A bar of driving eighths on the root, the sub under the top line.
+        func eighths(_ bar: Int, velocity: Int, octaveOn: Set<Int> = [], rising: Bool = false) {
             let root = chord(at: bar).root
-            sub.add(subRoot(root), at: beat(bar), length: 3.4, velocity: 100)
-            sub.add(subRoot(root), at: beat(bar, 3.5), length: 0.45, velocity: 80)
-        }
-        // Pre-choruses: eighth-note drive builds under the sub.
-        for bar in barsOf(["PRE 1", "PRE 2"]) {
-            let root = chord(at: bar).root
-            sub.add(subRoot(root), at: beat(bar), length: 3.9, velocity: 100)
-            for e in 0..<8 { drive.add(root, at: beat(bar, Double(e) * 0.5), length: 0.4, velocity: 70 + e * 3) }
-        }
-        // Choruses: the driving eighths, octave on the and-of-4.
-        for bar in barsOf(["CHORUS 1", "CHORUS 2", "CHORUS 3"]) {
-            let root = chord(at: bar).root
-            sub.add(subRoot(root), at: beat(bar), length: 3.9, velocity: 104)
             for e in 0..<8 {
-                let octave = e == 7 || e == 3
-                drive.add(root + (octave ? 12 : 0), at: beat(bar, Double(e) * 0.5), length: 0.42, velocity: e % 2 == 0 ? 104 : 84)
+                let v = rising ? velocity - 20 + e * 4 : (e % 2 == 0 ? velocity : velocity - 18)
+                drive.add(root + (octaveOn.contains(e) ? 12 : 0), at: beat(bar, Double(e) * 0.5), length: 0.42, velocity: v)
+                sub.add(subRoot(root), at: beat(bar, Double(e) * 0.5), length: 0.42, velocity: e % 2 == 0 ? 104 : 88)
             }
         }
-        // Bridge: the stuttering bass carries it, two bars a chord.
+
+        // Verses: eighths, held back, the octave only at the end of the bar.
+        for bar in barsOf(["VERSE 1", "VERSE 2"]) { eighths(bar, velocity: 88, octaveOn: [7]) }
+        // Pre-choruses: the eighths dig in as the bar goes on.
+        for bar in barsOf(["PRE 1", "PRE 2"]) { eighths(bar, velocity: 96, rising: true) }
+        // Choruses: full drive, octave on the and-of-2 and the and-of-4.
+        for bar in barsOf(["CHORUS 1", "CHORUS 2", "CHORUS 3"]) { eighths(bar, velocity: 108, octaveOn: [3, 7]) }
+        // Bridge: the stuttering bass carries it over eighths on the sub.
         let bridge = section("BRIDGE")
         for bar in stride(from: bridge.bar, to: bridge.bar + bridge.bars, by: 2) {
+            stutter.add(chord(at: bar).root, at: beat(bar), length: 7.9, velocity: 112)
+        }
+        for bar in bridge.bar ..< bridge.bar + bridge.bars {
             let root = chord(at: bar).root
-            stutter.add(root, at: beat(bar), length: 7.9, velocity: 112)
-            sub.add(subRoot(root), at: beat(bar), length: 7.9, velocity: 96)
+            for e in 0..<8 { sub.add(subRoot(root), at: beat(bar, Double(e) * 0.5), length: 0.42, velocity: e % 2 == 0 ? 100 : 84) }
         }
         // Outro: the last roots, then silence.
         let outro = section("OUTRO")
         for bar in outro.bar ..< outro.bar + 4 {
             sub.add(subRoot(chord(at: bar).root), at: beat(bar), length: 3.8, velocity: 90 - (bar - outro.bar) * 8)
         }
+
+        // Bridge sweeps: the stutter opens from a closed lowpass across the
+        // bridge; the drive bass is thinned by a highpass into CHORUS 3.
+        stutter.fx = FX.filtered(stutter.fx, mode: .lowPass, resonance: 0.45)
+        stutter.automation = [Lanes.sweep(from: 0.18, to: 1, bars: bridge.bar ..< bridge.bar + bridge.bars)]
+        drive.fx = FX.filtered(drive.fx, mode: .highPass, resonance: 0.3)
+        drive.automation = [Lanes.sweep(from: 0, to: 0.55, bars: bridge.bar - 1 ..< section("CHORUS 3").bar, snapBack: 0)]
         return [sub, drive, stutter]
     }
 
@@ -276,9 +282,10 @@ enum LYDemoSong {
 
     static func harmony() -> [Part] {
         var pad = Part(name: "PAD", sound: "WET CONCRETE", volumeDB: -15, grit: 0.3, fx: FX.tape(0.4))
-        var saws = Part(name: "SAWS", sound: "NERVE FIELD", volumeDB: -11, grit: 0.55, fx: FX.tape(0.5))
+        var saws = Part(name: "SAWS", sound: "NERVE FIELD", volumeDB: -9, grit: 0.45, fx: FX.tape(0.5))
         var arp = Part(name: "ARP", sound: "MACHINE LOOM", volumeDB: -16, pan: 0.2, grit: 0.4)
-        var pluck = Part(name: "GLASS", sound: "RAZOR PLUCK", volumeDB: -15, pan: -0.25, grit: 0.4, fx: FX.decimated(0.25))
+        var wall = Part(name: "WALL", sound: "SLOW BLEED", volumeDB: -11, grit: 0.35, fx: FX.tape(0.45))
+        var pluck = Part(name: "GLASS", sound: "ICICLE", volumeDB: -12, pan: -0.25, fx: FX.shimmer)
 
         // Pad: under intro, verses, bridge and outro, a bar per chord.
         for bar in barsOf(["INTRO", "VERSE 1", "VERSE 2", "OUTRO"]) {
@@ -296,6 +303,19 @@ enum LYDemoSong {
             let c = chord(at: bar)
             saws.chord(c.voicing + [c.voicing[0] + 12], at: beat(bar), length: 3.95, velocity: 96)
         }
+        // The wall: a second supersaw that swells through each pre-chorus and
+        // lands an octave up on the chorus, over the saws.
+        for name in ["PRE 1", "PRE 2"] {
+            let s = section(name)
+            for bar in s.bar ..< s.bar + s.bars {
+                let rise = Double(bar - s.bar) / Double(max(s.bars - 1, 1))
+                wall.chord(chord(at: bar).voicing, at: beat(bar), length: 3.95, velocity: 50 + Int(rise * 60))
+            }
+        }
+        for bar in barsOf(["CHORUS 1", "CHORUS 2", "CHORUS 3"]) {
+            let v = chord(at: bar).voicing
+            wall.chord(v.map { $0 + 12 } + [v[0] + 24], at: beat(bar), length: 3.95, velocity: 112)
+        }
         // Arp: the chord held a bar at a time; the arpeggiator plays it on the grid.
         for bar in barsOf(["INTRO", "VERSE 1", "PRE 1", "VERSE 2", "PRE 2", "OUTRO"]) where !(bar < 2) {
             arp.chord(chord(at: bar).voicing, at: beat(bar), length: 3.98, velocity: bar < 8 ? 70 : 92)
@@ -308,7 +328,26 @@ enum LYDemoSong {
                 pluck.add(pitch, at: beat(bar, Double(e) * 0.5), length: 0.4, velocity: e % 2 == 0 ? 96 : 72)
             }
         }
-        return [pad, saws, arp, pluck]
+        // Bridge: the pad starts dark and opens into CHORUS 3.
+        pad.fx = FX.filtered(pad.fx, mode: .lowPass, resonance: 0.3)
+        pad.automation = [Lanes.sweep(from: 0.25, to: 1, bars: bridge.bar ..< bridge.bar + bridge.bars)]
+        // The wall's GRIT climbs through each pre-chorus and stays up for the chorus.
+        var grit: [(Double, Double)] = []
+        for name in ["PRE 1", "PRE 2"] {
+            let pre = section(name), chorus = pre.bar + pre.bars
+            grit += [(Double(pre.bar), 0.1), (Double(chorus), 0.6), (Double(chorus + 16), 0.6), (Double(chorus + 16) + 0.01, 0.1)]
+        }
+        let last = section("CHORUS 3")
+        grit += [(Double(last.bar - 2), 0.1), (Double(last.bar), 0.6)]
+        wall.automation = [Lanes.lane(.synth("macro4"), grit)]
+        // The glass throws into the reverb on the last bar of every chorus.
+        var sends: [(Double, Double)] = []
+        for name in ["CHORUS 1", "CHORUS 2", "CHORUS 3"] {
+            let c = section(name), last = Double(c.bar + c.bars - 1)
+            sends += [(last, 0.35), (last + 0.5, 0.8), (last + 1, 0.8), (last + 1.25, 0.35)]
+        }
+        pluck.automation = [Lanes.lane(.fx("reverb.send"), sends)]
+        return [pad, saws, wall, arp, pluck]
     }
 
     // MARK: Melody
@@ -358,10 +397,10 @@ enum LYDemoSong {
     ]
 
     static func melody() -> [Part] {
-        var voice = Part(name: "LEAD", sound: "DEAD FREQUENCY", volumeDB: -10, grit: 0.35)
-        var hookLead = Part(name: "HOOK", sound: "TORN SIREN", volumeDB: -5, grit: 0.45, fx: FX.amp(0.4))
-        var hookHigh = Part(name: "HOOK HIGH", sound: "CATHODE", volumeDB: -16, pan: 0.15, grit: 0.4)
-        var scream = Part(name: "SCREAM", sound: "SCREAMING WIRE", volumeDB: -14, grit: 0.6)
+        var voice = Part(name: "LEAD", sound: "DEAD FREQUENCY", volumeDB: -14, grit: 0.35)
+        var hookLead = Part(name: "HOOK", sound: "SHATTERED GLIDE", volumeDB: -13, grit: 0.2, fx: FX.tape(0.35))
+        var hookHigh = Part(name: "HOOK HIGH", sound: "CATHODE", volumeDB: -19, pan: 0.15, grit: 0.4)
+        var scream = Part(name: "SCREAM", sound: "SCREAMING WIRE", volumeDB: -16, grit: 0.6)
         var piano = Part(name: "PIANO", sound: "SCORCHED EP", volumeDB: -15, pan: -0.1, grit: 0.35)
 
         func play(_ phrase: Phrase, into part: inout Part, at bar: Int, transpose: Int = 0, velocity: Int = 100, until: Double = .infinity) {
@@ -440,6 +479,7 @@ enum LYDemoSong {
         if part.grit > 0 { patch?.set(LY_MACRO4, part.grit) }
         track.synth = patch
         track.fx = part.fx
+        if !part.automation.isEmpty { track.automation = part.automation }
         return track
     }
 
@@ -467,6 +507,24 @@ enum LYDemoSong {
         )
         session.mainFX = FX.main
         return session
+    }
+
+    // MARK: Automation
+
+    enum Lanes {
+        /// A filter cutoff moving straight across bars, and optionally
+        /// snapping to a value where the bars end.
+        static func sweep(from: Double, to: Double, bars: Range<Int>, snapBack: Double? = nil) -> LYAutomationLane {
+            var points = [LYAutomationPoint(beat: beat(bars.lowerBound), value: from),
+                          LYAutomationPoint(beat: beat(bars.upperBound) - 0.05, value: to)]
+            if let snapBack { points.append(LYAutomationPoint(beat: beat(bars.upperBound), value: snapBack)) }
+            return LYAutomationLane(target: .fx("filter.cutoff"), points: points)
+        }
+
+        /// Straight lines through (bar, value) pairs.
+        static func lane(_ target: LYAutomationTarget, _ points: [(Double, Double)]) -> LYAutomationLane {
+            LYAutomationLane(target: target, points: points.map { LYAutomationPoint(beat: $0.0 * 4, value: $0.1) })
+        }
     }
 
     // MARK: Effects
@@ -508,6 +566,34 @@ enum LYDemoSong {
             decimator.isBypassed = false
             rack.decimator = decimator
             rack.order = [.eq, .comp, .tape, .decim, .reverb]
+            return rack
+        }
+
+        /// Adds a FILTER insert, open, for a lane to sweep.
+        static func filtered(_ rack: LYFXRack?, mode: FilterMode, resonance: Float) -> LYFXRack {
+            var rack = rack ?? LYFXRack()
+            var filter = FilterState()
+            filter.mode = mode
+            filter.cutoff = mode == .highPass ? 0 : 1
+            filter.resonance = resonance
+            filter.isBypassed = false
+            rack.filter = filter
+            var order = rack.chain(isMain: false)
+            order.insert(.filter, at: order.firstIndex(of: .reverb) ?? order.endIndex)
+            rack.order = order
+            return rack
+        }
+
+        /// Glass on top: lows out, high mids and air up, into the reverb.
+        static var shimmer: LYFXRack {
+            var rack = LYFXRack()
+            var bands = LYFXRack.defaultBands
+            bands[0].gain = -8
+            bands[1].gain = -4
+            bands[3].gain = 5
+            bands[4].gain = 7
+            rack.eqBands = bands
+            rack.reverbSend = 0.35
             return rack
         }
 
@@ -554,7 +640,7 @@ enum LYDemoSong {
             rack.compressor = comp
             var finale = FinaleState()
             finale.mode = 2
-            finale.gainDb = 3
+            finale.gainDb = 6
             finale.isBypassed = false
             rack.finale = finale
             rack.order = [.eq, .comp, .tape, .reverb, .finale]
