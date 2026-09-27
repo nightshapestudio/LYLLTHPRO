@@ -331,7 +331,11 @@ struct WorkspaceView: View {
                                 currentStep: step,
                                 isPlaying: audio.isPlaying,
                                 waveformState: audio.engine.state.outputWaveformState,
-                                syncEngine: { audio.syncSequencer(document.session) }
+                                syncEngine: { audio.syncSequencer(document.session) },
+                                openSound: { id in
+                                    let isDrum = document.session.tracks.first { $0.id == id }?.kind == .drumkit
+                                    isDrum ? openDrums(id) : openSynth(id)
+                                }
                             )
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -593,7 +597,12 @@ struct WorkspaceView: View {
             openAutomationMenu: { trackID, laneID in
                 presentMenu(.automation(trackID, laneID), from: laneID.map { "auto.\($0)" } ?? "auto.add.\(trackID)")
             },
-            openSongFXMenu: { presentMenu(.songFX($0), from: "songfx") }
+            openSongFXMenu: { presentMenu(.songFX($0), from: "songfx") },
+            placePattern: {
+                document.session.placePatternInSong(document.session.activePatternIndex ?? 0)
+                audio.syncSequencer(document.session)
+                audio.syncTimeline(document.session, media: document.audioMediaStore)
+            }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -2682,6 +2691,7 @@ private struct SequencerWorkspace: View {
     let isPlaying: Bool
     @ObservedObject var waveformState: OutputWaveformState
     let syncEngine: () -> Void
+    var openSound: (UUID) -> Void = { _ in }
 
     @State private var selectedStep: LYSelectedSequenceStep?
     @State private var stepActionTarget: LYSelectedSequenceStep?
@@ -2799,7 +2809,8 @@ private struct SequencerWorkspace: View {
     }
 
     private var sequencerHeader: some View {
-        HStack(spacing: 10) {
+        let inSong = session.isPatternInSong(patternIndex)
+        return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("SEQUENCER")
                     .font(LYLLTHTheme.label(11, weight: .bold))
@@ -2824,8 +2835,16 @@ private struct SequencerWorkspace: View {
             HStack(spacing: 3) {
                 patternAction("plus", "NEW", help: "A new empty pattern on every track", action: { addPattern(copying: false) })
                 patternAction("plus.square.on.square", "DUPLICATE", help: "A new pattern that starts as a copy of this one", action: { addPattern(copying: true) })
-                patternAction("text.insert", "PLACE IN SONG", help: "Put this pattern at the end of the song, on every track", action: placeInSong)
+                patternAction("text.insert", inSong ? "PLACE AGAIN" : "PLACE IN SONG", help: "Put this pattern at the end of the song, on every track. SONG plays only what is placed.", action: placeInSong)
             }
+
+            Text(inSong ? "IN SONG" : "NOT IN SONG")
+                .font(LYLLTHTheme.label(7.5, weight: .bold))
+                .tracking(1.3)
+                .foregroundStyle(inSong ? LYLLTHTheme.teal : LYLLTHTheme.purple)
+                .lyBloom(LYLLTHTheme.purple, isOn: !inSong)
+                .fixedSize()
+                .help(inSong ? "This pattern plays in the song" : "SONG does not play this pattern until you PLACE IN SONG")
 
             Spacer(minLength: 8)
 
@@ -2915,10 +2934,14 @@ private struct SequencerWorkspace: View {
                         .font(LYLLTHTheme.label(10, weight: .bold))
                         .foregroundStyle(LYLLTHTheme.text)
                         .lineLimit(1)
-                    Text(track.isChordTrack == true ? "CHORD TRACK" : track.kind.label)
-                        .font(LYLLTHTheme.label(7, weight: .bold))
-                        .tracking(1.3)
-                        .foregroundStyle(LYLLTHTheme.dim)
+                    if let sound = LYDrumSounds.soundName(for: track) {
+                        LYTrackSoundButton(sound: sound, accent: accent) { openSound(track.id) }
+                    } else {
+                        Text(track.isChordTrack == true ? "CHORD TRACK" : track.kind.label)
+                            .font(LYLLTHTheme.label(7, weight: .bold))
+                            .tracking(1.3)
+                            .foregroundStyle(LYLLTHTheme.dim)
+                    }
                 }
                 Spacer(minLength: 3)
                 LYTrackToggle(
@@ -3234,29 +3257,7 @@ private struct SequencerWorkspace: View {
 
     /// Places the pattern being edited at the end of the song on every track.
     private func placeInSong() {
-        let beatsPerBar = max(1, Double(session.numerator) * 4 / Double(max(session.denominator, 1)))
-        let end = session.tracks.flatMap(\.clips).filter(\.isInSong).map { $0.startBeat + $0.lengthBeats }.max() ?? 0
-        let at = ceil(end / beatsPerBar - 0.000_1) * beatsPerBar
-        for trackIndex in musicalTrackIndices {
-            guard let clipIndex = activeClipIndex(trackIndex: trackIndex) else { continue }
-            let pattern = session.tracks[trackIndex].clips[clipIndex]
-            if pattern.isOffTimeline == true,
-               !session.tracks[trackIndex].clips.contains(where: { $0.patternSourceID == pattern.id }) {
-                // First use: the pattern itself goes into the song.
-                session.tracks[trackIndex].clips[clipIndex].isOffTimeline = nil
-                session.tracks[trackIndex].clips[clipIndex].startBeat = at
-            } else {
-                var placement = pattern
-                placement.id = UUID()
-                placement.patternSourceID = pattern.id
-                placement.steps = nil
-                placement.stepParameters = nil
-                placement.isOffTimeline = nil
-                placement.startBeat = at
-                placement.loopOffsetBeats = 0
-                session.tracks[trackIndex].clips.append(placement)
-            }
-        }
+        session.placePatternInSong(patternIndex)
         syncEngine()
     }
 

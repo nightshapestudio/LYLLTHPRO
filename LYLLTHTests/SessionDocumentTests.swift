@@ -533,3 +533,43 @@ final class SessionDocumentTests: XCTestCase {
         XCTAssertLessThan(peak, 0.2)
     }
 }
+
+@MainActor
+final class PatternPlacementTests: XCTestCase {
+    /// A session whose patterns were all made in the sequencer and never placed.
+    private func unplaced() -> LYLLTHSession {
+        var session = LYLLTHSession.starter()
+        for t in session.tracks.indices {
+            session.tracks[t].clips.removeAll { $0.isPlacement }
+            for c in session.tracks[t].clips.indices where session.tracks[t].clips[c].isSequenced {
+                session.tracks[t].clips[c].isOffTimeline = true
+            }
+        }
+        return session
+    }
+
+    func testUnplacedPatternsAreFlaggedAndPlacingThemFillsTheSong() {
+        var session = unplaced()
+        XCTAssertTrue(session.hasPatternsOutsideSong)
+        XCTAssertFalse(session.isPatternInSong(0))
+
+        session.placePatternInSong(0)
+
+        XCTAssertFalse(session.hasPatternsOutsideSong)
+        XCTAssertTrue(session.isPatternInSong(0))
+        let drums = session.tracks.filter { $0.kind == .drumkit }
+        XCTAssertFalse(drums.isEmpty)
+        XCTAssertTrue(drums.allSatisfy { !$0.songRegions.isEmpty })
+    }
+
+    func testPlacingAgainAddsAPlacementAfterTheFirst() {
+        var session = unplaced()
+        session.placePatternInSong(0)
+        session.placePatternInSong(0)
+        let kick = session.tracks.first { $0.kind == .drumkit }!
+        let regions = kick.songRegions.sorted { $0.startBeat < $1.startBeat }
+        XCTAssertEqual(regions.count, 2)
+        XCTAssertEqual(regions[1].patternSourceID, regions[0].id)
+        XCTAssertGreaterThanOrEqual(regions[1].startBeat, regions[0].startBeat + regions[0].lengthBeats - 0.001)
+    }
+}

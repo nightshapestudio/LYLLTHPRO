@@ -1285,3 +1285,62 @@ struct LYLLTHSession: Codable, Equatable {
         ]
     }
 }
+
+// MARK: - Patterns in the song
+
+extension LYLLTHSession {
+    private var sequencedTrackIndices: [Int] {
+        tracks.indices.filter { tracks[$0].kind == .drumkit || tracks[$0].kind == .instrument }
+    }
+
+    private func patternClipIndex(trackIndex: Int, pattern: Int) -> Int? {
+        let values = tracks[trackIndex].patternIndices
+        guard !values.isEmpty else { return nil }
+        return values[min(max(pattern, 0), values.count - 1)]
+    }
+
+    /// Whether pattern `index` plays anywhere in the song, on any track.
+    func isPatternInSong(_ index: Int) -> Bool {
+        sequencedTrackIndices.contains { trackIndex in
+            guard let clipIndex = patternClipIndex(trackIndex: trackIndex, pattern: index) else { return false }
+            let pattern = tracks[trackIndex].clips[clipIndex]
+            return pattern.isOffTimeline != true
+                || tracks[trackIndex].clips.contains { $0.patternSourceID == pattern.id && $0.isOffTimeline != true }
+        }
+    }
+
+    /// Patterns have steps but none of them are in the song, so SONG plays
+    /// nothing from the sequencer.
+    var hasPatternsOutsideSong: Bool {
+        let tracks = sequencedTrackIndices.map { self.tracks[$0] }
+        return tracks.allSatisfy { $0.songRegions.isEmpty }
+            && tracks.contains { $0.patterns.contains { ($0.steps ?? []).contains(true) } }
+    }
+
+    /// Places pattern `index` at the end of the song on every track.
+    mutating func placePatternInSong(_ index: Int) {
+        let beatsPerBar = max(1, Double(numerator) * 4 / Double(max(denominator, 1)))
+        let end = tracks.flatMap(\.clips).filter(\.isInSong).map { $0.startBeat + $0.lengthBeats }.max() ?? 0
+        let at = ceil(end / beatsPerBar - 0.000_1) * beatsPerBar
+        for trackIndex in sequencedTrackIndices {
+            guard let clipIndex = patternClipIndex(trackIndex: trackIndex, pattern: index) else { continue }
+            let pattern = tracks[trackIndex].clips[clipIndex]
+            if pattern.isOffTimeline == true,
+               !tracks[trackIndex].clips.contains(where: { $0.patternSourceID == pattern.id }) {
+                // First use: the pattern itself goes into the song.
+                tracks[trackIndex].clips[clipIndex].isOffTimeline = nil
+                tracks[trackIndex].clips[clipIndex].startBeat = at
+            } else {
+                var placement = pattern
+                placement.id = UUID()
+                placement.patternSourceID = pattern.id
+                placement.steps = nil
+                placement.stepParameters = nil
+                placement.isOffTimeline = nil
+                placement.startBeat = at
+                placement.loopOffsetBeats = 0
+                tracks[trackIndex].clips.append(placement)
+            }
+        }
+    }
+}

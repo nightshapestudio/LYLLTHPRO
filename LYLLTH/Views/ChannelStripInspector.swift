@@ -401,7 +401,7 @@ struct ChannelStripInspector: View {
             return feeds == 0 ? "NO INPUTS" : feeds == 1 ? "1 INPUT" : "\(feeds) INPUTS"
         case .drumkit, .instrument:
             if let synth = track.synth { return "LUNATK · " + synth.name }
-            if let drum = LYDrumSounds.preset(id: LYDrumSounds.presetID(for: track)) { return "DRUM · " + drum.name }
+            if let drum = LYDrumSounds.preset(for: track) { return "DRUM · " + drum.name }
             if track.isChordTrack == true { return "CHORD ENGINE" }
             return (track.synthPresetID ?? "SYNTH").uppercased()
         }

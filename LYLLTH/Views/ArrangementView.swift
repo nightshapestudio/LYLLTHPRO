@@ -25,6 +25,8 @@ struct ArrangementView: View {
     var openAutomationMenu: (UUID, UUID?) -> Void = { _, _ in }
     /// Opens a song FX move's editor.
     var openSongFXMenu: (UUID) -> Void = { _ in }
+    /// Places the pattern being edited at the end of the song.
+    var placePattern: () -> Void = {}
 
     @EnvironmentObject private var audio: AudioEngineController
 
@@ -586,6 +588,7 @@ struct ArrangementView: View {
                 number: index + 1,
                 name: track.name,
                 kind: track.isChordTrack == true ? "CHORD TRACK" : track.kind.label,
+                sound: LYDrumSounds.soundName(for: track),
                 accent: accent,
                 isSelected: selected,
                 isMuted: $session.tracks[index].isMuted,
@@ -641,6 +644,23 @@ struct ArrangementView: View {
                         .padding(.leading, 14)
                         .frame(height: laneHeight)
                         .allowsHitTesting(false)
+                }
+
+                if (track.kind == .drumkit || track.kind == .instrument) && track.isChordTrack != true
+                    && session.hasPatternsOutsideSong {
+                    HStack(spacing: 10) {
+                        Text("NOT IN SONG")
+                            .foregroundStyle(LYLLTHTheme.purple)
+                        Button(action: placePattern) {
+                            Text("PLACE PATTERN \(String(format: "%02d", (session.activePatternIndex ?? 0) + 1)) IN SONG")
+                        }
+                        .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.teal, compact: true))
+                        .help("SONG plays only patterns placed on the timeline")
+                    }
+                    .font(LYLLTHTheme.label(8, weight: .bold))
+                    .tracking(2)
+                    .padding(.leading, 14)
+                    .frame(height: laneHeight)
                 }
 
                 if track.kind == .audio && track.clips.isEmpty {
@@ -1160,6 +1180,8 @@ struct LYTrackHeader: View {
     let number: Int
     let name: String
     let kind: String
+    /// The drum sound or synth patch; clicking it opens the chooser.
+    var sound: String? = nil
     let accent: Color
     let isSelected: Bool
     @Binding var isMuted: Bool
@@ -1187,11 +1209,15 @@ struct LYTrackHeader: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(name)
-                Text(kind)
-                    .font(LYLLTHTheme.label(7, weight: .bold))
-                    .tracking(1.3)
-                    .foregroundStyle(LYLLTHTheme.dim)
-                    .lineLimit(1)
+                if let sound {
+                    LYTrackSoundButton(sound: sound, accent: accent, action: openInstrument)
+                } else {
+                    Text(kind)
+                        .font(LYLLTHTheme.label(7, weight: .bold))
+                        .tracking(1.3)
+                        .foregroundStyle(LYLLTHTheme.dim)
+                        .lineLimit(1)
+                }
             }
             .layoutPriority(1)
             Spacer(minLength: 4)
@@ -1239,6 +1265,32 @@ struct LYTrackHeader: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 5)
+    }
+}
+
+/// A track's sound name under its title. It is the way to change the sound,
+/// so it reads as a control: accent text with a chevron.
+struct LYTrackSoundButton: View {
+    let sound: String
+    let accent: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Text(sound)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 6, weight: .bold))
+            }
+            .font(LYLLTHTheme.label(7.5, weight: .bold))
+            .tracking(1)
+            .foregroundStyle(accent)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Change this track's sound")
     }
 }
 

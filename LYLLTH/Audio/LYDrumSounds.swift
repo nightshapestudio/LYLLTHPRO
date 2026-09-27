@@ -43,6 +43,15 @@ enum LYDrumSounds {
         return preset(id: id)
     }
 
+    /// What a track plays, named for its header: the drum sound or the
+    /// LUNATK patch. Nil for tracks with nothing to choose.
+    static func soundName(for track: LYTrack) -> String? {
+        if track.kind == .drumkit {
+            return track.samplePath == nil ? preset(for: track)?.name.uppercased() : nil
+        }
+        return track.synth.map { "LUNATK · " + $0.name.uppercased() }
+    }
+
     private static var folder: URL {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let url = base.appendingPathComponent("LYLLTH/DrumSynth", isDirectory: true)
