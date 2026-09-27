@@ -190,7 +190,7 @@ struct LFOState {
         case LY_LFO_SQUARE: return p < 0.5f ? 1.f : -1.f;
         case LY_LFO_SAMPLE_HOLD: return held;
         case LY_LFO_CUSTOM: {
-            const float position = p * LY_LFO_POINTS;
+            const float position = p * (float)LY_LFO_POINTS;
             const int i = std::min((int)position, LY_LFO_POINTS - 1);
             if (!smooth) return points[i];
             const float t = position - i;
@@ -854,7 +854,7 @@ void setDefaults(LYSynth *s) {
         set(b + (LY_LFO1_RATE - LY_LFO1_SHAPE), 0.4f);
         set(b + (LY_LFO1_SMOOTH - LY_LFO1_SHAPE), 1);
         for (int i = 0; i < LY_LFO_POINTS; ++i)
-            set(LY_LFO_POINTS_BASE + l * LY_LFO_POINTS + i, std::sin((float)kTwoPi * i / LY_LFO_POINTS));
+            set(LY_LFO_POINTS_BASE + l * LY_LFO_POINTS + i, std::sin((float)kTwoPi * i / (float)LY_LFO_POINTS));
     }
     set(LY_VOICES, 8); set(LY_MASTER, 0.8f); set(LY_BPM, 120);
     set(LY_GLIDE_ALWAYS, 1); set(LY_VEL_SENS, 0.8f);

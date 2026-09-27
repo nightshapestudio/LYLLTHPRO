@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 import NightshapeAudioEngine
-import AVFoundation
+@preconcurrency import AVFoundation
 import CryptoKit
 
 /// DrumKit's two transport modes. PATTERN loops the pattern being edited;
