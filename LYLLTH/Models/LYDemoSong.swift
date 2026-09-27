@@ -89,6 +89,8 @@ enum LYDemoSong {
         var automation: [LYAutomationLane] = []
         /// Velocity (0…1) by song step (a sixteenth).
         var hits: [Int: Double] = [:]
+        /// Per-step pitch, cutoff, pan and flam locks, by song step.
+        var locks: [Int: LYStepParameters] = [:]
 
         mutating func add(_ pitch: Int = 0, at beat: Double, length: Double = 0.25, velocity: Int = 100) {
             let step = Int((beat * 4).rounded())
@@ -104,6 +106,8 @@ enum LYDemoSong {
         var shaker = DrumPart(name: "CHAINS", preset: "closedhat_017", volumeDB: -18, pan: -0.25)  // CHAINLINK
         var metal = DrumPart(name: "METAL", preset: "perc_010", volumeDB: -13, pan: -0.1, fx: FX.decimated(0.35))   // METAL STAB
         var impact = DrumPart(name: "IMPACT", preset: "tom_003", volumeDB: -8, fx: FX.tape(0.6))       // THUNDER
+        // Short and tight; its own choke group so each hit cuts the last one's tail.
+        var roll = DrumPart(name: "ROLL", preset: "snare_024", volumeDB: -9, chokeGroup: 3, fx: FX.tape(0.4))  // RIVETER
 
         // Intro: the kick arrives half-way, then a pulse of hats.
         for bar in 4..<8 {
@@ -142,8 +146,23 @@ enum LYDemoSong {
                     snare.add(50, at: beat(bar, 3), length: 0.25, velocity: 104)
                     for e in 0..<16 { hats.add(60, at: beat(bar, Double(e) * 0.25), length: 0.08, velocity: e % 4 == 2 ? 70 : 36) }
                 } else {
-                    // A sixteenth roll that grows into the downbeat.
-                    for e in 0..<16 { snare.add(50, at: beat(bar, Double(e) * 0.25), length: 0.2, velocity: 36 + e * 5) }
+                    // The roll into the chorus: eighths, then sixteenths. No two
+                    // hits alike: pitch climbs five semitones, the filter opens,
+                    // the hands alternate a little left and right, the level
+                    // rises unevenly, and the last hit is flammed.
+                    let times = [0.0, 0.5, 1.0, 1.5] + (8..<16).map { Double($0) * 0.25 }
+                    let shape = [0.40, 0.34, 0.48, 0.42, 0.52, 0.46, 0.58, 0.55, 0.66, 0.62, 0.78, 0.92]
+                    for (n, t) in times.enumerated() {
+                        let step = Int((beat(bar, t) * 4).rounded())
+                        let progress = Double(n) / Double(times.count - 1)
+                        roll.add(50, at: beat(bar, t), length: 0.2, velocity: Int(shape[n] * 127))
+                        var lock = LYStepParameters.default
+                        lock.pitch = (progress * 5).rounded()
+                        lock.cutoff = 0.45 + progress * 0.45
+                        lock.pan = n % 2 == 0 ? -0.08 : 0.08
+                        lock.flam = n == times.count - 1 ? true : nil
+                        roll.locks[step] = lock
+                    }
                 }
             }
         }
@@ -186,7 +205,7 @@ enum LYDemoSong {
             kick.add(36, at: beat(bar), length: 0.25, velocity: 96 - (bar - outro.bar) * 10)
             snare.add(50, at: beat(bar, 2), length: 0.25, velocity: 90 - (bar - outro.bar) * 10)
         }
-        return [kick, snare, clap, hats, shaker, metal, impact]
+        return [kick, snare, clap, hats, shaker, metal, impact, roll]
     }
 
     /// A drum part as DrumKit pattern clips: a 4-bar (64-step) pattern per
@@ -206,6 +225,7 @@ enum LYDemoSong {
                 for i in 0..<(bars * 16) {
                     if let velocity = part.hits[firstBar * 16 + i] {
                         steps[i] = true
+                        if let lock = part.locks[firstBar * 16 + i] { locks[i] = lock }
                         locks[i].velocity = velocity
                     }
                 }
@@ -522,6 +542,7 @@ enum LYDemoSong {
         )
         mix(&session.tracks)
         session.mainFX = FX.main
+        glitches(&session)
         return session
     }
 
@@ -668,6 +689,16 @@ enum LYDemoSong {
             return rack
         }
 
+        /// FRACTURE engaged with an empty grid, placed before the reverb.
+        static func fractured(_ rack: LYFXRack?, isMain: Bool) -> LYFXRack {
+            var rack = rack ?? LYFXRack()
+            rack.fracture = .engagedEmpty
+            var order = rack.chain(isMain: isMain)
+            if !order.contains(.fracture) { order.insert(.fracture, at: order.firstIndex(of: .reverb) ?? order.endIndex) }
+            rack.order = order
+            return rack
+        }
+
         /// A track's high-pass, so only the kick, SUB and BASS own the bottom.
         static func lowCut(_ rack: LYFXRack?, _ hz: Float) -> LYFXRack {
             var rack = rack ?? LYFXRack()
@@ -695,6 +726,43 @@ enum LYDemoSong {
             rack.order = order
             return rack
         }
+    }
+
+    /// NIN-style damage on the song FX lane: FRACTURE moves at phrase ends and
+    /// section seams, never on a loop. Each target carries an engaged, empty
+    /// FRACTURE so it is silent between moves.
+    static func glitches(_ session: inout LYLLTHSession) {
+        func id(_ name: String) -> UUID? { session.tracks.first { $0.name == name }?.id }
+        let moves: [(SongFXMove, String?, Double, Double)] = [
+            (.reverse, nil, beat(7, 3), 1),                         // sucks back into VERSE 1
+            (.stutter, "LEAD", beat(11, 3.5), 0.5),                 // verse phrase endings
+            (.stutter, "LEAD", beat(19, 3.5), 0.5),
+            (.crush, "ARP", beat(section("PRE 1").bar + 6), 8),     // the arp rots into the chorus
+            (.gate, "SAWS", beat(section("CHORUS 1").bar + 15, 2), 2),
+            (.stutter, nil, beat(section("CHORUS 1").bar + 15, 3.5), 0.5),
+            (.reverse, "PIANO", beat(section("VERSE 2").bar + 3, 3), 1),
+            (.crush, "ARP", beat(section("PRE 2").bar + 6), 8),
+            (.stutter, "KICK", beat(section("BRIDGE").bar - 1, 3), 1),  // under the tape stop
+            (.crush, "STUTTER", beat(section("BRIDGE").bar + 4), 4),
+            (.stutter, "SCREAM", beat(section("BRIDGE").bar + 6, 3), 1),
+            (.drop, nil, beat(section("CHORUS 3").bar - 1, 3.5), 0.5),  // a hole before the last chorus
+            (.gate, "BASS", beat(section("CHORUS 3").bar + 7, 2), 2),
+            (.stutter, "HOOK", beat(section("CHORUS 3").bar + 11, 3), 1),
+            (.crush, "RADIO", beat(section("OUTRO").bar + 4), 8),
+        ]
+        var targets = Set<UUID>()
+        var blocks: [LYSongFXBlock] = []
+        for (move, name, start, length) in moves {
+            let target = name.flatMap(id)
+            if name != nil && target == nil { continue }
+            if let target { targets.insert(target) }
+            blocks.append(LYSongFXBlock(move: move, trackID: target, startBeat: start, lengthBeats: length, row: target == nil ? 1 : 0))
+        }
+        session.songFX = blocks
+        for i in session.tracks.indices where targets.contains(session.tracks[i].id) {
+            session.tracks[i].fx = FX.fractured(session.tracks[i].fx, isMain: false)
+        }
+        session.mainFX = FX.fractured(session.mainFX, isMain: true)
     }
 
     /// The mix pass: high-passes on everything above the bass, kick-keyed
