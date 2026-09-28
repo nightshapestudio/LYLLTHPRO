@@ -448,6 +448,27 @@ enum LYHelpLibrary {
     }
 }
 
+/// Help text with every run of digits in the NIGHTSHAPE number face, the
+/// one numbers use everywhere in the apps. Only digits switch, so periods
+/// and dashes in a sentence stay in the text's own face.
+private func numbered(_ string: String, _ font: Font, size: CGFloat) -> Text {
+    var result = Text("")
+    var run = ""
+    var runIsDigits = false
+    func flush() {
+        guard !run.isEmpty else { return }
+        result = result + Text(run).font(runIsDigits ? LYLLTHTheme.value(size) : font)
+        run = ""
+    }
+    for character in string {
+        let isDigit = character.isNumber
+        if isDigit != runIsDigits { flush(); runIsDigits = isDigit }
+        run.append(character)
+    }
+    flush()
+    return result
+}
+
 struct LYHelpCenterView: View {
     @State private var query = ""
     @State private var category: LYHelpCategory? = .start
@@ -507,7 +528,7 @@ struct LYHelpCenterView: View {
                     .foregroundStyle(query.isEmpty ? LYLLTHTheme.metadata : LYLLTHTheme.teal)
                 TextField("Search controls, tasks or problems", text: $query)
                     .textFieldStyle(.plain)
-                    .font(LYLLTHTheme.label(11))
+                    .font(LYLLTHTheme.body(12))
                     .foregroundStyle(LYLLTHTheme.text)
                     .focused($searchFocused)
                     .accessibilityLabel("Search LYLLTH Help")
@@ -613,8 +634,8 @@ struct LYHelpCenterView: View {
                         .font(LYLLTHTheme.label(11, weight: .bold))
                         .tracking(1.5)
                         .foregroundStyle(LYLLTHTheme.text)
-                    Text("Try the name of a control, a job such as ‘record vocals’, or a symptom such as ‘late take’. ")
-                        .font(LYLLTHTheme.label(11))
+                    numbered("Try the name of a control, a job such as ‘record vocals’, or a symptom such as ‘late take’.", LYLLTHTheme.body(12), size: 12)
+                        .lineSpacing(3)
                         .foregroundStyle(LYLLTHTheme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -639,13 +660,13 @@ struct LYHelpCenterView: View {
             selectedArticleID = article.id
         } label: {
             VStack(alignment: .leading, spacing: 6) {
-                Text(article.title)
-                    .font(LYLLTHTheme.label(11, weight: selected ? .bold : .medium))
+                numbered(article.title.uppercased(), LYLLTHTheme.label(10, weight: selected ? .bold : .medium), size: 10)
+                    .tracking(0.9)
                     .foregroundStyle(selected ? LYLLTHTheme.text : LYLLTHTheme.secondary)
                     .multilineTextAlignment(.leading)
-                Text(article.summary)
-                    .font(LYLLTHTheme.label(9.5))
+                numbered(article.summary, LYLLTHTheme.body(11.5), size: 11.5)
                     .foregroundStyle(LYLLTHTheme.metadata)
+                    .lineSpacing(2)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }
@@ -669,15 +690,14 @@ struct LYHelpCenterView: View {
                     .font(LYLLTHTheme.label(8.5, weight: .bold))
                     .tracking(2)
                     .foregroundStyle(LYLLTHTheme.teal)
-                Text(selectedArticle.title)
-                    .font(LYLLTHTheme.label(27, weight: .bold))
+                numbered(selectedArticle.title.uppercased(), LYLLTHTheme.label(26, weight: .bold), size: 26)
+                    .tracking(1)
                     .foregroundStyle(LYLLTHTheme.text)
                     .padding(.top, 8)
-                Text(selectedArticle.summary)
-                    .font(LYLLTHTheme.label(13))
+                numbered(selectedArticle.summary, LYLLTHTheme.body(15), size: 15)
                     .foregroundStyle(LYLLTHTheme.secondary)
                     .lineSpacing(4)
-                    .padding(.top, 9)
+                    .padding(.top, 10)
 
                 if selectedArticle.sections.count > 1 {
                     VStack(alignment: .leading, spacing: 8) {
@@ -688,8 +708,7 @@ struct LYHelpCenterView: View {
                         ForEach(selectedArticle.sections) { section in
                             HStack(spacing: 8) {
                                 Rectangle().fill(LYLLTHTheme.indigo).frame(width: 9, height: 1)
-                                Text(section.title)
-                                    .font(LYLLTHTheme.label(10.5))
+                                numbered(section.title, LYLLTHTheme.body(12.5), size: 12.5)
                                     .foregroundStyle(LYLLTHTheme.secondary)
                             }
                         }
@@ -719,9 +738,10 @@ struct LYHelpCenterView: View {
                                     category = item.category
                                     selectedArticleID = item.id
                                 } label: {
-                                    Text(item.title.uppercased())
-                                        .font(LYLLTHTheme.label(8.5, weight: .bold))
+                                    numbered(item.title.uppercased(), LYLLTHTheme.label(8.5, weight: .bold), size: 8.5)
                                         .tracking(0.6)
+                                        .lineLimit(1)
+                                        .fixedSize()
                                         .foregroundStyle(LYLLTHTheme.secondary)
                                         .padding(.horizontal, 10)
                                         .frame(height: 28)
@@ -748,28 +768,31 @@ struct LYHelpCenterView: View {
                 Text(String(format: "%02d", number))
                     .font(LYLLTHTheme.value(10))
                     .foregroundStyle(LYLLTHTheme.purple)
-                Text(section.title)
-                    .font(LYLLTHTheme.label(17, weight: .bold))
+                numbered(section.title.uppercased(), LYLLTHTheme.label(15, weight: .bold), size: 15)
+                    .tracking(0.9)
                     .foregroundStyle(LYLLTHTheme.text)
             }
             ForEach(Array(section.paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                Text(paragraph)
-                    .font(LYLLTHTheme.label(12))
+                numbered(paragraph, LYLLTHTheme.body(13.5), size: 13.5)
                     .foregroundStyle(LYLLTHTheme.secondary)
                     .lineSpacing(5)
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(Array(section.steps.enumerated()), id: \.offset) { index, step in
-                HStack(alignment: .top, spacing: 11) {
+                // The box is centered on the capitals of the step's first line,
+                // whatever its font size, so number and text read level.
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text("\(index + 1)")
-                        .font(LYLLTHTheme.value(9))
+                        .font(LYLLTHTheme.value(11))
                         .foregroundStyle(LYLLTHTheme.teal)
-                        .frame(width: 18, height: 18)
+                        .frame(width: 20, height: 20)
                         .overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.65), lineWidth: 1))
-                    Text(step)
-                        .font(LYLLTHTheme.label(11.5))
+                        .alignmentGuide(.firstTextBaseline) { box in
+                            box.height / 2 + Self.stepSize * Self.interCapHeight / 2
+                        }
+                    numbered(step, LYLLTHTheme.body(Self.stepSize), size: Self.stepSize)
                         .foregroundStyle(LYLLTHTheme.secondary)
-                        .lineSpacing(4)
+                        .lineSpacing(5)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -783,6 +806,10 @@ struct LYHelpCenterView: View {
         .padding(.top, 28)
     }
 
+    private static let stepSize: CGFloat = 13.5
+    /// Inter's capital height as a fraction of its point size.
+    private static let interCapHeight: CGFloat = 0.727
+
     private func callout(_ label: String, _ body: String, color: Color) -> some View {
         HStack(alignment: .top, spacing: 11) {
             Rectangle().fill(color).frame(width: 2)
@@ -791,10 +818,9 @@ struct LYHelpCenterView: View {
                     .font(LYLLTHTheme.label(8, weight: .bold))
                     .tracking(1.6)
                     .foregroundStyle(color)
-                Text(body)
-                    .font(LYLLTHTheme.label(10.5))
+                numbered(body, LYLLTHTheme.body(12.5), size: 12.5)
                     .foregroundStyle(LYLLTHTheme.secondary)
-                    .lineSpacing(3)
+                    .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

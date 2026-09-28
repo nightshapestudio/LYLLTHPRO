@@ -73,6 +73,20 @@ enum LYLLTHTheme {
         }
     }
 
+    /// Reading text: sentences in Help and anywhere prose runs longer than a
+    /// label. Adam is the display face for short uppercase labels; in long
+    /// lowercase lines its rounded letters read as a novelty face.
+    static func body(_ size: CGFloat = 12, weight: Font.Weight = .regular) -> Font {
+        switch weight {
+        case .medium:
+            return .custom("Inter-Medium", size: size)
+        case .semibold, .bold, .heavy, .black:
+            return .custom("Inter-SemiBold", size: size)
+        default:
+            return .custom("Inter-Regular", size: size)
+        }
+    }
+
     /// The single numeric-readout face used across NIGHTSHAPE products.
     /// Labels stay in Adam; reported values use the quiet, thin SF display cut
     /// with fixed-width figures so changing values never shift laterally.
