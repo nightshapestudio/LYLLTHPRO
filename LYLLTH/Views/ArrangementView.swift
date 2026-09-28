@@ -42,6 +42,7 @@ struct ArrangementView: View {
     @State private var dropTargetTrackID: UUID?
     @State private var loopDrag: LoopDrag?
     @State private var lastBraceClick = Date.distantPast
+    @State private var horizontalScrollOffset: CGFloat = 0
 
     private enum LoopDrag {
         case create(anchor: Double)
@@ -93,6 +94,7 @@ struct ArrangementView: View {
                             beats: beats,
                             beatsPerBar: beatsPerBar,
                             snap: { snapBeat($0, $0) },
+                            headerOffset: horizontalScrollOffset,
                             openEditor: openSongFXMenu
                         )
                         ForEach(visibleTrackIndices, id: \.self) { index in
@@ -110,6 +112,14 @@ struct ArrangementView: View {
                         alignment: .topLeading
                     )
                     .overlay(alignment: .topLeading) { cursors }
+                    .background {
+                        LYArrangementScrollOffsetReader { offset in
+                            let x = max(0, offset.x)
+                            if abs(x - horizontalScrollOffset) > 0.25 {
+                                horizontalScrollOffset = x
+                            }
+                        }
+                    }
                 }
                 .lyScrollers()
                 .defaultScrollAnchor(.topLeading)
@@ -455,6 +465,8 @@ struct ArrangementView: View {
             .padding(.horizontal, 14)
             .frame(width: headerWidth, height: rulerHeight)
             .background(LYLLTHTheme.deck)
+            .offset(x: horizontalScrollOffset)
+            .zIndex(10)
 
             ZStack(alignment: .topLeading) {
                 Canvas { context, size in
@@ -638,6 +650,8 @@ struct ArrangementView: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { track.kind == .drumkit ? openDrums(track.id) : openSynth(track.id) }
             .onTapGesture { selectedTrackID = track.id }
+            .offset(x: horizontalScrollOffset)
+            .zIndex(10)
 
             ZStack(alignment: .topLeading) {
                 BeatGrid(
@@ -812,6 +826,8 @@ struct ArrangementView: View {
                             }
                         )
                         .frame(width: headerWidth, height: automationHeight)
+                        .offset(x: horizontalScrollOffset)
+                        .zIndex(10)
                         LYAutomationLaneView(
                             lane: binding,
                             accent: accent,
@@ -848,6 +864,8 @@ struct ArrangementView: View {
                 .lyMenuAnchor("auto.add.\(track.id)")
                 .padding(.leading, 18)
                 .frame(width: headerWidth, height: 30, alignment: .leading)
+                .offset(x: horizontalScrollOffset)
+                .zIndex(10)
                 if (track.automation ?? []).isEmpty {
                     Text("PICK VOLUME, PAN, A SEND, AN EFFECT OR A LUNATK KNOB · CLICK THE LANE TO ADD POINTS")
                         .font(LYLLTHTheme.label(7, weight: .bold))
@@ -1223,6 +1241,73 @@ struct ArrangementView: View {
             beatWidth: Double(beatWidth),
             overrideMode: flags.contains(.control) ? .division : nil
         )
+    }
+}
+
+/// Reads the enclosing AppKit scroll view directly. SwiftUI geometry preferences
+/// can stop updating once a large lazy stack has moved completely off-screen;
+/// the clip view's bounds remain authoritative at every horizontal position.
+private struct LYArrangementScrollOffsetReader: NSViewRepresentable {
+    let onChange: (CGPoint) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onChange: onChange)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            context.coordinator.attach(from: view)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onChange = onChange
+        context.coordinator.attach(from: nsView)
+    }
+
+    final class Coordinator: NSObject {
+        var onChange: (CGPoint) -> Void
+        private weak var clipView: NSClipView?
+
+        init(onChange: @escaping (CGPoint) -> Void) {
+            self.onChange = onChange
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        func attach(from view: NSView) {
+            var ancestor: NSView? = view
+            while let current = ancestor {
+                if let scrollView = current as? NSScrollView {
+                    observe(scrollView.contentView)
+                    return
+                }
+                ancestor = current.superview
+            }
+        }
+
+        private func observe(_ candidate: NSClipView) {
+            guard clipView !== candidate else { return }
+            NotificationCenter.default.removeObserver(self)
+            clipView = candidate
+            candidate.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(boundsDidChange(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: candidate
+            )
+            onChange(candidate.bounds.origin)
+        }
+
+        @objc private func boundsDidChange(_ notification: Notification) {
+            guard let clipView else { return }
+            onChange(clipView.bounds.origin)
+        }
     }
 }
 

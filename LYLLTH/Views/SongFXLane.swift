@@ -13,6 +13,7 @@ struct LYSongFXLane: View {
     let beats: Int
     let beatsPerBar: Double
     let snap: (Double) -> Double
+    let headerOffset: CGFloat
     let openEditor: (UUID) -> Void
 
     static let rowHeight: CGFloat = 22
@@ -35,6 +36,8 @@ struct LYSongFXLane: View {
             .frame(width: headerWidth, height: height, alignment: .leading)
             .background(LYLLTHTheme.deck)
             .lyMenuAnchor("songfx")
+            .offset(x: headerOffset)
+            .zIndex(10)
 
             ZStack(alignment: .topLeading) {
                 Rectangle()
