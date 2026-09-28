@@ -81,7 +81,7 @@ final class LYBounce: ObservableObject {
             phase = .failed(error.localizedDescription.uppercased())
             return
         }
-        audio.togglePlayback()
+        audio.playSongFromStart()
         startedAt = Date()
         let total = songSeconds + Self.tailSeconds
         phase = .running(elapsed: 0, total: total, kind: kind.title)

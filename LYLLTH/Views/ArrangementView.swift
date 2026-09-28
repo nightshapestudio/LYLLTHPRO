@@ -39,7 +39,12 @@ struct ArrangementView: View {
     @State private var selectedClipID: UUID?
     @State private var pinchStartZoom: Double?
     @State private var viewportSize: CGSize = .zero
-    @State private var editCursorBeat = 0.0
+    /// The play and edit cursor: PLAY starts here, splits and pastes land
+    /// here. Kept by the audio controller so the transport can read it.
+    private var editCursorBeat: Double {
+        get { audio.cursorBeat }
+        nonmutating set { audio.cursorBeat = newValue }
+    }
     @State private var copiedAudioEvent: LYClip?
     @State private var dropTargetTrackID: UUID?
     @State private var loopDrag: LoopDrag?
@@ -523,11 +528,12 @@ struct ArrangementView: View {
                         guard !wasDrag else { return }
                         if !handleBraceClick(value) {
                             let raw = Double(value.location.x / max(beatWidth, 1))
-                            editCursorBeat = min(max(0, snapBeat(raw, raw)), Double(beats))
+                            // During playback the song jumps here.
+                            audio.movePlayCursor(to: min(max(0, snapBeat(raw, raw)), Double(beats)))
                         }
                     }
             )
-            .help("Drag in the ruler to draw, move or resize the loop. Double-click the loop to remove it. Click outside it to place the edit cursor.")
+            .help("Drag in the ruler to draw, move or resize the loop. Double-click the loop to remove it. Click outside it to move the play cursor; while playing, the song jumps there.")
         }
         .background(LYLLTHTheme.deck)
         .overlay(alignment: .bottom) { LYHairline(color: LYLLTHTheme.lineStrong) }
@@ -682,7 +688,8 @@ struct ArrangementView: View {
                             selectedTrackID = track.id
                             selectedClipID = nil
                             let raw = Double(value.location.x / max(beatWidth, 1))
-                            editCursorBeat = min(max(0, snapBeat(raw, raw)), Double(beats))
+                            // During playback the song jumps here.
+                            audio.movePlayCursor(to: min(max(0, snapBeat(raw, raw)), Double(beats)))
                         })
                 )
 

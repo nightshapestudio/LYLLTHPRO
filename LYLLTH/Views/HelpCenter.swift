@@ -205,9 +205,10 @@ enum LYHelpLibrary {
                     section("Commit only when ready", "Keep the event flexible while arranging. Consolidate after pitch, fades and timing are approved.", tip: "For sustained pads and ambience, TEMPO often sounds more natural than forcing every detected movement onto the beat grid.")
                 ]),
         article("transport-loop", .arrange, "Use the transport, loop and count-in", "Control playback and define the range used by punch, takes and export.",
-                keywords: ["play", "stop", "space", "metronome", "click", "count", "loop brace", "tempo"], related: ["record-audio", "punch-takes", "export-mix"],
+                keywords: ["play", "stop", "space", "metronome", "click", "count", "loop brace", "tempo", "playhead", "play cursor", "start position", "jump"], related: ["record-audio", "punch-takes", "export-mix"],
                 sections: [
-                    section("Playback", "Press Space to play or stop. The stop control returns to the start. SONG plays the arrangement; PATTERN loops the pattern open in SEQUENCER."),
+                    section("Playback", "Press Space to play or stop. SONG plays the arrangement; PATTERN loops the pattern open in SEQUENCER."),
+                    section("Where the song starts", steps: ["Click the ruler, or an empty part of a lane, to put the purple play cursor there.", "Press Space. The song starts at the cursor.", "Click somewhere else while it plays and the song jumps there straight away."], tip: "Stopping leaves the cursor where it was, so Space plays the same passage again. Click near bar 1 to start from the top.", note: "With LOOP on, the song plays inside the loop. A cursor outside the loop starts at the loop's beginning."),
                     section("Loop range", "Turn LOOP on to cycle the brace in the arrangement ruler. If no brace exists, LYLLTH starts with the first four bars. The same range can define punch recording and a limited export."),
                     section("Click and count", "CLICK turns on the metronome. COUNT adds a one-bar lead-in before recording. Set tempo before tracking time-sensitive audio whenever possible.", tip: "Use count-in for the first take and a quiet lead-in on later punches; the performer hears context without recording over it.")
                 ]),

@@ -542,9 +542,40 @@ final class AudioEngineController: ObservableObject {
         instruments[trackID]
     }
 
+    /// The play cursor in ARRANGE, in song beats: where PLAY starts the song.
+    @Published var cursorBeat = 0.0
+
+    /// PLAY / STOP. In the song, play starts at the play cursor.
     func togglePlayback() {
         guard engine.isReady else { return }
-        engine.toggleTransport()
+        if isPlaying || transportMode != .song {
+            engine.toggleTransport()
+        } else {
+            engine.startTransport(fromStep: step(forSongBeat: cursorBeat))
+        }
+    }
+
+    /// Plays the song from the top of its window, whatever the cursor says.
+    /// For bounces, which must always start at the beginning.
+    func playSongFromStart() {
+        guard engine.isReady, !isPlaying else { return }
+        engine.startTransport(fromStep: 0)
+    }
+
+    /// Moves the play cursor. While the song plays, playback jumps there.
+    func movePlayCursor(to beat: Double) {
+        cursorBeat = max(0, beat)
+        guard engine.isReady, isPlaying, transportMode == .song else { return }
+        engine.startTransport(fromStep: step(forSongBeat: cursorBeat))
+    }
+
+    /// Transport steps from the song window's start to a song beat. Outside
+    /// the window (a cursor past the end, or outside the loop) it starts at
+    /// the window's start.
+    private func step(forSongBeat beat: Double) -> Int64 {
+        let window = songWindow
+        guard beat >= window.startBeat, beat < window.endBeat else { return 0 }
+        return Int64(((beat - window.startBeat) / lyBeatsPerStep + 0.000_1).rounded(.down))
     }
 
     /// Stops the song without silencing what is still ringing, for the end
