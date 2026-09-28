@@ -231,6 +231,8 @@ private enum LYWorkspaceMenu: Equatable {
     case automation(UUID, UUID?)
     /// Edit one song FX move.
     case songFX(UUID)
+    /// Drum kits.
+    case kits
 }
 
 private struct LYAudioImportTarget {
@@ -273,6 +275,8 @@ struct WorkspaceView: View {
     @State private var pianoRollClip: (track: UUID, clip: UUID)?
     @State private var sirenClip: (track: UUID, clip: UUID)?
     @State private var drumTrackID: UUID?
+    /// The DRUM SYNTH page is open; `drumTrackID` is where LOAD puts sounds.
+    @State private var drumSynthOpen = false
     @State private var bounce = LYBounce()
     @State private var engineSync = LYCoalescedSync()
     @State private var recorder = LYRecorder()
@@ -327,7 +331,10 @@ struct WorkspaceView: View {
                         openTrackMenu: { presentMenu(.addTrack, from: "stripTrack") },
                         export: presentExport,
                         openHelp: { openWindow(id: "lyllth-help") },
-                        openSettings: { openSettings() }
+                        openSettings: { openSettings() },
+                        kitName: currentKitName,
+                        openKits: { presentMenu(.kits, from: "stripKit") },
+                        openDrumSynth: { openDrums(nil) }
                     )
 
                 HStack(spacing: 0) {
@@ -377,6 +384,8 @@ struct WorkspaceView: View {
                                 isPlaying: audio.isPlaying,
                                 waveformState: audio.engine.state.outputWaveformState,
                                 syncEngine: { audio.syncSequencer(document.session) },
+                                kitName: currentKitName,
+                                openKits: { presentMenu(.kits, from: "seqKit") },
                                 openSound: { id in
                                     let isDrum = document.session.tracks.first { $0.id == id }?.kind == .drumkit
                                     isDrum ? openDrums(id) : openSynth(id)
@@ -672,7 +681,7 @@ struct WorkspaceView: View {
             acceptsRightClicks: {
                 // Nothing floating over the arrangement.
                 activeMenu == nil && fxRequest == nil && fxPickerTarget == nil && synthTrackID == nil
-                    && pianoRollClip == nil && sirenClip == nil && drumTrackID == nil
+                    && pianoRollClip == nil && sirenClip == nil && !drumSynthOpen
                     && audioUnits.editor == nil && recoveryCandidate == nil && !showTyping
             }
         )
@@ -1353,33 +1362,45 @@ struct WorkspaceView: View {
         }
     }
 
-    private func openDrums(_ trackID: UUID) {
-        guard document.session.tracks.contains(where: { $0.id == trackID && $0.kind == .drumkit }) else { return }
-        selectedTrackID = trackID
-        withAnimation(LYLLTHTheme.settle) { drumTrackID = trackID }
+    /// Opens DRUM SYNTH, loading into `trackID`, or into the selected drum
+    /// track (else the first) when none is given.
+    private func openDrums(_ trackID: UUID?) {
+        let drums = document.session.tracks.filter { $0.kind == .drumkit && $0.samplePath == nil }
+        let target = trackID.flatMap { id in drums.first { $0.id == id } }
+            ?? drums.first { $0.id == selectedTrackID } ?? drums.first
+        if let target { selectedTrackID = target.id }
+        drumTrackID = target?.id
+        withAnimation(LYLLTHTheme.settle) { drumSynthOpen = true }
+    }
+
+    /// The loaded kit's name, or what the drums are when no kit matches.
+    private var currentKitName: String {
+        if LYDrumKitLibrary.drumTrackIndices(in: document.session).isEmpty { return "NO DRUMS" }
+        return LYDrumKitLibrary.loadedKit(in: document.session, among: LYDrumKitLibrary.factory + LYDrumKitLibrary.userKits())?.name ?? "CUSTOM"
     }
 
     @ViewBuilder
     private var drumBrowserOverlay: some View {
-        if let trackID = drumTrackID, let track = document.session.tracks.first(where: { $0.id == trackID }) {
-            let close = { withAnimation(LYLLTHTheme.snap) { drumTrackID = nil } }
+        if drumSynthOpen {
+            let close = { withAnimation(LYLLTHTheme.snap) { drumSynthOpen = false } }
             GeometryReader { geo in
                 LYFloatingWindow(
-                    id: "drums",
-                    title: "DRUM SYNTH  ·  " + track.name,
+                    id: "drumsynth",
+                    title: "DRUM SYNTH",
                     accent: LYLLTHTheme.teal,
-                    size: CGSize(width: min(geo.size.width - 40, 980), height: min(geo.size.height - 60, 680)),
+                    size: CGSize(width: min(geo.size.width - 32, 1320), height: min(geo.size.height - 56, 800)),
                     close: close
                 ) {
-                    LYDrumSoundBrowser(
-                        trackName: track.name,
-                        currentID: LYDrumSounds.presetID(for: track),
+                    LYDrumSynthPage(
+                        tracks: document.session.tracks.filter { $0.kind == .drumkit && $0.samplePath == nil },
+                        initialTrackID: drumTrackID,
                         audition: { audio.auditionDrum($0) },
-                        load: { preset in
+                        load: { trackID, preset, custom in
                             guard let index = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+                            document.session.tracks[index].customDrumPreset = custom ? preset : nil
                             document.session.tracks[index].drumPresetID = preset.id
-                        },
-                        close: close
+                            drumTrackID = trackID
+                        }
                     )
                 }
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
@@ -1883,6 +1904,12 @@ struct WorkspaceView: View {
                             // Let the menu close before a save panel opens.
                             DispatchQueue.main.async { runExport(choice) }
                         },
+                        close: dismissMenu
+                    )
+                case .kits:
+                    LYKitPanel(
+                        session: document.session,
+                        loadKit: { kit in LYDrumKitLibrary.load(kit, into: &document.session) },
                         close: dismissMenu
                     )
                 case .project:
@@ -2564,6 +2591,9 @@ struct WorkspaceStrip: View {
     let export: () -> Void
     let openHelp: () -> Void
     let openSettings: () -> Void
+    var kitName = ""
+    var openKits: () -> Void = {}
+    var openDrumSynth: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 14) {
@@ -2602,6 +2632,32 @@ struct WorkspaceStrip: View {
             .help(isSaved ? "Song: new, open, save, DrumKit .fkit, export" : "This song has never been saved. Open this menu and choose SAVE")
 
             LYViewSwitch(activeWorkspace: $activeWorkspace)
+
+            // The drums, one click from anywhere: swap the whole kit, or open
+            // the synth that makes every sound.
+            HStack(spacing: 4) {
+                Button(action: openKits) {
+                    HStack(spacing: 6) {
+                        Text("KIT")
+                            .foregroundStyle(LYLLTHTheme.teal)
+                        Text(kitName)
+                            .foregroundStyle(LYLLTHTheme.text)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+                    }
+                }
+                .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.teal, compact: true))
+                .lyMenuAnchor("stripKit")
+                .help("Swap every drum sound at once. Patterns, levels and effects stay.")
+                Button(action: openDrumSynth) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "waveform.path").font(.system(size: 9, weight: .bold))
+                        Text("DRUM SYNTH")
+                    }
+                }
+                .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.teal, compact: true))
+                .help("Browse, shape and load every drum sound")
+            }
 
             Text(activeWorkspace == "PATTERN"
                  ? "LOOPS ONE PATTERN  ·  NEW, DUPLICATE, PLACE IN SONG"
@@ -3117,6 +3173,8 @@ private struct SequencerWorkspace: View {
     let isPlaying: Bool
     @ObservedObject var waveformState: OutputWaveformState
     let syncEngine: () -> Void
+    var kitName = ""
+    var openKits: () -> Void = {}
     var openSound: (UUID) -> Void = { _ in }
 
     @State private var selectedStep: LYSelectedSequenceStep?
@@ -3250,6 +3308,17 @@ private struct SequencerWorkspace: View {
                 .tracking(1)
                 .foregroundStyle(LYLLTHTheme.dim)
             }
+
+            Button(action: openKits) {
+                HStack(spacing: 6) {
+                    Text("KIT").foregroundStyle(LYLLTHTheme.teal)
+                    Text(kitName).foregroundStyle(LYLLTHTheme.text).lineLimit(1)
+                    Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+                }
+            }
+            .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.teal, compact: true))
+            .lyMenuAnchor("seqKit")
+            .help("Swap every drum sound at once. Patterns, levels and effects stay.")
 
             HStack(spacing: 3) {
                 ForEach(0..<patternCount, id: \.self) { index in

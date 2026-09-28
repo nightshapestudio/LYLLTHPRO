@@ -46,6 +46,14 @@ targets:
         group: DrumKitShared
       - path: ../nightshape-drumkit-ios/Views/Components/FXWindowsMore.swift
         group: DrumKitShared
+      # DrumKit's drum synth editors and kit library, for LYLLTH's DRUM SYNTH
+      # page and KITS: the same curves, the same factory kits.
+      - path: ../nightshape-drumkit-ios/Views/Components/DrumSynthShapeEditor.swift
+        group: DrumKitShared
+      - path: ../nightshape-drumkit-ios/Views/Components/DrumSynthFilterEditor.swift
+        group: DrumKitShared
+      - path: ../nightshape-drumkit-ios/Services/DrumKitLibrary.swift
+        group: DrumKitShared
       - path: ../nightshape-drumkit-ios/Views/Components/CompressorWindowView.swift
         group: DrumKitShared
       - path: ../nightshape-drumkit-ios/Views/Components/ExperimentalFXNavigation.swift

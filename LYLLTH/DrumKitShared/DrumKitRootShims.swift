@@ -21,6 +21,13 @@ enum NightshapeHaptics {
     static func destructive() {}
 }
 
+/// The iPhone's selection tick, for the shared drum synth editors: a light
+/// trackpad bump on a Force Touch trackpad, nothing otherwise.
+final class UISelectionFeedbackGenerator {
+    func prepare() {}
+    func selectionChanged() { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+}
+
 extension View {
     /// Copied from DrumKit's root view so shared panels keep the same frame.
     func nightshapePremiumPanelChrome(accent: Color) -> some View {

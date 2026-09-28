@@ -139,12 +139,20 @@ enum LYHelpLibrary {
                     section("Start clean", "NEW creates an empty pattern on every track. This is useful for breakdowns and song sections that should not inherit the previous groove."),
                     section("Edit from the arrangement", "Double-click a pattern region, or select it and press Return, to open that pattern in SEQUENCER. Press Command-2 when you are ready to return to the song.")
                 ]),
-        article("drum-sounds", .create, "Choose and shape drum sounds", "Load DrumKit sounds and keep the kit working as one instrument.",
-                keywords: ["drum synth", "sound browser", "kit", "preset", "audition"], related: ["sequencer", "nightshape-effects", "drumkit-continuity"],
+        article("drum-sounds", .create, "Choose and shape drum sounds", "Swap the whole kit, or open the synth behind every drum sound.",
+                keywords: ["drum synth", "sound browser", "kit", "kits", "preset", "audition", "change drum sound", "drum sounds", "noir signal", "save kit"], related: ["drum-kits", "sequencer", "drumkit-continuity"],
                 sections: [
-                    section("Choose a sound", steps: ["Select a drum track.", "Open NIGHTSHAPE in the LIBRARY or click the track’s sound name.", "Click a sound to audition it; double-click to load it on the selected track."]),
-                    section("Judge it in the pattern", "A solo preview tells you the color. The pattern tells you whether the transient, body and decay leave room for the rest of the kit."),
-                    section("Keep useful range", "Pitch, level and filter changes at the step level are best for variation. Use the sound editor for the track’s core identity, then use the mixer to place it in the song.", tip: "Make the kick and bass agree before adding width or long ambience to the rest of the kit.")
+                    section("Open DRUM SYNTH", "Click DRUM SYNTH in the strip at the top of the window, or click a drum track's sound name under the track name. Opening it from a track sets LOAD INTO to that track."),
+                    section("Find a sound", steps: ["Pick a category on the left: KICK, SNARE, CLOSED HAT and so on.", "Click a sound to hear it. Return plays it again.", "Double-click it, or press LOAD, to put it on the track shown in LOAD INTO.", "Type in the search box to look through every category at once."], tip: "Change LOAD INTO to fill several tracks from the page without closing it. A dot marks the sound already on that track."),
+                    section("Shape it", "SIMPLE shows the controls that matter most: the oscillators, sub and noise color, the envelope, the pitch LFO and the output. FULL shows every control the synth has. Draw the volume shape on VOLUME, or drag across the filter display for cutoff and resonance. Each change plays back when you let go."),
+                    section("Keep what you made", "LOAD EDITED puts your version on the track. The song keeps its own copy, so it sounds the same on another Mac. SAVE AS adds it to YOUR SOUNDS, which appear at the top of their category in every song. RESET goes back to the saved sound.", note: "Editing a factory sound never changes that sound on other tracks. Your version is loaded as a copy.")
+                ]),
+        article("drum-kits", .create, "Swap the whole kit", "Change every drum sound at once and keep the beat.",
+                keywords: ["kit", "kits", "drum kit", "factory kit", "save kit", "swap drums", "noir signal", "retro cathedral", "electric grid", "chrome bloom", "iron pulse"], related: ["drum-sounds", "sequencer"],
+                sections: [
+                    section("Load a kit", steps: ["Click KIT in the strip at the top, or KIT in the SEQUENCER header. It shows the kit you have loaded.", "Click a kit. Every drum track takes its new sound; the patterns, levels and effects stay exactly as they were."]),
+                    section("How sounds find their tracks", "The kick goes on the kick, the snare on the snare, a hat on each hat track. A kit with one tom puts it on both tom tracks. A kit you saved goes back onto the tracks with the same names."),
+                    section("Save your own", "Set up the sounds you like, open KIT and press SAVE CURRENT SOUNDS AS A KIT. Edited sounds are saved inside the kit. Your kits are there in every song. Click × and then DELETE? to remove one.", tip: "The five factory kits are the same as in DrumKit on iPhone. KIT shows CUSTOM once you change a sound, so you can always tell whether a kit is still intact.")
                 ]),
         article("lunatk", .create, "Play and program LUNATK", "Use LYLLTH’s built-in synth for melodic and harmonic parts.",
                 keywords: ["synth", "instrument", "preset", "oscillator", "modulation", "arp", "performer"], related: ["musical-typing", "note-editing", "midi-routing"],
