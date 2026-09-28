@@ -95,7 +95,8 @@ enum LYSongCompiler {
                     // Regions that overlap (a DrumKit song's lanes) sound
                     // together; the last one that hits sets the step's values.
                     var sawRegion = false
-                    for clip in regions where beat >= clip.startBeat - 0.000_1 && beat < clip.startBeat + clip.lengthBeats - 0.000_1 {
+                    // A muted region plays nothing.
+                    for clip in regions where !clip.isMuted && beat >= clip.startBeat - 0.000_1 && beat < clip.startBeat + clip.lengthBeats - 0.000_1 {
                         guard let rendered = renderedByClip[clip.patternSourceID ?? clip.id], !rendered.enabled.isEmpty else { continue }
                         let offset = Int(floor((beat - clip.startBeat + clip.loopOffsetBeats) / lyBeatsPerStep + 0.000_1))
                         let index = ((offset % rendered.enabled.count) + rendered.enabled.count) % rendered.enabled.count

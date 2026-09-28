@@ -668,7 +668,13 @@ struct WorkspaceView: View {
                 audio.syncTimeline(document.session, media: document.audioMediaStore)
             },
             consolidateAudio: consolidateAudioEvent,
-            toggleFreeze: toggleFreeze
+            toggleFreeze: toggleFreeze,
+            acceptsRightClicks: {
+                // Nothing floating over the arrangement.
+                activeMenu == nil && fxRequest == nil && fxPickerTarget == nil && synthTrackID == nil
+                    && pianoRollClip == nil && sirenClip == nil && drumTrackID == nil
+                    && audioUnits.editor == nil && recoveryCandidate == nil && !showTyping
+            }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -31,6 +31,9 @@ struct ArrangementView: View {
     var placePattern: () -> Void = {}
     var consolidateAudio: (UUID, UUID) -> Void = { _, _ in }
     var toggleFreeze: (UUID) -> Void = { _ in }
+    /// False while a floating window or menu sits over the arrangement, so
+    /// a right-click inside it never opens a region menu underneath.
+    var acceptsRightClicks: () -> Bool = { true }
 
     @EnvironmentObject private var audio: AudioEngineController
 
@@ -46,6 +49,8 @@ struct ArrangementView: View {
         nonmutating set { audio.cursorBeat = newValue }
     }
     @State private var copiedAudioEvent: LYClip?
+    @State private var regionMenu: LYRegionMenuRequest?
+    @State private var renaming: LYRenameRequest?
     @State private var dropTargetTrackID: UUID?
     @State private var loopDrag: LoopDrag?
     @State private var lastBraceClick = Date.distantPast
@@ -143,6 +148,8 @@ struct ArrangementView: View {
             }
         }
         .background { LYArrangementKeyMonitor(action: handleArrangementKey) }
+        .coordinateSpace(name: Self.menuSpace)
+        .overlay { regionMenuOverlay }
     }
 
     // MARK: Header
@@ -778,6 +785,15 @@ struct ArrangementView: View {
             }
             .frame(width: CGFloat(beats) * beatWidth, height: laneHeight)
             .clipped()
+            .background {
+                // Right-click anywhere on the lane: the region under the
+                // pointer, or the lane itself where there is none.
+                GeometryReader { geo in
+                    LYRightClickArea { point in
+                        openRegionMenu(trackIndex: index, at: point, laneOrigin: geo.frame(in: .named(Self.menuSpace)).origin)
+                    }
+                }
+            }
             .onDrop(
                 of: [UTType.fileURL],
                 isTargeted: Binding(
@@ -2154,5 +2170,297 @@ private struct LYEventWaveform: View {
                 seam += cycleBeats
             }
         }
+    }
+}
+
+
+// MARK: - Right-click menus
+
+struct LYRegionMenuRequest: Equatable {
+    var trackID: UUID
+    /// nil: the empty lane was clicked.
+    var clipID: UUID?
+    /// Song beat under the pointer, snapped.
+    var beat: Double
+    /// Where the menu opens, in the arrangement's space.
+    var point: CGPoint
+}
+
+struct LYRenameRequest: Equatable {
+    var clipID: UUID
+    var text: String
+    var point: CGPoint
+}
+
+extension ArrangementView {
+    static let menuSpace = "LYArrangeMenu"
+
+    fileprivate func openRegionMenu(trackIndex: Int, at point: CGPoint, laneOrigin: CGPoint) -> Bool {
+        guard acceptsRightClicks(), session.tracks.indices.contains(trackIndex) else { return false }
+        let track = session.tracks[trackIndex]
+        let raw = Double(point.x / max(beatWidth, 1))
+        let clip = track.clips.last { clip in
+            (clip.isInSong || clip.kind == .audio)
+                && raw >= clip.startBeat && raw < clip.startBeat + clip.lengthBeats
+                && point.y >= 4 && point.y <= laneHeight - 4
+        }
+        selectedTrackID = track.id
+        selectedClipID = clip?.id
+        renaming = nil
+        withAnimation(LYLLTHTheme.snap) {
+            regionMenu = LYRegionMenuRequest(
+                trackID: track.id, clipID: clip?.id,
+                beat: min(max(0, snapBeat(raw, raw)), Double(beats)),
+                point: CGPoint(x: laneOrigin.x + point.x, y: laneOrigin.y + point.y)
+            )
+        }
+        return true
+    }
+
+    @ViewBuilder
+    fileprivate var regionMenuOverlay: some View {
+        if let request = regionMenu, let menu = regionMenuContent(request) {
+            let close = { withAnimation(LYLLTHTheme.snap) { regionMenu = nil } }
+            GeometryReader { geo in
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.001).contentShape(Rectangle()).onTapGesture(perform: close)
+                    LYContextMenuView(title: menu.title, subtitle: menu.subtitle, accent: menu.accent, entries: menu.entries, close: close)
+                        // Kept inside the arrangement, room left for a submenu.
+                        .offset(x: min(request.point.x + 2, max(8, geo.size.width - 450)),
+                                y: min(request.point.y + 2, max(8, geo.size.height - menu.height - 12)))
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+                }
+            }
+            .zIndex(200)
+        }
+        if let request = renaming {
+            renameField(request)
+        }
+    }
+
+    private struct MenuContent {
+        var title: String
+        var subtitle: String
+        var accent: Color
+        var entries: [LYMenuEntry]
+        var height: CGFloat { 54 + entries.reduce(0) { $0 + $1.height } }
+    }
+
+    /// Runs an edit on the song and keeps the new region selected.
+    private func edit(_ change: (inout LYLLTHSession) -> UUID?) {
+        var next = session
+        if let id = change(&next) { selectedClipID = id }
+        session = next
+    }
+
+    private func regionMenuContent(_ request: LYRegionMenuRequest) -> MenuContent? {
+        guard let trackIndex = session.tracks.firstIndex(where: { $0.id == request.trackID }) else { return nil }
+        let track = session.tracks[trackIndex]
+        let accent = LYLLTHTheme.trackAccent(position: trackIndex)
+        guard let clipID = request.clipID, let clip = track.clips.first(where: { $0.id == clipID }) else {
+            return MenuContent(title: track.name, subtitle: "LANE", accent: accent, entries: laneEntries(track, request))
+        }
+        let beat = request.beat
+        let canSplitHere = beat > clip.startBeat + 0.001 && beat < clip.startBeat + clip.lengthBeats - 0.001
+        let cursorInside = editCursorBeat > clip.startBeat + 0.001 && editCursorBeat < clip.startBeat + clip.lengthBeats - 0.001
+        let common: [LYMenuEntry] = [
+            .section("CUT"),
+            .action("SPLIT HERE", icon: "scissors", enabled: canSplitHere) { edit { LYRegionCommands.split(clipID, atBeat: beat, in: &$0) } },
+            .action("SPLIT AT CURSOR", icon: "scissors", shortcut: "S", enabled: cursorInside) {
+                edit { LYRegionCommands.split(clipID, atBeat: editCursorBeat, in: &$0) }
+            }
+        ]
+        let rename = LYMenuEntry.action("RENAME…", icon: "character.cursor.ibeam") {
+            renaming = LYRenameRequest(clipID: clipID, text: clip.name, point: request.point)
+        }
+
+        switch clip.kind {
+        case .audio:
+            let transpose: [LYMenuEntry] = [
+                .action("OCTAVE UP", shortcut: "+12") { edit { LYRegionCommands.transpose(clipID, by: 12, in: &$0); return nil } },
+                .action("SEMITONE UP", shortcut: "+1") { edit { LYRegionCommands.transpose(clipID, by: 1, in: &$0); return nil } },
+                .action("SEMITONE DOWN", shortcut: "−1") { edit { LYRegionCommands.transpose(clipID, by: -1, in: &$0); return nil } },
+                .action("OCTAVE DOWN", shortcut: "−12") { edit { LYRegionCommands.transpose(clipID, by: -12, in: &$0); return nil } },
+                .divider("t"),
+                .action("RESET PITCH", enabled: abs(clip.pitchSemitones) > 0.001) { edit { LYRegionCommands.resetPitch(clipID, in: &$0); return nil } }
+            ]
+            let gain: [LYMenuEntry] = [
+                .action("NORMALIZE", shortcut: "−0.3 DB", enabled: LYRegionCommands.peakDB(of: clip) != nil) { edit { LYRegionCommands.normalize(clipID, in: &$0); return nil } },
+                .divider("g"),
+                .action("UP 3 DB", shortcut: "+3") { edit { LYRegionCommands.adjustGain(clipID, by: 3, in: &$0); return nil } },
+                .action("UP 1 DB", shortcut: "+1") { edit { LYRegionCommands.adjustGain(clipID, by: 1, in: &$0); return nil } },
+                .action("DOWN 1 DB", shortcut: "−1") { edit { LYRegionCommands.adjustGain(clipID, by: -1, in: &$0); return nil } },
+                .action("DOWN 3 DB", shortcut: "−3") { edit { LYRegionCommands.adjustGain(clipID, by: -3, in: &$0); return nil } },
+                .divider("g2"),
+                .action("RESET GAIN", enabled: abs(clip.eventGainDB) > 0.001) { edit { LYRegionCommands.setGain(clipID, to: 0, in: &$0); return nil } }
+            ]
+            let fades: [LYMenuEntry] = [
+                .action("SHORT FADE IN", shortcut: "10 MS") { edit { LYRegionCommands.setFades(clipID, inSeconds: 0.01, outSeconds: nil, in: &$0); return nil } },
+                .action("LONG FADE IN", shortcut: "500 MS") { edit { LYRegionCommands.setFades(clipID, inSeconds: 0.5, outSeconds: nil, in: &$0); return nil } },
+                .action("SHORT FADE OUT", shortcut: "10 MS") { edit { LYRegionCommands.setFades(clipID, inSeconds: nil, outSeconds: 0.01, in: &$0); return nil } },
+                .action("LONG FADE OUT", shortcut: "500 MS") { edit { LYRegionCommands.setFades(clipID, inSeconds: nil, outSeconds: 0.5, in: &$0); return nil } },
+                .divider("f"),
+                .action("CLEAR FADES", enabled: clip.fadeInSeconds > 0 || clip.fadeOutSeconds > 0) {
+                    edit { LYRegionCommands.setFades(clipID, inSeconds: 0, outSeconds: 0, in: &$0); return nil }
+                }
+            ]
+            let stretch: [LYMenuEntry] = LYAudioStretchMode.allCases.map { mode in
+                .action(stretchTitle(mode), on: clip.stretchMode == mode) { edit { LYRegionCommands.setStretch(clipID, to: mode, in: &$0); return nil } }
+            }
+            let entries: [LYMenuEntry] = [
+                .section("EDIT"),
+                .action("CUT", icon: "scissors.badge.ellipsis", shortcut: "⌘X") { copiedAudioEvent = clip; edit { LYRegionCommands.delete(clipID, in: &$0); return nil } },
+                .action("COPY", icon: "doc.on.doc", shortcut: "⌘C") { copiedAudioEvent = clip },
+                .action("PASTE AT CURSOR", icon: "doc.on.clipboard", shortcut: "⌘V", enabled: copiedAudioEvent != nil) { pasteAudioEvent() },
+                .action("DUPLICATE", icon: "plus.square.on.square", shortcut: "⌘D") { edit { LYRegionCommands.duplicate(clipID, in: &$0) } }
+            ] + common + [
+                .action("CROSSFADE", icon: "arrow.left.and.right.righttriangle.left.righttriangle.right", enabled: selectedCrossfadePartner != nil) { crossfadeSelectedAudioEvent() },
+                .section("EVENT"),
+                .action("MUTE", icon: "speaker.slash", on: clip.isMuted) { edit { LYRegionCommands.toggleMute(clipID, in: &$0); return nil } },
+                .action("LOOP", icon: "repeat", on: clip.isLooped) { edit { LYRegionCommands.toggleLoop(clipID, in: &$0); return nil } },
+                .action("LOCK POSITION", icon: "lock", on: clip.isLocked) { edit { LYRegionCommands.toggleLock(clipID, in: &$0); return nil } },
+                rename,
+                .section("SOUND"),
+                .submenu("TRANSPOSE", icon: "arrow.up.arrow.down", transpose),
+                .submenu("GAIN", icon: "dial.low", gain),
+                .submenu("FADES", icon: "chart.line.uptrend.xyaxis", fades),
+                .submenu("STRETCH", icon: "metronome", stretch),
+                .section("OPEN"),
+                .action(clip.activeVocalEdit == nil ? "SIREN" : "SIREN  ·  EDITED", icon: "waveform.path.ecg") { openVocal(track.id, clipID) },
+                .action("PREVIEW", icon: "play") { previewAudioEvent(clip) },
+                .action("BOUNCE IN PLACE", icon: "square.and.arrow.down.on.square") { consolidateAudio(track.id, clipID) },
+                .divider("end"),
+                .action("DELETE", icon: "trash", shortcut: "⌫", destructive: true) { edit { LYRegionCommands.delete(clipID, in: &$0); return nil } }
+            ]
+            return MenuContent(title: clip.name, subtitle: "AUDIO EVENT  ·  " + track.name, accent: accent, entries: entries)
+
+        case .notes:
+            let quantize: [LYMenuEntry] = [
+                .action("QUARTER NOTES", shortcut: "1/4") { edit { LYRegionCommands.quantize(clipID, grid: 1, in: &$0); return nil } },
+                .action("EIGHTHS", shortcut: "1/8") { edit { LYRegionCommands.quantize(clipID, grid: 0.5, in: &$0); return nil } },
+                .action("SIXTEENTHS", shortcut: "1/16") { edit { LYRegionCommands.quantize(clipID, grid: 0.25, in: &$0); return nil } },
+                .action("THIRTY-SECONDS", shortcut: "1/32") { edit { LYRegionCommands.quantize(clipID, grid: 0.125, in: &$0); return nil } },
+                .divider("q"),
+                .action("SIXTEENTHS, HALFWAY", shortcut: "50%") { edit { LYRegionCommands.quantize(clipID, grid: 0.25, strength: 0.5, in: &$0); return nil } }
+            ]
+            let transpose: [LYMenuEntry] = [
+                .action("OCTAVE UP", shortcut: "+12") { edit { LYRegionCommands.transpose(clipID, by: 12, in: &$0); return nil } },
+                .action("SEMITONE UP", shortcut: "+1") { edit { LYRegionCommands.transpose(clipID, by: 1, in: &$0); return nil } },
+                .action("SEMITONE DOWN", shortcut: "−1") { edit { LYRegionCommands.transpose(clipID, by: -1, in: &$0); return nil } },
+                .action("OCTAVE DOWN", shortcut: "−12") { edit { LYRegionCommands.transpose(clipID, by: -12, in: &$0); return nil } }
+            ]
+            let velocity: [LYMenuEntry] = [
+                .action("HARDER", shortcut: "+20%") { edit { LYRegionCommands.scaleVelocity(clipID, by: 1.2, in: &$0); return nil } },
+                .action("A LITTLE HARDER", shortcut: "+10%") { edit { LYRegionCommands.scaleVelocity(clipID, by: 1.1, in: &$0); return nil } },
+                .action("A LITTLE SOFTER", shortcut: "−10%") { edit { LYRegionCommands.scaleVelocity(clipID, by: 0.9, in: &$0); return nil } },
+                .action("SOFTER", shortcut: "−20%") { edit { LYRegionCommands.scaleVelocity(clipID, by: 0.8, in: &$0); return nil } }
+            ]
+            let entries: [LYMenuEntry] = [
+                .section("EDIT"),
+                .action("OPEN IN PIANO ROLL", icon: "pianokeys", shortcut: "↩") { openNotes(track.id, clipID) },
+                .action("DUPLICATE", icon: "plus.square.on.square", shortcut: "⌘D") { edit { LYRegionCommands.duplicate(clipID, in: &$0) } }
+            ] + common + [
+                .section("NOTES"),
+                .submenu("QUANTIZE", icon: "square.grid.3x1.below.line.grid.1x2", quantize),
+                .submenu("TRANSPOSE", icon: "arrow.up.arrow.down", transpose),
+                .submenu("VELOCITY", icon: "chart.bar", velocity),
+                .section("CLIP"),
+                .action("MUTE", icon: "speaker.slash", on: clip.isMuted) { edit { LYRegionCommands.toggleMute(clipID, in: &$0); return nil } },
+                rename,
+                .divider("end"),
+                .action("DELETE", icon: "trash", shortcut: "⌫", destructive: true) { edit { LYRegionCommands.delete(clipID, in: &$0); return nil } }
+            ]
+            return MenuContent(title: clip.name, subtitle: "NOTE CLIP  ·  " + track.name, accent: accent, entries: entries)
+
+        case .pattern, .midi:
+            let content = track.patternContent(of: clip)
+            let entries: [LYMenuEntry] = [
+                .section("PATTERN"),
+                .action("EDIT IN SEQUENCER", icon: "square.grid.3x3", shortcut: "↩") { openPattern(track.id, content.id) },
+                .action("PLACE AGAIN", icon: "plus.square.on.square", shortcut: "⌘D") { edit { LYRegionCommands.duplicate(clipID, in: &$0) } },
+                .action("MAKE UNIQUE", icon: "square.on.square.dashed", enabled: clip.isPlacement) { edit { LYRegionCommands.makeUnique(clipID, in: &$0) } }
+            ] + common + [
+                .section("REGION"),
+                .action("MUTE", icon: "speaker.slash", on: clip.isMuted) { edit { LYRegionCommands.toggleMute(clipID, in: &$0); return nil } },
+                .action("RENAME PATTERN…", icon: "character.cursor.ibeam") {
+                    renaming = LYRenameRequest(clipID: content.id, text: content.name, point: request.point)
+                },
+                .divider("end"),
+                .action("REMOVE FROM SONG", icon: "trash", shortcut: "⌫", destructive: true) { edit { LYRegionCommands.delete(clipID, in: &$0); return nil } }
+            ]
+            return MenuContent(title: content.name, subtitle: (clip.isPlacement ? "PLACEMENT  ·  " : "PATTERN  ·  ") + track.name, accent: accent, entries: entries)
+        }
+    }
+
+    private func laneEntries(_ track: LYTrack, _ request: LYRegionMenuRequest) -> [LYMenuEntry] {
+        var entries: [LYMenuEntry] = [.section("HERE")]
+        if track.kind == .audio {
+            entries.append(.action("PASTE HERE", icon: "doc.on.clipboard", shortcut: "⌘V", enabled: copiedAudioEvent != nil) {
+                editCursorBeat = request.beat
+                pasteAudioEvent()
+            })
+            entries.append(.action("IMPORT AUDIO HERE…", icon: "square.and.arrow.down") { requestAudioImport(track.id, request.beat) })
+        }
+        if takesNoteClips(track), let index = session.tracks.firstIndex(where: { $0.id == track.id }) {
+            entries.append(.action("NEW NOTE CLIP HERE", icon: "pianokeys") { createNoteClip(trackIndex: index, atBeat: request.beat) })
+        }
+        entries.append(.action("MOVE PLAY CURSOR HERE", icon: "arrowtriangle.down") { audio.movePlayCursor(to: request.beat) })
+        return entries
+    }
+
+    private func stretchTitle(_ mode: LYAudioStretchMode) -> String {
+        switch mode {
+        case .off: return "OFF · RECORDED SPEED"
+        case .tempo: return "FOLLOW TEMPO"
+        case .beatMapped: return "FOLLOW BEATS"
+        }
+    }
+
+    private func renameField(_ request: LYRenameRequest) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.001).contentShape(Rectangle()).onTapGesture { renaming = nil }
+                LYRenamePanel(text: request.text) { name in
+                    edit { LYRegionCommands.rename(request.clipID, to: name, in: &$0); return nil }
+                    renaming = nil
+                } cancel: {
+                    renaming = nil
+                }
+                .offset(x: min(request.point.x, max(8, geo.size.width - 260)), y: min(request.point.y, max(8, geo.size.height - 90)))
+            }
+        }
+        .zIndex(210)
+    }
+}
+
+/// A small NIGHTSHAPE panel with one text field, for renaming a region.
+private struct LYRenamePanel: View {
+    @State var text: String
+    let commit: (String) -> Void
+    let cancel: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("RENAME")
+                .font(LYLLTHTheme.label(8, weight: .bold))
+                .tracking(1.8)
+                .foregroundStyle(LYLLTHTheme.teal)
+            TextField("NAME", text: $text)
+                .textFieldStyle(.plain)
+                .font(LYLLTHTheme.label(11, weight: .bold))
+                .foregroundStyle(LYLLTHTheme.text)
+                .padding(.horizontal, 9)
+                .frame(height: 28)
+                .background(LYLLTHTheme.deck)
+                .overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.7), lineWidth: 1))
+                .focused($focused)
+                .onSubmit { commit(text) }
+                .onExitCommand(perform: cancel)
+        }
+        .padding(12)
+        .frame(width: 240)
+        .lyNightshapeMenuChrome(accent: LYLLTHTheme.teal)
+        .onAppear { DispatchQueue.main.async { focused = true } }
     }
 }
