@@ -183,13 +183,15 @@ final class AudioEngineController: ObservableObject {
     /// every edit: renders are cached and only timing changes reschedule.
     func syncTimeline(_ session: LYLLTHSession, media: LYProjectMediaStore) {
         let wantedSamples = Set(session.tracks.compactMap(\.samplePath))
-        if wantedSamples != sampleAssetNames {
+        // Also retried while one is unread: a relinked sample keeps its name.
+        if wantedSamples != sampleAssetNames || wantedSamples.contains(where: { sampleAssets[$0] == nil }) {
+            let loaded = Set(sampleAssets.keys)
             sampleAssetNames = wantedSamples
             sampleAssets = Dictionary(uniqueKeysWithValues: wantedSamples.compactMap { path in
                 media.data(for: path).map { (path, $0) }
             })
             // Sample drum tracks may have been waiting for their audio.
-            if session.tracks.contains(where: { $0.samplePath != nil }) { syncSequencer(session) }
+            if !Set(sampleAssets.keys).subtracting(loaded).isEmpty { syncSequencer(session) }
         }
         let meter = transportMeter(numerator: session.numerator, denominator: session.denominator)
         let window = LYSongWindow.resolve(for: session, stepsPerBar: meter.activeSubdivisionCount)

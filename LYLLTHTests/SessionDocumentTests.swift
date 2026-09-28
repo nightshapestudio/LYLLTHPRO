@@ -835,4 +835,36 @@ final class DeEsserAndGateRackTests: XCTestCase {
         XCTAssertEqual(FXKind.deEsser.category, .dynamics)
         XCTAssertEqual(FXKind.noiseGate.title, "NOISE GATE")
     }
+
+}
+
+final class MediaReferenceTests: XCTestCase {
+    func testDrumSampleAndFrozenOriginalsAreNotUnusedAudio() throws {
+        var document = LYLLTHSessionDocument(session: .starter())
+        try document.audioMediaStore.put(Data([1]), named: "fkit-kick.wav")
+        try document.audioMediaStore.put(Data([2]), named: "vocal.wav")
+        try document.audioMediaStore.put(Data([3]), named: "vocal-take-2.wav")
+        try document.audioMediaStore.put(Data([4]), named: "old-sample.wav")
+        try document.audioMediaStore.put(Data([5]), named: "freeze.wav")
+        try document.audioMediaStore.put(Data([6]), named: "stray.wav")
+
+        let drum = document.session.tracks.firstIndex { $0.kind == .drumkit }!
+        document.session.tracks[drum].samplePath = "fkit-kick.wav"
+
+        var original = LYClip(name: "VOCAL", kind: .audio, startBeat: 0, lengthBeats: 4, sourceRelativePath: "vocal.wav")
+        original.takes = [LYAudioTake(name: "TAKE 2", sourceRelativePath: "vocal-take-2.wav", sourceStartSeconds: 0, durationSeconds: 1)]
+        var frozen = LYTrack(name: "VOX", kind: .audio, accent: .purple)
+        frozen.clips = [LYClip(name: "VOX · FREEZE", kind: .audio, startBeat: 0, lengthBeats: 4, sourceRelativePath: "freeze.wav")]
+        frozen.frozenState = LYFrozenTrackState(kind: .drumkit, clips: [original], inserts: [], instrumentPlugin: nil, fx: nil,
+                                                synth: nil, synthPresetID: nil, drumPresetID: nil, customDrumPreset: nil,
+                                                samplePath: "old-sample.wav", automation: nil)
+        document.session.tracks.append(frozen)
+
+        XCTAssertEqual(document.orphanedAudioNames, ["stray.wav"])
+        let discard = LYProjectMediaStore.discard
+        LYProjectMediaStore.discard = { try FileManager.default.removeItem(at: $0) }
+        defer { LYProjectMediaStore.discard = discard }
+        try document.audioMediaStore.remove("fkit-kick.wav")
+        XCTAssertEqual(document.missingAudioNames, ["fkit-kick.wav"])
+    }
 }

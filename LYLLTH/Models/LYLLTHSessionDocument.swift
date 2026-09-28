@@ -407,12 +407,23 @@ struct LYLLTHSessionDocument: FileDocument {
         return clip.id
     }
 
+    /// Every stored file the song can still play: events and their takes,
+    /// drum tracks' one-shot samples, and what a frozen track gets back when
+    /// it is unfrozen.
     var referencedAudioNames: Set<String> {
-        Set(session.tracks.flatMap(\.clips).flatMap { clip -> [String] in
-            var paths = [clip.sourceRelativePath].compactMap { $0 }
-            paths += (clip.takes ?? []).map(\.sourceRelativePath)
-            return paths
-        })
+        var names = Set<String>()
+        func add(_ clips: [LYClip], sample: String?) {
+            for clip in clips {
+                if let path = clip.sourceRelativePath { names.insert(path) }
+                names.formUnion((clip.takes ?? []).map(\.sourceRelativePath))
+            }
+            if let sample { names.insert(sample) }
+        }
+        for track in session.tracks {
+            add(track.clips, sample: track.samplePath)
+            if let frozen = track.frozenState { add(frozen.clips, sample: frozen.samplePath) }
+        }
+        return names
     }
 
     var missingAudioNames: [String] {
