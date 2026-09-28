@@ -644,7 +644,8 @@ struct ArrangementView: View {
                 instrumentIcon: track.kind == .drumkit ? "waveform.path" : (track.kind == .instrument && track.isChordTrack != true ? "pianokeys" : nil),
                 openInstrument: { track.kind == .drumkit ? openDrums(track.id) : openSynth(track.id) },
                 isFrozen: track.isFrozen,
-                toggleFreeze: { toggleFreeze(track.id) }
+                toggleFreeze: { toggleFreeze(track.id) },
+                compact: laneHeight < 56
             )
             .frame(width: headerWidth, height: laneHeight)
             .contentShape(Rectangle())
@@ -1333,6 +1334,117 @@ struct LYTrackHeader: View {
     var openInstrument: () -> Void = {}
     var isFrozen = false
     var toggleFreeze: () -> Void = {}
+    /// A short lane: one line instead of two.
+    var compact = false
+
+    private var nameLabel: some View {
+        Text(name)
+            .font(LYLLTHTheme.label(10.5, weight: .bold))
+            .tracking(0.7)
+            .foregroundStyle(isMuted ? LYLLTHTheme.dim : LYLLTHTheme.text)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .help(name)
+    }
+
+    @ViewBuilder
+    private var subtitle: some View {
+        if let sound {
+            LYTrackSoundButton(sound: sound, accent: accent, action: openInstrument)
+        } else {
+            Text(kind)
+                .font(LYLLTHTheme.label(7, weight: .bold))
+                .tracking(1.3)
+                .foregroundStyle(LYLLTHTheme.dim)
+                .lineLimit(1)
+        }
+    }
+
+    /// Mode only matters once a track is automated; READ is the default.
+    private var showsModeChip: Bool {
+        guard let automationMode else { return false }
+        return automationCount > 0 || (showsAutomation?.wrappedValue ?? false) || (automationMode.wrappedValue ?? .read) != .read
+    }
+
+    private var performRow: some View {
+        HStack(spacing: 3) {
+            // The sound name under the track name opens the chooser; the
+            // icon is only for tracks that have no sound name to click.
+            if sound == nil, let instrumentIcon {
+                Button(action: openInstrument) {
+                    Image(systemName: instrumentIcon)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(accent)
+                        .frame(width: 19, height: 17)
+                        .overlay(Rectangle().stroke(accent.opacity(0.7), lineWidth: 1))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(instrumentIcon == "pianokeys" ? "Open LUNATK" : "Choose this track's drum sound")
+            }
+            LYTrackToggle(title: "M", isOn: $isMuted, tint: LYLLTHTheme.purple, height: 17)
+                .help("Mute")
+            LYTrackToggle(title: "S", isOn: $isSolo, tint: LYLLTHTheme.teal, height: 17)
+                .help("Solo")
+            if let isArmed {
+                // A dot, the record symbol, so it never reads as another R.
+                Button { isArmed.wrappedValue.toggle() } label: {
+                    Circle()
+                        .fill(isArmed.wrappedValue ? LYLLTHTheme.record : Color.clear)
+                        .overlay(Circle().stroke(isArmed.wrappedValue ? LYLLTHTheme.record : LYLLTHTheme.chromeText, lineWidth: 1.2))
+                        .frame(width: 7, height: 7)
+                        .frame(width: 19, height: 17)
+                        .overlay(Rectangle().stroke(isArmed.wrappedValue ? LYLLTHTheme.record : LYLLTHTheme.lineStrong, lineWidth: 1))
+                        .lyBloom(LYLLTHTheme.record, isOn: isArmed.wrappedValue)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Record arm")
+                .accessibilityLabel("Record arm")
+            }
+        }
+    }
+
+    private var processRow: some View {
+        HStack(spacing: 3) {
+            if let showsAutomation {
+                chip(automationCount > 0 ? "AUTO \(automationCount)" : "AUTO",
+                     isOn: showsAutomation.wrappedValue, tint: LYLLTHTheme.indigo) {
+                    showsAutomation.wrappedValue.toggle()
+                }
+                .help("Show this track's automation lanes")
+            }
+            if showsModeChip, let automationMode {
+                let mode = automationMode.wrappedValue ?? .read
+                chip(mode.label.uppercased(), isOn: mode != .read, tint: LYLLTHTheme.record, width: 42) {
+                    let all = LYAutomationMode.allCases
+                    automationMode.wrappedValue = all[(all.firstIndex(of: mode)! + 1) % all.count]
+                }
+                .help("Automation mode: \(mode.label). Click to cycle READ, TOUCH, LATCH and WRITE.")
+                .accessibilityLabel("Automation mode \(mode.label)")
+            }
+            chip(isFrozen ? "FROZEN" : "FREEZE", isOn: isFrozen, tint: LYLLTHTheme.teal, width: 44, action: toggleFreeze)
+                .help(isFrozen ? "Unfreeze and restore the original track" : "Freeze this track to audio")
+                .accessibilityLabel(isFrozen ? "Unfreeze track" : "Freeze track")
+        }
+    }
+
+    /// A worded toggle: accent outline and text when on, quiet chrome when off.
+    private func chip(_ title: String, isOn: Bool, tint: Color, width: CGFloat? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            mixedNumericLabel(title, labelFont: LYLLTHTheme.label(7, weight: .bold), numberFont: LYLLTHTheme.value(8))
+                .tracking(0.9)
+                .foregroundStyle(isOn ? tint : LYLLTHTheme.chromeText)
+                .lineLimit(1)
+                .padding(.horizontal, width == nil ? 6 : 0)
+                .frame(width: width, height: 17)
+                .background(tint.opacity(isOn ? 0.12 : 0))
+                .overlay(Rectangle().stroke(isOn ? tint : LYLLTHTheme.lineStrong, lineWidth: 1))
+                .lyBloom(tint, isOn: isOn)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1343,86 +1455,31 @@ struct LYTrackHeader: View {
                 .overlay(Rectangle().stroke(accent.opacity(isSelected ? 1 : 0.6), lineWidth: 1))
                 .lyBloom(accent, isOn: isSelected)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(name)
-                    .font(LYLLTHTheme.label(10.5, weight: .bold))
-                    .tracking(0.7)
-                    .foregroundStyle(isMuted ? LYLLTHTheme.dim : LYLLTHTheme.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(name)
-                if let sound {
-                    LYTrackSoundButton(sound: sound, accent: accent, action: openInstrument)
-                } else {
-                    Text(kind)
-                        .font(LYLLTHTheme.label(7, weight: .bold))
-                        .tracking(1.3)
-                        .foregroundStyle(LYLLTHTheme.dim)
-                        .lineLimit(1)
+            if compact {
+                VStack(alignment: .leading, spacing: 2) {
+                    nameLabel
+                    subtitle
                 }
-            }
-            .layoutPriority(1)
-            Spacer(minLength: 4)
-            HStack(spacing: 3) {
-            if let instrumentIcon {
-                Button(action: openInstrument) {
-                    Image(systemName: instrumentIcon)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(accent)
-                        .frame(width: 19, height: 19)
-                        .overlay(Rectangle().stroke(accent.opacity(0.7), lineWidth: 1))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(instrumentIcon == "pianokeys" ? "Open LUNATK" : "Choose this track's drum sound")
-            }
-            LYTrackToggle(title: "M", isOn: $isMuted, tint: LYLLTHTheme.purple)
-                .help("Mute")
-            LYTrackToggle(title: "S", isOn: $isSolo, tint: LYLLTHTheme.teal)
-                .help("Solo")
-            if let isArmed {
-                LYTrackToggle(title: "R", isOn: isArmed, tint: LYLLTHTheme.record)
-                    .help("Record arm")
-            }
-            if let showsAutomation {
-                LYTrackToggle(title: "A", isOn: showsAutomation, tint: LYLLTHTheme.indigo)
-                    .overlay(alignment: .topTrailing) {
-                        if automationCount > 0 && !showsAutomation.wrappedValue {
-                            Circle().fill(LYLLTHTheme.indigo).frame(width: 4, height: 4).offset(x: 1.5, y: -1.5)
-                        }
+                .layoutPriority(1)
+                Spacer(minLength: 4)
+                HStack(spacing: 3) { performRow; processRow }.fixedSize()
+            } else {
+                // Two lines, each with its own width: what the track is and
+                // what you play (mute, solo, record) on top; its sound and
+                // what processes it (automation, freeze) underneath.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        nameLabel.layoutPriority(1)
+                        Spacer(minLength: 4)
+                        performRow.fixedSize()
                     }
-                    .help("Show automation lanes")
-            }
-            if let automationMode {
-                let mode = automationMode.wrappedValue ?? .read
-                Button {
-                    let all = LYAutomationMode.allCases
-                    automationMode.wrappedValue = all[(all.firstIndex(of: mode)! + 1) % all.count]
-                } label: {
-                    Text(String(mode.label.prefix(1)))
-                        .font(LYLLTHTheme.label(8, weight: .bold))
-                        .foregroundStyle(mode == .read ? LYLLTHTheme.chromeText : LYLLTHTheme.record)
-                        .frame(width: 19, height: 19)
-                        .overlay(Rectangle().stroke(mode == .read ? LYLLTHTheme.lineStrong : LYLLTHTheme.record, lineWidth: 1))
-                        .contentShape(Rectangle())
+                    HStack(spacing: 6) {
+                        subtitle.layoutPriority(1)
+                        Spacer(minLength: 4)
+                        processRow.fixedSize()
+                    }
                 }
-                .buttonStyle(.plain)
-                .help("Automation mode: \(mode.label). Click to cycle READ, TOUCH, LATCH and WRITE.")
-                .accessibilityLabel("Automation mode \(mode.label)")
             }
-            Button(action: toggleFreeze) {
-                Image(systemName: isFrozen ? "snowflake.circle.fill" : "snowflake")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(isFrozen ? LYLLTHTheme.teal : LYLLTHTheme.chromeText)
-                    .frame(width: 19, height: 19)
-                    .overlay(Rectangle().stroke(isFrozen ? LYLLTHTheme.teal : LYLLTHTheme.lineStrong, lineWidth: 1))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(isFrozen ? "Unfreeze and restore the original track" : "Freeze this track to audio")
-            .accessibilityLabel(isFrozen ? "Unfreeze track" : "Freeze track")
-            }
-            .fixedSize()
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1468,13 +1525,14 @@ struct LYTrackToggle: View {
     let title: String
     @Binding var isOn: Bool
     let tint: Color
+    var height: CGFloat = 19
 
     var body: some View {
         Button { isOn.toggle() } label: {
             Text(title)
                 .font(LYLLTHTheme.label(8.5, weight: .bold))
                 .foregroundStyle(isOn ? tint : LYLLTHTheme.chromeText)
-                .frame(width: 19, height: 19)
+                .frame(width: 19, height: height)
                 .background(tint.opacity(isOn ? 0.14 : 0))
                 .overlay(Rectangle().stroke(isOn ? tint : LYLLTHTheme.lineStrong, lineWidth: 1))
                 .lyBloom(tint, isOn: isOn)
