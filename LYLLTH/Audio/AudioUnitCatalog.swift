@@ -130,8 +130,8 @@ final class AudioUnitCatalog: ObservableObject {
     @Published private(set) var quarantined: [LYAudioUnitDescriptor] = []
     private let validation: LYAudioUnitValidationStore
 
-    init(validation: LYAudioUnitValidationStore = .shared) {
-        self.validation = validation
+    init(validation: LYAudioUnitValidationStore? = nil) {
+        self.validation = validation ?? .shared
     }
 
     func scan() {
@@ -439,7 +439,7 @@ final class LYAudioUnitHost: ObservableObject {
         }
     }
 
-    static let loadTimeoutSeconds = 20.0
+    nonisolated static let loadTimeoutSeconds = 20.0
 
     private nonisolated func instantiate(_ description: AudioComponentDescription) async throws -> AVAudioUnit {
         try await withCheckedThrowingContinuation { continuation in

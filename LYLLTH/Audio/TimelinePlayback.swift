@@ -480,7 +480,8 @@ final class LYTimelineAudioPlayer {
             clip.stretchMode.rawValue,
             String(format: "%.4f", clip.sourceBPM ?? 0),
             String(format: "%.4f", clip.stretchMode == .off ? 0 : bpm),
-            String(clip.beatMap?.markers.count ?? 0)
+            String(clip.beatMap?.markers.count ?? 0),
+            clip.activeVocalEdit?.renderKey ?? ""
         ].joined(separator: "|")
     }
 

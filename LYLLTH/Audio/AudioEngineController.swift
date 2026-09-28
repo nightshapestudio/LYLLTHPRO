@@ -689,7 +689,10 @@ enum LYAudioEventRenderer {
         projectBPM: Double
     ) async throws -> AVAudioPCMBuffer {
         try await Task.detached(priority: .userInitiated) {
-            let url = try LYAudioSourceFileCache.url(for: data, fileExtension: fileExtension)
+            var url = try LYAudioSourceFileCache.url(for: data, fileExtension: fileExtension)
+            // A SIREN edit plays from its own render of the whole recording;
+            // trims, fades, stretch and transpose then apply as usual.
+            if let edit = clip.activeVocalEdit { url = try LYVocalRenderCache.url(forSource: url, edit: edit) }
             let file = try AVAudioFile(forReading: url)
             let sourceDuration = Double(file.length) / file.processingFormat.sampleRate
             let start = min(max(0, clip.sourceStartSeconds + clip.slipOffsetSeconds), sourceDuration)

@@ -269,6 +269,7 @@ struct WorkspaceView: View {
     @State private var showTyping = false
     /// The note clip open in the piano roll: (track, clip).
     @State private var pianoRollClip: (track: UUID, clip: UUID)?
+    @State private var sirenClip: (track: UUID, clip: UUID)?
     @State private var drumTrackID: UUID?
     @State private var bounce = LYBounce()
     @State private var engineSync = LYCoalescedSync()
@@ -419,6 +420,7 @@ struct WorkspaceView: View {
                 fxPickerOverlay
 
                 pianoRollOverlay
+                sirenOverlay
                     .zIndex(179)
 
                 musicalTypingOverlay
@@ -642,6 +644,10 @@ struct WorkspaceView: View {
             openDrums: { openDrums($0) },
             openPattern: { openPattern(trackID: $0, clipID: $1) },
             openNotes: { openNotes(trackID: $0, clipID: $1) },
+            openVocal: { trackID, clipID in
+                selectedTrackID = trackID
+                withAnimation(LYLLTHTheme.settle) { sirenClip = (trackID, clipID) }
+            },
             openAutomationMenu: { trackID, laneID in
                 presentMenu(.automation(trackID, laneID), from: laneID.map { "auto.\($0)" } ?? "auto.add.\(trackID)")
             },
@@ -1384,6 +1390,53 @@ struct WorkspaceView: View {
         audio.syncSequencer(document.session)
         selectedTrackID = trackID
         withAnimation(LYLLTHTheme.settle) { pianoRollClip = (trackID, clipID) }
+    }
+
+    /// SIREN over the workspace, editing one audio event in place.
+    @ViewBuilder
+    private var sirenOverlay: some View {
+        if let ref = sirenClip,
+           let trackIndex = document.session.tracks.firstIndex(where: { $0.id == ref.track }),
+           let clipIndex = document.session.tracks[trackIndex].clips.firstIndex(where: { $0.id == ref.clip }) {
+            let track = document.session.tracks[trackIndex]
+            let clip = track.clips[clipIndex]
+            let close = { withAnimation(LYLLTHTheme.snap) { sirenClip = nil } }
+            let position = document.session.tracks.firstIndex { $0.id == track.id } ?? 0
+            let accent = LYLLTHTheme.trackAccent(position: position)
+            GeometryReader { geo in
+                LYFloatingWindow(
+                    id: "siren",
+                    title: "SIREN  ·  " + track.name + "  ·  " + clip.name.uppercased(),
+                    accent: accent,
+                    size: CGSize(width: min(geo.size.width - 32, 1240), height: min(geo.size.height - 56, 640)),
+                    close: close
+                ) {
+                    LYSirenEditor(
+                        clip: Binding(
+                            get: {
+                                document.session.tracks.first { $0.id == ref.track }?.clips.first { $0.id == ref.clip } ?? clip
+                            },
+                            set: { edited in
+                                guard let t = document.session.tracks.firstIndex(where: { $0.id == ref.track }),
+                                      let c = document.session.tracks[t].clips.firstIndex(where: { $0.id == ref.clip }) else { return }
+                                document.session.tracks[t].clips[c] = edited
+                            }
+                        ),
+                        context: LYSirenContext(
+                            session: document.session,
+                            trackID: ref.track,
+                            sourceURL: { [document] path in
+                                guard let data = document.audioData(for: path) else { return nil }
+                                return try? LYAudioSourceFileCache.url(for: data, fileExtension: URL(fileURLWithPath: path).pathExtension)
+                            },
+                            songBeat: { [audio] in audio.isPlaying && audio.transportMode == .song ? audio.currentSongBeat() : nil }
+                        ),
+                        accent: accent
+                    )
+                }
+                .transition(.scale(scale: 0.97).combined(with: .opacity))
+            }
+        }
     }
 
     @ViewBuilder

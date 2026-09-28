@@ -966,6 +966,8 @@ struct LYClip: Codable, Identifiable, Equatable {
     var takes: [LYAudioTake]? = nil
     var activeTakeID: UUID? = nil
     var compSegments: [LYCompSegment]? = nil
+    /// SIREN tuning, timing and alignment for an audio region.
+    var vocal: LYVocalEdit? = nil
 
     var isNoteClip: Bool { kind == .notes }
     /// The repeating length of a note clip.
@@ -1035,7 +1037,7 @@ extension LYClip {
         case slipOffsetSeconds, eventGainDB
         case pitchSemitones, fadeInSeconds, fadeOutSeconds, fadeCurve, stretchMode
         case sourceBPM, preservePitch, beatMap, isMuted, isLocked, isLooped, loopOffsetBeats, sourceFileDurationSeconds
-        case patternSourceID, isOffTimeline, notes, noteLoopBeats, takes, activeTakeID, compSegments
+        case patternSourceID, isOffTimeline, notes, noteLoopBeats, takes, activeTakeID, compSegments, vocal
     }
 
     init(from decoder: Decoder) throws {
@@ -1075,6 +1077,7 @@ extension LYClip {
         takes = try values.decodeIfPresent([LYAudioTake].self, forKey: .takes)
         activeTakeID = try values.decodeIfPresent(UUID.self, forKey: .activeTakeID)
         compSegments = try values.decodeIfPresent([LYCompSegment].self, forKey: .compSegments)
+        vocal = try values.decodeIfPresent(LYVocalEdit.self, forKey: .vocal)
         normalizeAudioEvent()
     }
 }

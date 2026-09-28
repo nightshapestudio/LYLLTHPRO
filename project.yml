@@ -27,6 +27,9 @@ targets:
       # make every Debug session sound and measure unlike the real thing.
       - path: LYLLTH/SynthCore/LYSynthCore.cpp
         compilerFlags: ["-O3"]
+      # SIREN's analysis and resynthesis loops, optimised for the same reason.
+      - path: LYLLTH/SynthCore/LYVocalDSP.cpp
+        compilerFlags: ["-O3"]
       - path: LYLLTH/Resources
         buildPhase: resources
       # DrumKit's FX state models and FX windows, compiled from the sibling

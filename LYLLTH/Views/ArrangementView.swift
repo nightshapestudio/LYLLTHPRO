@@ -21,6 +21,8 @@ struct ArrangementView: View {
     var openPattern: (UUID, UUID) -> Void = { _, _ in }
     /// Opens a note clip (track id, clip id) in the piano roll.
     var openNotes: (UUID, UUID) -> Void = { _, _ in }
+    /// Opens an audio event (track id, clip id) in SIREN.
+    var openVocal: (UUID, UUID) -> Void = { _, _ in }
     /// Opens the automation target menu: (track id, lane id or nil to add one).
     var openAutomationMenu: (UUID, UUID?) -> Void = { _, _ in }
     /// Opens a song FX move's editor.
@@ -332,6 +334,10 @@ struct ArrangementView: View {
 
                 Spacer(minLength: 8)
 
+                eventActionButton(clip.activeVocalEdit == nil ? "SIREN" : "SIREN  ●", help: "Tune, time and align this event note by note (or double-click it)") {
+                    guard let location = selectedAudioLocation else { return }
+                    openVocal(session.tracks[location.track].id, clip.id)
+                }
                 eventActionButton("PREVIEW", help: "Hear this event alone") { previewAudioEvent(clip) }
                 eventActionButton("XFADE", help: "Crossfade with the overlapping event beside it", enabled: selectedCrossfadePartner != nil, action: crossfadeSelectedAudioEvent)
                 eventActionButton("CONSOLIDATE", help: "Print gain, fades, pitch and stretch into a new source") {
@@ -748,6 +754,7 @@ struct ArrangementView: View {
                     .simultaneousGesture(
                         TapGesture(count: 2).onEnded {
                             if clip.isNoteClip { openNotes(track.id, clip.id); return }
+                            if clip.kind == .audio { openVocal(track.id, clip.id); return }
                             guard clip.isSequenced else { return }
                             openPattern(track.id, track.patternContent(of: clip).id)
                         }
