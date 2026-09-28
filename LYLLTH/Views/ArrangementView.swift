@@ -1457,20 +1457,8 @@ struct LYTrackHeader: View {
             LYTrackToggle(title: "S", isOn: $isSolo, tint: LYLLTHTheme.teal, height: 17)
                 .help("Solo")
             if let isArmed {
-                // A dot, the record symbol, so it never reads as another R.
-                Button { isArmed.wrappedValue.toggle() } label: {
-                    Circle()
-                        .fill(isArmed.wrappedValue ? LYLLTHTheme.record : Color.clear)
-                        .overlay(Circle().stroke(isArmed.wrappedValue ? LYLLTHTheme.record : LYLLTHTheme.chromeText, lineWidth: 1.2))
-                        .frame(width: 7, height: 7)
-                        .frame(width: 19, height: 17)
-                        .overlay(Rectangle().stroke(isArmed.wrappedValue ? LYLLTHTheme.record : LYLLTHTheme.lineStrong, lineWidth: 1))
-                        .lyBloom(LYLLTHTheme.record, isOn: isArmed.wrappedValue)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Record arm")
-                .accessibilityLabel("Record arm")
+                LYTrackToggle(title: "R", isOn: isArmed, tint: LYLLTHTheme.record, height: 17)
+                    .help("Record arm")
             }
         }
     }
@@ -1478,11 +1466,13 @@ struct LYTrackHeader: View {
     private var processRow: some View {
         HStack(spacing: 3) {
             if let showsAutomation {
-                chip(automationCount > 0 ? "AUTO \(automationCount)" : "AUTO",
-                     isOn: showsAutomation.wrappedValue, tint: LYLLTHTheme.indigo) {
-                    showsAutomation.wrappedValue.toggle()
-                }
-                .help("Show this track's automation lanes")
+                LYTrackToggle(title: "A", isOn: showsAutomation, tint: LYLLTHTheme.indigo, height: 17)
+                    .overlay(alignment: .topTrailing) {
+                        if automationCount > 0 && !showsAutomation.wrappedValue {
+                            Circle().fill(LYLLTHTheme.indigo).frame(width: 4, height: 4).offset(x: 1.5, y: -1.5)
+                        }
+                    }
+                    .help(automationCount > 0 ? "Show this track's \(automationCount) automation lane\(automationCount == 1 ? "" : "s")" : "Show this track's automation lanes")
             }
             if showsModeChip, let automationMode {
                 let mode = automationMode.wrappedValue ?? .read
@@ -1493,9 +1483,18 @@ struct LYTrackHeader: View {
                 .help("Automation mode: \(mode.label). Click to cycle READ, TOUCH, LATCH and WRITE.")
                 .accessibilityLabel("Automation mode \(mode.label)")
             }
-            chip(isFrozen ? "FROZEN" : "FREEZE", isOn: isFrozen, tint: LYLLTHTheme.teal, width: 44, action: toggleFreeze)
-                .help(isFrozen ? "Unfreeze and restore the original track" : "Freeze this track to audio")
-                .accessibilityLabel(isFrozen ? "Unfreeze track" : "Freeze track")
+            Button(action: toggleFreeze) {
+                Image(systemName: isFrozen ? "snowflake.circle.fill" : "snowflake")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(isFrozen ? LYLLTHTheme.teal : LYLLTHTheme.chromeText)
+                    .frame(width: 19, height: 17)
+                    .overlay(Rectangle().stroke(isFrozen ? LYLLTHTheme.teal : LYLLTHTheme.lineStrong, lineWidth: 1))
+                    .lyBloom(LYLLTHTheme.teal, isOn: isFrozen)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isFrozen ? "Unfreeze and restore the original track" : "Freeze this track to audio")
+            .accessibilityLabel(isFrozen ? "Unfreeze track" : "Freeze track")
         }
     }
 
