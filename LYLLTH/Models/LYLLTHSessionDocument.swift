@@ -379,6 +379,14 @@ struct LYLLTHSessionDocument: FileDocument {
             session.assignEngineChannel(toTrackAt: trackIndex)
         }
 
+        let clip = storeAudioEvent(imported, atBeat: atBeat)
+        session.tracks[trackIndex].clips.append(clip)
+        return clip.id
+    }
+
+    /// Stores an imported file in the song's audio and makes the event that
+    /// plays all of it.
+    private mutating func storeAudioEvent(_ imported: LYImportedAudio, atBeat: Double) -> LYClip {
         let storedName = uniqueAudioName(imported.fileName)
         try? mediaStore.put(imported.data, named: storedName)
         var clip = LYClip(
@@ -403,8 +411,71 @@ struct LYLLTHSessionDocument: FileDocument {
         if let cycle = LYAudioEventTiming.cycleBeats(for: clip, projectBPM: session.bpm) {
             clip.lengthBeats = cycle
         }
+        return clip
+    }
+
+    /// A drum track's sound laid down as an audio event at `atBeat`, on the
+    /// audio track that holds that drum track's prints: found by name, or
+    /// made just below the drum track, at its level and pan. Returns the
+    /// print track and the new event.
+    mutating func addDrumPrint(
+        _ imported: LYImportedAudio,
+        fromDrumTrackID drumTrackID: UUID,
+        printed: LYPrintedDrum?,
+        atBeat: Double
+    ) -> (trackID: UUID, clipID: UUID)? {
+        guard let drumIndex = session.tracks.firstIndex(where: { $0.id == drumTrackID }) else { return nil }
+        let drum = session.tracks[drumIndex]
+        let name = LYDrumPrint.trackName(for: drum)
+        let trackIndex: Int
+        if let existing = session.tracks.firstIndex(where: { $0.kind == .audio && $0.name == name }) {
+            trackIndex = existing
+        } else {
+            var track = LYTrack(name: name, kind: .audio, accent: .purple, volumeDB: drum.volumeDB)
+            track.pan = drum.pan
+            track.outputBusID = drum.outputBusID
+            trackIndex = drumIndex + 1
+            session.tracks.insert(track, at: trackIndex)
+            session.assignEngineChannel(toTrackAt: trackIndex)
+        }
+        var clip = storeAudioEvent(imported, atBeat: atBeat)
+        clip.printedDrum = printed
         session.tracks[trackIndex].clips.append(clip)
-        return clip.id
+        return (session.tracks[trackIndex].id, clip.id)
+    }
+
+    /// Points every event that plays `sourceName` at a new print of the
+    /// sound. Trims and positions stay; an event that played the whole old
+    /// sound plays the whole new one.
+    mutating func replaceDrumPrint(sourceName: String, with imported: LYImportedAudio) {
+        let storedName = uniqueAudioName(imported.fileName)
+        try? mediaStore.put(imported.data, named: storedName)
+        let secondsPerBeat = 60 / max(session.bpm, 1)
+        for t in session.tracks.indices {
+            for c in session.tracks[t].clips.indices where session.tracks[t].clips[c].sourceRelativePath == sourceName {
+                var clip = session.tracks[t].clips[c]
+                let oldFile = clip.sourceFileDurationSeconds ?? clip.sourceDurationSeconds ?? imported.duration
+                let oldDuration = clip.sourceDurationSeconds ?? oldFile
+                let playedAll = clip.sourceStartSeconds < 0.000_5 && abs(oldDuration - oldFile) < 0.000_5
+                clip.sourceRelativePath = storedName
+                clip.waveformPeaks = imported.waveformPeaks
+                clip.sourceSampleRate = imported.sampleRate
+                clip.sourceChannelCount = imported.channelCount
+                clip.sourceFileDurationSeconds = imported.duration
+                if playedAll {
+                    clip.sourceDurationSeconds = imported.duration
+                    clip.lengthBeats = max(0.001, imported.duration / secondsPerBeat)
+                } else {
+                    clip.sourceStartSeconds = min(clip.sourceStartSeconds, max(0, imported.duration - 0.001))
+                    let fits = min(oldDuration, imported.duration - clip.sourceStartSeconds)
+                    if fits < oldDuration {
+                        clip.lengthBeats = max(0.001, clip.lengthBeats * fits / max(oldDuration, 0.001))
+                    }
+                    clip.sourceDurationSeconds = max(0.001, fits)
+                }
+                session.tracks[t].clips[c] = clip
+            }
+        }
     }
 
     /// Every stored file the song can still play: events and their takes,

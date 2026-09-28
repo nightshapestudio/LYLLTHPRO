@@ -163,6 +163,7 @@
 		B9CBB8A6BB37F7A5FF09C9EB /* DrumSynthControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F97842A504B9FFCB9A8E07 /* DrumSynthControls.swift */; };
 		BCFDC588B7A5C7F4E8C9F886 /* SirenEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE3FCE9D26D3049D63A5B62C /* SirenEditor.swift */; };
 		BDCDD898806FB38DC18A19C6 /* SoundSteppingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F72DA643AF2A79998343D85 /* SoundSteppingTests.swift */; };
+		A12F8A2DADB9CEBAA075F0D3 /* DrumPrintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5717730080FEF5F054BBFF6D /* DrumPrintTests.swift */; };
 		BEDFD504AE4AD5C9E2F9D00E /* SessionDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */; };
 		BEF12851075EA3C677715CCD /* NightshapeTheme+macOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2076405DA45D97F6974188B2 /* NightshapeTheme+macOS.swift */; };
 		C5FC2050CF73E1D9599F3518 /* AudioEngineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC518B98C5E542E07745D166 /* AudioEngineController.swift */; };
@@ -318,6 +319,7 @@
 		6F5EDEEECA0B5AF0315DC28E /* ZipArchiveReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ZipArchiveReader.swift; path = "../nightshape-drumkit-ios/Services/ZipArchiveReader.swift"; sourceTree = "<group>"; };
 		6F6FDEB2771DB26C743DA3A2 /* FKitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FKitTests.swift; sourceTree = "<group>"; };
 		6F72DA643AF2A79998343D85 /* SoundSteppingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundSteppingTests.swift; sourceTree = "<group>"; };
+		5717730080FEF5F054BBFF6D /* DrumPrintTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumPrintTests.swift; sourceTree = "<group>"; };
 		72AEB02959BB05614C81FE98 /* DrumKitLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrumKitLibrary.swift; path = "../nightshape-drumkit-ios/Services/DrumKitLibrary.swift"; sourceTree = "<group>"; };
 		762CC1543C2324F346E902F2 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
 		79A8BE359F6B7DF3674E5D8A /* Inter-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-Medium.ttf"; sourceTree = "<group>"; };
@@ -603,6 +605,7 @@
 				CE39D72F825EEC10AE76F292 /* SirenTests.swift */,
 				E4590DBB4A2CB4EEFB8F938C /* SongFXTests.swift */,
 				6F72DA643AF2A79998343D85 /* SoundSteppingTests.swift */,
+				5717730080FEF5F054BBFF6D /* DrumPrintTests.swift */,
 				1A2F4736A16F53868A4791F0 /* SynthCoreTests.swift */,
 				1A1922DA06A54E7620D26B2E /* SynthFeatureTests.swift */,
 				297C287AF96441E0A0F9CFA4 /* Fixtures */,
@@ -1071,6 +1074,7 @@
 				587978914D7A50ECE3DCE300 /* SirenTests.swift in Sources */,
 				8FF0057A33F063C940883B91 /* SongFXTests.swift in Sources */,
 				BDCDD898806FB38DC18A19C6 /* SoundSteppingTests.swift in Sources */,
+				A12F8A2DADB9CEBAA075F0D3 /* DrumPrintTests.swift in Sources */,
 				162682C9152C4F5217FC0D04 /* SynthCoreTests.swift in Sources */,
 				EFD5BBF99458A4F73ACC3359 /* SynthFeatureTests.swift in Sources */,
 			);

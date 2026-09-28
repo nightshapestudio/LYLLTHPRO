@@ -31,6 +31,10 @@ struct ArrangementView: View {
     var placePattern: () -> Void = {}
     var consolidateAudio: (UUID, UUID) -> Void = { _, _ in }
     var toggleFreeze: (UUID) -> Void = { _ in }
+    /// Prints a drum track's sound to its PRINT audio track at a beat.
+    var printDrum: (UUID, Double) -> Void = { _, _ in }
+    /// Prints a printed audio event's drum sound again.
+    var reprintDrum: (UUID) -> Void = { _ in }
     /// False while a floating window or menu sits over the arrangement, so
     /// a right-click inside it never opens a region menu underneath.
     var acceptsRightClicks: () -> Bool = { true }
@@ -2383,7 +2387,10 @@ extension ArrangementView {
                 .section("OPEN"),
                 .action(clip.activeVocalEdit == nil ? "SIREN" : "SIREN  ·  EDITED", icon: "waveform.path.ecg") { openVocal(track.id, clipID) },
                 .action("PREVIEW", icon: "play") { previewAudioEvent(clip) },
-                .action("BOUNCE IN PLACE", icon: "square.and.arrow.down.on.square") { consolidateAudio(track.id, clipID) },
+                .action("BOUNCE IN PLACE", icon: "square.and.arrow.down.on.square") { consolidateAudio(track.id, clipID) }
+            ] + (clip.printedDrum == nil ? [] : [
+                .action("PRINT SOUND AGAIN", icon: "arrow.clockwise") { reprintDrum(clipID) }
+            ]) + [
                 .divider("end"),
                 .action("DELETE", icon: "trash", shortcut: "⌫", destructive: true) { edit { LYRegionCommands.delete(clipID, in: &$0); return nil } }
             ]
@@ -2434,7 +2441,7 @@ extension ArrangementView {
                 .action("EDIT IN SEQUENCER", icon: "square.grid.3x3", shortcut: "↩") { openPattern(track.id, content.id) },
                 .action("PLACE AGAIN", icon: "plus.square.on.square", shortcut: "⌘D") { edit { LYRegionCommands.duplicate(clipID, in: &$0) } },
                 .action("MAKE UNIQUE", icon: "square.on.square.dashed", enabled: clip.isPlacement) { edit { LYRegionCommands.makeUnique(clipID, in: &$0) } }
-            ] + common + [
+            ] + common + printEntries(track, request) + [
                 .section("REGION"),
                 .action("MUTE", icon: "speaker.slash", on: clip.isMuted) { edit { LYRegionCommands.toggleMute(clipID, in: &$0); return nil } },
                 .action("RENAME PATTERN…", icon: "character.cursor.ibeam") {
@@ -2459,8 +2466,18 @@ extension ArrangementView {
         if takesNoteClips(track), let index = session.tracks.firstIndex(where: { $0.id == track.id }) {
             entries.append(.action("NEW NOTE CLIP HERE", icon: "pianokeys") { createNoteClip(trackIndex: index, atBeat: request.beat) })
         }
+        entries += printEntries(track, request)
         entries.append(.action("MOVE PLAY CURSOR HERE", icon: "arrowtriangle.down") { audio.movePlayCursor(to: request.beat) })
         return entries
+    }
+
+    /// A drum track's sound as an audio event to chop, on its PRINT track.
+    private func printEntries(_ track: LYTrack, _ request: LYRegionMenuRequest) -> [LYMenuEntry] {
+        guard track.kind == .drumkit else { return [] }
+        return [
+            .section("SAMPLE"),
+            .action("PRINT SOUND HERE", icon: "waveform.badge.plus") { printDrum(track.id, request.beat) }
+        ]
     }
 
     private func stretchTitle(_ mode: LYAudioStretchMode) -> String {

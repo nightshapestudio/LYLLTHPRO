@@ -134,3 +134,52 @@ enum LYDrumSounds {
         }.value
     }
 }
+
+/// A drum track's sound printed to an ordinary audio event, to split, trim
+/// and chop. The print is the file the drum track already plays: its preset's
+/// render, or its own one-shot sample. Track envelope and effects are left
+/// off; the print track starts at the drum track's level and pan.
+enum LYDrumPrint {
+    /// The audio track a drum track's prints land on.
+    static func trackName(for drum: LYTrack) -> String { drum.name + " PRINT" }
+
+    /// The sound a drum track plays, read as an audio file: a one-shot, so
+    /// no tempo or beat map is guessed from it.
+    static func audio(for drum: LYTrack, sampleURL: (String) -> URL?) async throws -> (LYImportedAudio, LYPrintedDrum?) {
+        guard drum.kind == .drumkit else { throw CocoaError(.fileNoSuchFile) }
+        if let path = drum.samplePath {
+            guard let url = sampleURL(path) else { throw CocoaError(.fileNoSuchFile) }
+            return (oneShot(try await LYAudioImporter.importFile(at: url), name: drum.name), nil)
+        }
+        guard let preset = LYDrumSounds.preset(for: drum) else { throw CocoaError(.fileNoSuchFile) }
+        return (try await audio(for: preset), LYPrintedDrum(trackID: drum.id, presetID: preset.id))
+    }
+
+    static func audio(for preset: DrumSynthPreset) async throws -> LYImportedAudio {
+        let url = try await LYDrumSounds.renderedFile(for: preset)
+        return oneShot(try await LYAudioImporter.importFile(at: url), name: preset.name)
+    }
+
+    /// The sound a print came from as it is now: the drum track's own, if it
+    /// still plays that preset, else the library's.
+    static func currentPreset(for printed: LYPrintedDrum, in session: LYLLTHSession,
+                              userPresets: [DrumSynthPreset] = LYDrumUserPresets.all()) -> DrumSynthPreset? {
+        if let track = session.tracks.first(where: { $0.id == printed.trackID }),
+           track.kind == .drumkit, track.samplePath == nil,
+           let preset = LYDrumSounds.preset(for: track), preset.id == printed.presetID {
+            return preset
+        }
+        return userPresets.first { $0.id == printed.presetID } ?? LYDrumSounds.preset(id: printed.presetID)
+    }
+
+    private static func oneShot(_ imported: LYImportedAudio, name: String) -> LYImportedAudio {
+        var sound = imported
+        let title = name.uppercased()
+        sound.displayName = title
+        let ext = URL(fileURLWithPath: imported.fileName).pathExtension
+        sound.fileName = title.replacingOccurrences(of: " ", with: "_") + "_PRINT." + (ext.isEmpty ? "wav" : ext)
+        sound.sourceBPM = nil
+        sound.beatMap = nil
+        return sound
+    }
+}

@@ -101,6 +101,8 @@ struct LYWorkspaceActions {
     var openLUNATK: () -> Void = {}
     /// Previous (−1) / next (+1) sound on the selected track.
     var stepSound: (Int) -> Void = { _ in }
+    /// The selected drum track's sound, printed to audio at the cursor.
+    var printSound: () -> Void = {}
 }
 
 private struct LYWorkspaceActionsKey: FocusedValueKey {
@@ -163,6 +165,10 @@ struct LYProjectCommands: Commands {
                 .disabled(workspace == nil)
             Button("Next Sound") { workspace?.stepSound(1) }
                 .keyboardShortcut("]", modifiers: .command)
+                .disabled(workspace == nil)
+            Divider()
+            Button("Print Sound as Sample") { workspace?.printSound() }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
                 .disabled(workspace == nil)
         }
         CommandGroup(after: .toolbar) {

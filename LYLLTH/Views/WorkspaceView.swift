@@ -682,6 +682,8 @@ struct WorkspaceView: View {
             },
             consolidateAudio: consolidateAudioEvent,
             toggleFreeze: toggleFreeze,
+            printDrum: printDrumSound,
+            reprintDrum: reprintDrumSound,
             acceptsRightClicks: {
                 // Nothing floating over the arrangement.
                 activeMenu == nil && fxRequest == nil && fxPickerTarget == nil && synthTrackID == nil
@@ -1703,8 +1705,54 @@ struct WorkspaceView: View {
                 let synths = document.session.tracks.filter { $0.kind == .instrument && $0.isChordTrack != true }
                 if let track = synths.first(where: { $0.id == selectedTrackID }) ?? synths.first { openSynth(track.id) }
             },
-            stepSound: { step in if let id = selectedTrackID { stepSound(id, by: step) } }
+            stepSound: { step in if let id = selectedTrackID { stepSound(id, by: step) } },
+            printSound: {
+                guard let id = selectedTrackID,
+                      document.session.tracks.first(where: { $0.id == id })?.kind == .drumkit else {
+                    notice = "SELECT A DRUM TRACK TO PRINT ITS SOUND"
+                    return
+                }
+                printDrumSound(id, atBeat: audio.cursorBeat)
+            }
         )
+    }
+
+    /// A drum track's sound laid on its PRINT audio track at `beat`.
+    private func printDrumSound(_ trackID: UUID, atBeat beat: Double) {
+        guard let track = document.session.tracks.first(where: { $0.id == trackID }), track.kind == .drumkit else { return }
+        let media = document.audioMediaStore
+        Task { @MainActor in
+            do {
+                let (sound, printed) = try await LYDrumPrint.audio(for: track) { media.url(for: $0) }
+                guard let placed = document.addDrumPrint(sound, fromDrumTrackID: trackID, printed: printed, atBeat: beat) else { return }
+                selectedTrackID = placed.trackID
+                audioImportError = nil
+                notice = "PRINTED " + sound.displayName + " TO " + LYDrumPrint.trackName(for: track)
+            } catch {
+                audioImportError = "PRINT: " + error.localizedDescription.uppercased()
+            }
+        }
+    }
+
+    /// Prints a printed event's drum sound again, as that sound is now.
+    /// Every event cut from the same print follows.
+    private func reprintDrumSound(_ clipID: UUID) {
+        guard let clip = document.session.tracks.lazy.flatMap(\.clips).first(where: { $0.id == clipID }),
+              let printed = clip.printedDrum, let sourceName = clip.sourceRelativePath else { return }
+        guard let preset = LYDrumPrint.currentPreset(for: printed, in: document.session) else {
+            audioImportError = "PRINT AGAIN: THAT SOUND IS NO LONGER IN THE LIBRARY"
+            return
+        }
+        Task { @MainActor in
+            do {
+                let sound = try await LYDrumPrint.audio(for: preset)
+                document.replaceDrumPrint(sourceName: sourceName, with: sound)
+                audioImportError = nil
+                notice = "PRINTED " + sound.displayName + " AGAIN"
+            } catch {
+                audioImportError = "PRINT AGAIN: " + error.localizedDescription.uppercased()
+            }
+        }
     }
 
     /// Previous / next sound on a track, within its kind, played as it lands.

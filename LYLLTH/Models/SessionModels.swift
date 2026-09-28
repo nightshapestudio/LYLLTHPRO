@@ -968,6 +968,9 @@ struct LYClip: Codable, Identifiable, Equatable {
     var compSegments: [LYCompSegment]? = nil
     /// SIREN tuning, timing and alignment for an audio region.
     var vocal: LYVocalEdit? = nil
+    /// Set on an audio event printed from a drum track's sound, so it can be
+    /// printed again after the sound changes.
+    var printedDrum: LYPrintedDrum? = nil
 
     var isNoteClip: Bool { kind == .notes }
     /// The repeating length of a note clip.
@@ -1038,6 +1041,7 @@ extension LYClip {
         case pitchSemitones, fadeInSeconds, fadeOutSeconds, fadeCurve, stretchMode
         case sourceBPM, preservePitch, beatMap, isMuted, isLocked, isLooped, loopOffsetBeats, sourceFileDurationSeconds
         case patternSourceID, isOffTimeline, notes, noteLoopBeats, takes, activeTakeID, compSegments, vocal
+        case printedDrum
     }
 
     init(from decoder: Decoder) throws {
@@ -1078,8 +1082,16 @@ extension LYClip {
         activeTakeID = try values.decodeIfPresent(UUID.self, forKey: .activeTakeID)
         compSegments = try values.decodeIfPresent([LYCompSegment].self, forKey: .compSegments)
         vocal = try values.decodeIfPresent(LYVocalEdit.self, forKey: .vocal)
+        printedDrum = try values.decodeIfPresent(LYPrintedDrum.self, forKey: .printedDrum)
         normalizeAudioEvent()
     }
+}
+
+/// Where a printed drum sound came from: the drum track and the preset it
+/// played.
+struct LYPrintedDrum: Codable, Equatable {
+    var trackID: UUID
+    var presetID: String
 }
 
 enum LYAudioEventEditor {
