@@ -2782,11 +2782,12 @@ struct LYViewSwitch: View {
                     .tracking(1.4)
             }
             .foregroundStyle(isOn ? color : LYLLTHTheme.dim)
+            // A faint lift on the lettering only; the box itself never glows.
+            .lyBloom(color, isOn: isOn && color != LYLLTHTheme.teal, strength: 0.3)
             .padding(.horizontal, 12)
             .frame(height: 28)
-            .background(color.opacity(isOn ? 0.12 : 0))
+            .background(color.opacity(isOn ? 0.08 : 0))
             .overlay(alignment: .bottom) { Rectangle().fill(isOn ? color : .clear).frame(height: 2) }
-            .lyBloom(color, isOn: isOn && color != LYLLTHTheme.teal)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -3,8 +3,9 @@ import AppKit
 
 /// DrumKit's song FX lane above the tracks: filter sweeps and FRACTURE
 /// moves on a track or MAIN, two rows so moves on different targets can
-/// overlap. Double-click to add a move, drag to move it, drag its right edge
-/// to resize, click to change it.
+/// overlap. Double-click empty lane to add a move, double-click a move to
+/// remove it. Drag a move to place it, drag either edge to shorten or
+/// lengthen it, click it to change it.
 struct LYSongFXLane: View {
     @Binding var blocks: [LYSongFXBlock]
     let tracks: [LYTrack]
@@ -26,7 +27,7 @@ struct LYSongFXLane: View {
                     .font(LYLLTHTheme.label(8, weight: .bold))
                     .tracking(1.8)
                     .foregroundStyle(LYLLTHTheme.chromeText)
-                Text(blocks.isEmpty ? "DOUBLE-CLICK TO ADD A FILTER OR FRACTURE MOVE" : "FILTER + FRACTURE MOVES")
+                Text(blocks.isEmpty ? "DOUBLE-CLICK TO ADD A FILTER OR FRACTURE MOVE" : "DOUBLE-CLICK ADDS OR REMOVES · DRAG EDGES TO RESIZE")
                     .font(LYLLTHTheme.label(6.5, weight: .bold))
                     .tracking(0.9)
                     .foregroundStyle(LYLLTHTheme.dim)
@@ -53,7 +54,8 @@ struct LYSongFXLane: View {
                         rowHeight: Self.rowHeight,
                         maximumBeat: Double(beats),
                         snap: snap,
-                        open: { openEditor(block.id) }
+                        open: { openEditor(block.id) },
+                        remove: { remove(block.id) }
                     )
                     .frame(width: max(CGFloat(block.lengthBeats) * beatWidth - 2, 8), height: Self.rowHeight - 3)
                     .offset(x: CGFloat(block.startBeat) * beatWidth + 1, y: 4 + CGFloat(block.row) * Self.rowHeight)
@@ -72,6 +74,10 @@ struct LYSongFXLane: View {
 
     private func accent(for block: LYSongFXBlock) -> Color {
         block.move.isFracture ? LYLLTHTheme.purple : LYLLTHTheme.indigo
+    }
+
+    private func remove(_ id: UUID) {
+        blocks.removeAll { $0.id == id }
     }
 
     private func add(at location: CGPoint) {
@@ -93,14 +99,26 @@ private struct LYSongFXBlockView: View {
     let maximumBeat: Double
     let snap: (Double) -> Double
     let open: () -> Void
+    let remove: () -> Void
 
-    @State private var moveOrigin: (beat: Double, row: Int)?
-    @State private var resizeOrigin: Double?
+    private enum Grab { case body, leading, trailing }
+
+    // One gesture does everything (click, double-click, move, both edges),
+    // so no recognizer can starve another.
+    @State private var grab: Grab?
+    @State private var origin: LYSongFXBlock?
+    @State private var dragged = false
+    @State private var lastClick = Date.distantPast
+    @State private var pendingOpen: DispatchWorkItem?
+    @State private var hoverEdge: Grab?
+
+    private var width: CGFloat { max(CGFloat(block.lengthBeats) * beatWidth - 2, 8) }
+    private var edge: CGFloat { min(7, width / 3) }
 
     var body: some View {
         ZStack(alignment: .leading) {
             Rectangle().fill(Color(hex: 0x0B0C10))
-            Rectangle().fill(accent.opacity(0.1))
+            Rectangle().fill(accent.opacity(grab == nil ? 0.1 : 0.2))
             if block.move.hasLevels {
                 Canvas { context, size in
                     var path = Path()
@@ -120,44 +138,98 @@ private struct LYSongFXBlockView: View {
                 .tracking(0.8)
                 .foregroundStyle(LYLLTHTheme.text)
                 .lineLimit(1)
-                .padding(.horizontal, 5)
+                .padding(.horizontal, 6)
                 .allowsHitTesting(false)
+            // Edge grips: always faintly there so they can be found, bright
+            // when hovered or held.
             HStack(spacing: 0) {
-                Rectangle().fill(Color.clear).contentShape(Rectangle()).gesture(moveGesture)
-                Rectangle()
-                    .fill(accent.opacity(resizeOrigin == nil ? 0.001 : 0.5))
-                    .frame(width: 6)
-                    .contentShape(Rectangle())
-                    .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
-                    .gesture(resizeGesture)
+                grip(active: hoverEdge == .leading || grab == .leading)
+                Spacer(minLength: 0)
+                grip(active: hoverEdge == .trailing || grab == .trailing)
             }
+            .allowsHitTesting(false)
         }
         .overlay(Rectangle().stroke(accent.opacity(0.85), lineWidth: 1))
-        .simultaneousGesture(TapGesture().onEnded { open() })
-        .help("Click to change the move or what it moves. Drag to move it, drag the right edge to resize.")
+        .contentShape(Rectangle())
+        .gesture(gesture)
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let point):
+                let next = region(at: point.x)
+                hoverEdge = next == .body ? nil : next
+                (next == .body ? NSCursor.openHand : NSCursor.resizeLeftRight).set()
+            case .ended:
+                hoverEdge = nil
+                NSCursor.arrow.set()
+            }
+        }
+        .help("Click to change it. Double-click to remove it. Drag to move it; drag either edge to shorten or lengthen it.")
     }
 
-    private var moveGesture: some Gesture {
-        DragGesture(minimumDistance: 3)
-            .onChanged { drag in
-                let origin = moveOrigin ?? (block.startBeat, block.row)
-                moveOrigin = origin
-                let beat = snap(origin.beat + Double(drag.translation.width / max(beatWidth, 1)))
-                block.startBeat = min(max(0, beat), max(0, maximumBeat - block.lengthBeats))
-                block.row = min(max(origin.row + Int((drag.translation.height / rowHeight).rounded()), 0), SongFXBlock.rowCount - 1)
-            }
-            .onEnded { _ in moveOrigin = nil }
+    private func grip(active: Bool) -> some View {
+        Rectangle()
+            .fill(accent.opacity(active ? 0.75 : 0.28))
+            .frame(width: 2)
+            .padding(.vertical, 3)
+            .padding(.horizontal, 2)
     }
 
-    private var resizeGesture: some Gesture {
-        DragGesture(minimumDistance: 1)
+    private func region(at x: CGFloat) -> Grab {
+        if x <= edge { return .leading }
+        if x >= width - edge { return .trailing }
+        return .body
+    }
+
+    private var gesture: some Gesture {
+        DragGesture(minimumDistance: 0)
             .onChanged { drag in
-                let origin = resizeOrigin ?? block.lengthBeats
-                resizeOrigin = origin
-                let end = snap(block.startBeat + origin + Double(drag.translation.width / max(beatWidth, 1)))
-                block.lengthBeats = max(lyBeatsPerStep, min(end, maximumBeat) - block.startBeat)
+                if grab == nil {
+                    grab = region(at: drag.startLocation.x)
+                    origin = block
+                }
+                guard let grab, let origin else { return }
+                if !dragged, hypot(drag.translation.width, drag.translation.height) < 3 { return }
+                if !dragged { pendingOpen?.cancel() }
+                dragged = true
+                let beats = Double(drag.translation.width / max(beatWidth, 1))
+                switch grab {
+                case .body:
+                    let start = snap(origin.startBeat + beats)
+                    block.startBeat = min(max(0, start), max(0, maximumBeat - origin.lengthBeats))
+                    block.row = min(max(origin.row + Int((drag.translation.height / rowHeight).rounded()), 0), SongFXBlock.rowCount - 1)
+                case .leading:
+                    let end = origin.startBeat + origin.lengthBeats
+                    let start = min(max(0, snap(origin.startBeat + beats)), end - lyBeatsPerStep)
+                    block.startBeat = start
+                    block.lengthBeats = end - start
+                case .trailing:
+                    let end = min(snap(origin.startBeat + origin.lengthBeats + beats), maximumBeat)
+                    block.lengthBeats = max(lyBeatsPerStep, end - origin.startBeat)
+                }
             }
-            .onEnded { _ in resizeOrigin = nil }
+            .onEnded { _ in
+                if !dragged { click() }
+                grab = nil
+                origin = nil
+                dragged = false
+            }
+    }
+
+    /// A single click opens the editor once the double-click window has
+    /// passed; a second click inside it removes the move instead.
+    private func click() {
+        let now = Date()
+        if now.timeIntervalSince(lastClick) <= NSEvent.doubleClickInterval {
+            pendingOpen?.cancel()
+            pendingOpen = nil
+            lastClick = .distantPast
+            remove()
+            return
+        }
+        lastClick = now
+        let work = DispatchWorkItem { open() }
+        pendingOpen = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: work)
     }
 }
 
@@ -174,6 +246,7 @@ struct LYSongFXPanel: View {
             LYNightshapeMenuDivider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    removeButton
                     moveSection("FILTER", SongFXMove.filterMoves)
                     moveSection("FRACTURE", SongFXMove.fractureMoves)
                     VStack(alignment: .leading, spacing: 4) {
@@ -181,16 +254,6 @@ struct LYSongFXPanel: View {
                         targetRow(nil, "MAIN")
                         ForEach(targets) { track in targetRow(track.id, track.name) }
                     }
-                    Button(action: remove) {
-                        Text("REMOVE MOVE")
-                            .font(LYLLTHTheme.label(8.5, weight: .bold))
-                            .tracking(1.4)
-                            .foregroundStyle(LYLLTHTheme.record)
-                            .frame(maxWidth: .infinity, minHeight: 28)
-                            .overlay(Rectangle().stroke(LYLLTHTheme.record.opacity(0.6), lineWidth: 1))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
                 }
                 .padding(14)
             }
@@ -198,6 +261,20 @@ struct LYSongFXPanel: View {
         }
         .frame(width: 320)
         .lyNightshapeMenuChrome(accent: accent)
+    }
+
+    private var removeButton: some View {
+        Button(action: remove) {
+            Text("REMOVE MOVE")
+                .font(LYLLTHTheme.label(8.5, weight: .bold))
+                .tracking(1.4)
+                .foregroundStyle(LYLLTHTheme.record)
+                .frame(maxWidth: .infinity, minHeight: 28)
+                .overlay(Rectangle().stroke(LYLLTHTheme.record.opacity(0.6), lineWidth: 1))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Or double-click the move in the lane")
     }
 
     private var accent: Color { block.move.isFracture ? LYLLTHTheme.purple : LYLLTHTheme.indigo }
