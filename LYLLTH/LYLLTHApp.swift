@@ -19,7 +19,6 @@ struct LYLLTHApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             LYProjectCommands()
-            LYSettingsCommands()
             LYHelpCommands()
         }
 
@@ -185,13 +184,3 @@ struct LYHelpCommands: Commands {
     }
 }
 
-struct LYSettingsCommands: Commands {
-    @Environment(\.openSettings) private var openSettings
-
-    var body: some Commands {
-        CommandGroup(replacing: .appSettings) {
-            Button("Settings…") { openSettings() }
-                .keyboardShortcut(",", modifiers: .command)
-        }
-    }
-}
