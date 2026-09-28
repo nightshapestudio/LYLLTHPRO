@@ -188,31 +188,33 @@ struct LYPatternPlaybackVisualizer: View {
         }
 
         guard (0..<stepCount).contains(currentStep) else { return }
+        // The playhead is a bright line with a tail behind it, like a
+        // comet: all the glow sits to the left, none ahead or around it.
+        // The tail is a fixed length on screen so it reads the same at 16
+        // steps as at 64.
         let stepLeft = pad + CGFloat(currentStep) * slotWidth
         let markerX = stepLeft + slotWidth * 0.5
         let alpha = isPlaying ? 1.0 : 0.4
-        let trailWidth = min(slotWidth * 1.85, markerX - pad)
-        let trail = CGRect(x: markerX - trailWidth, y: top, width: trailWidth, height: height)
-        context.fill(
-            Path(roundedRect: trail, cornerRadius: min(4, trailWidth * 0.18)),
-            with: .linearGradient(
-                Gradient(stops: [
-                    .init(color: LYLLTHTheme.purple.opacity(0), location: 0),
-                    .init(color: LYLLTHTheme.purple.opacity(0.045 * alpha), location: 0.52),
-                    .init(color: LYLLTHTheme.purple.opacity(0.20 * alpha), location: 1)
-                ]),
-                startPoint: CGPoint(x: trail.minX, y: trail.midY),
-                endPoint: CGPoint(x: trail.maxX, y: trail.midY)
+        let trailWidth = min(max(slotWidth * 2.5, 72), markerX - pad)
+        if trailWidth > 0 {
+            let trail = CGRect(x: markerX - trailWidth, y: top, width: trailWidth, height: height)
+            context.fill(
+                Path(trail),
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(color: LYLLTHTheme.purple.opacity(0), location: 0),
+                        .init(color: LYLLTHTheme.purple.opacity(0.10 * alpha), location: 0.6),
+                        .init(color: LYLLTHTheme.purple.opacity(0.34 * alpha), location: 1)
+                    ]),
+                    startPoint: CGPoint(x: trail.minX, y: trail.midY),
+                    endPoint: CGPoint(x: trail.maxX, y: trail.midY)
+                )
             )
-        )
+        }
+        let markerWidth: CGFloat = 2
         context.fill(
-            Path(roundedRect: CGRect(x: stepLeft, y: top, width: slotWidth, height: height), cornerRadius: min(4, slotWidth * 0.16)),
-            with: .color(LYLLTHTheme.purple.opacity(0.15 * alpha))
-        )
-        let markerWidth = max(1.5, slotWidth * 0.10)
-        context.fill(
-            Path(roundedRect: CGRect(x: markerX - markerWidth * 0.5, y: top, width: markerWidth, height: height), cornerRadius: markerWidth * 0.5),
-            with: .color(LYLLTHTheme.purple.opacity(0.78 * alpha))
+            Path(CGRect(x: markerX - markerWidth, y: top, width: markerWidth, height: height)),
+            with: .color(LYLLTHTheme.purple.opacity(alpha))
         )
 
         let pageCount = max(1, Int(ceil(Double(stepCount) / 8.0)))
