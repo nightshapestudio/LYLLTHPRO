@@ -57,10 +57,9 @@ struct LYSongFXLane: View {
                         open: { openEditor(block.id) },
                         remove: { remove(block.id) }
                     )
-                    .frame(width: max(CGFloat(block.lengthBeats) * beatWidth - 2, 8), height: Self.rowHeight - 3)
-                    .offset(x: CGFloat(block.startBeat) * beatWidth + 1, y: 4 + CGFloat(block.row) * Self.rowHeight)
                 }
             }
+            .coordinateSpace(name: LYSongFXBlockView.space)
             .frame(width: CGFloat(beats) * beatWidth, height: height)
             .clipped()
         }
@@ -91,6 +90,8 @@ struct LYSongFXLane: View {
 }
 
 private struct LYSongFXBlockView: View {
+    static let space = "LYSongFXLane"
+
     @Binding var block: LYSongFXBlock
     let title: String
     let accent: Color
@@ -106,13 +107,19 @@ private struct LYSongFXBlockView: View {
     // One gesture does everything (click, double-click, move, both edges),
     // so no recognizer can starve another.
     @State private var grab: Grab?
-    @State private var origin: LYSongFXBlock?
     @State private var dragged = false
+    /// Where the move sits while it's being dragged. The song is written
+    /// once, on release: writing it on every mouse move re-renders the
+    /// arrangement under the gesture and loses the drag.
+    @State private var preview: (start: Double, length: Double, row: Int)?
     @State private var lastClick = Date.distantPast
     @State private var pendingOpen: DispatchWorkItem?
     @State private var hoverEdge: Grab?
 
-    private var width: CGFloat { max(CGFloat(block.lengthBeats) * beatWidth - 2, 8) }
+    private var start: Double { preview?.start ?? block.startBeat }
+    private var length: Double { preview?.length ?? block.lengthBeats }
+    private var row: Int { preview?.row ?? block.row }
+    private var width: CGFloat { max(CGFloat(length) * beatWidth - 2, 8) }
     private var edge: CGFloat { min(7, width / 3) }
 
     var body: some View {
@@ -150,6 +157,7 @@ private struct LYSongFXBlockView: View {
             .allowsHitTesting(false)
         }
         .overlay(Rectangle().stroke(accent.opacity(0.85), lineWidth: 1))
+        .frame(width: width, height: rowHeight - 3)
         .contentShape(Rectangle())
         .gesture(gesture)
         .onContinuousHover { phase in
@@ -164,6 +172,7 @@ private struct LYSongFXBlockView: View {
             }
         }
         .help("Click to change it. Double-click to remove it. Drag to move it; drag either edge to shorten or lengthen it.")
+        .offset(x: CGFloat(start) * beatWidth + 1, y: 4 + CGFloat(row) * rowHeight)
     }
 
     private func grip(active: Bool) -> some View {
@@ -181,36 +190,41 @@ private struct LYSongFXBlockView: View {
     }
 
     private var gesture: some Gesture {
-        DragGesture(minimumDistance: 0)
+        // Measured in the lane's space, which doesn't move while the block does.
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
             .onChanged { drag in
                 if grab == nil {
-                    grab = region(at: drag.startLocation.x)
-                    origin = block
+                    grab = region(at: drag.startLocation.x - (CGFloat(block.startBeat) * beatWidth + 1))
                 }
-                guard let grab, let origin else { return }
+                guard let grab else { return }
                 if !dragged, hypot(drag.translation.width, drag.translation.height) < 3 { return }
                 if !dragged { pendingOpen?.cancel() }
                 dragged = true
                 let beats = Double(drag.translation.width / max(beatWidth, 1))
+                let end = block.startBeat + block.lengthBeats
                 switch grab {
                 case .body:
-                    let start = snap(origin.startBeat + beats)
-                    block.startBeat = min(max(0, start), max(0, maximumBeat - origin.lengthBeats))
-                    block.row = min(max(origin.row + Int((drag.translation.height / rowHeight).rounded()), 0), SongFXBlock.rowCount - 1)
+                    let start = min(max(0, snap(block.startBeat + beats)), max(0, maximumBeat - block.lengthBeats))
+                    let row = min(max(block.row + Int((drag.translation.height / rowHeight).rounded()), 0), SongFXBlock.rowCount - 1)
+                    preview = (start, block.lengthBeats, row)
                 case .leading:
-                    let end = origin.startBeat + origin.lengthBeats
-                    let start = min(max(0, snap(origin.startBeat + beats)), end - lyBeatsPerStep)
-                    block.startBeat = start
-                    block.lengthBeats = end - start
+                    let start = min(max(0, snap(block.startBeat + beats)), end - lyBeatsPerStep)
+                    preview = (start, end - start, block.row)
                 case .trailing:
-                    let end = min(snap(origin.startBeat + origin.lengthBeats + beats), maximumBeat)
-                    block.lengthBeats = max(lyBeatsPerStep, end - origin.startBeat)
+                    let newEnd = min(snap(end + beats), maximumBeat)
+                    preview = (block.startBeat, max(lyBeatsPerStep, newEnd - block.startBeat), block.row)
                 }
             }
             .onEnded { _ in
-                if !dragged { click() }
+                if let preview {
+                    block.startBeat = preview.start
+                    block.lengthBeats = preview.length
+                    block.row = preview.row
+                } else if !dragged {
+                    click()
+                }
+                preview = nil
                 grab = nil
-                origin = nil
                 dragged = false
             }
     }

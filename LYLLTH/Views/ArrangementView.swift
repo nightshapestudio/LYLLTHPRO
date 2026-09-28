@@ -158,7 +158,22 @@ struct ArrangementView: View {
 
     // MARK: Header
 
+    /// Zoom sliders go first as the window narrows, then the FIT buttons;
+    /// the last resort scrolls sideways rather than widening the window.
     private var header: some View {
+        ViewThatFits(in: .horizontal) {
+            headerRow(sliders: true, fit: true)
+            headerRow(sliders: false, fit: true)
+            headerRow(sliders: false, fit: false)
+            ScrollView(.horizontal, showsIndicators: false) { headerRow(sliders: false, fit: false) }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 52)
+        .background(LYLLTHTheme.panel)
+        .overlay(alignment: .bottom) { LYHairline() }
+    }
+
+    private func headerRow(sliders: Bool, fit: Bool) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("ARRANGEMENT")
@@ -172,7 +187,9 @@ struct ArrangementView: View {
                 )
                 .tracking(1.2)
                 .foregroundStyle(LYLLTHTheme.dim)
+                .lineLimit(1)
             }
+            .fixedSize()
             ForEach(session.trackFolders ?? []) { folder in
                 Button {
                     guard let index = session.trackFolders?.firstIndex(where: { $0.id == folder.id }) else { return }
@@ -183,29 +200,32 @@ struct ArrangementView: View {
                         Text(folder.name)
                         Text("\(folder.trackIDs.count)").font(LYLLTHTheme.value(7))
                     }
+                    .fixedSize()
                 }
                 .buttonStyle(LYChromeButtonStyle(active: folder.isCollapsed, tint: LYLLTHTheme.indigo, compact: true))
                 .help(folder.isCollapsed ? "Show tracks in \(folder.name)" : "Collapse \(folder.name)")
             }
-            Spacer()
-            snapMenu
-            autoZoomButton("H FIT", isOn: editor.autoHorizontalZoom) {
-                updateEditor { $0.autoHorizontalZoom.toggle() }
-                applyAutoZoom()
+            Spacer(minLength: 8)
+            snapMenu.fixedSize()
+            if fit {
+                autoZoomButton("H FIT", isOn: editor.autoHorizontalZoom) {
+                    updateEditor { $0.autoHorizontalZoom.toggle() }
+                    applyAutoZoom()
+                }
+                autoZoomButton("V FIT", isOn: editor.autoVerticalZoom) {
+                    updateEditor { $0.autoVerticalZoom.toggle() }
+                    applyAutoZoom()
+                }
             }
-            autoZoomButton("V FIT", isOn: editor.autoVerticalZoom) {
-                updateEditor { $0.autoVerticalZoom.toggle() }
-                applyAutoZoom()
+            if sliders {
+                LYMiniSlider(label: "H", value: editorBinding(\.horizontalZoom), range: 10...140)
+                    .frame(minWidth: 90)
+                    .help("Horizontal zoom. Pinch on the trackpad works too.")
+                LYMiniSlider(label: "V", value: editorBinding(\.verticalZoom), range: 38...144)
+                    .frame(minWidth: 90)
+                    .help("Track height. Option-pinch works too.")
             }
-            LYMiniSlider(label: "H", value: editorBinding(\.horizontalZoom), range: 10...140)
-                .help("Horizontal zoom. Pinch on the trackpad works too.")
-            LYMiniSlider(label: "V", value: editorBinding(\.verticalZoom), range: 38...144)
-                .help("Track height. Option-pinch works too.")
         }
-        .padding(.horizontal, 16)
-        .frame(height: 52)
-        .background(LYLLTHTheme.panel)
-        .overlay(alignment: .bottom) { LYHairline() }
     }
 
     private var visibleTrackIndices: [Int] {
@@ -249,7 +269,7 @@ struct ArrangementView: View {
     }
 
     private func autoZoomButton(_ title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
+        Button(action: action) { Text(title).lineLimit(1).fixedSize() }
             .buttonStyle(LYChromeButtonStyle(active: isOn, compact: true))
     }
 

@@ -225,6 +225,7 @@ private enum LYWorkspaceMenu: Equatable {
     case export
     case project
     case songKey
+    case meter
     case addTrack
     case arrangementSnap
     /// Pick what a lane moves: (track, lane), lane nil to add one.
@@ -316,7 +317,8 @@ struct WorkspaceView: View {
                         activeWorkspace: $activeWorkspace,
                         recorder: recorder,
                         toggleRecording: toggleRecording,
-                        openSongKeyMenu: { presentMenu(.songKey, from: "songKey") }
+                        openSongKeyMenu: { presentMenu(.songKey, from: "songKey") },
+                        openMeterMenu: { presentMenu(.meter, from: "meter") }
                     )
                     .environmentObject(audio)
 
@@ -1870,6 +1872,12 @@ struct WorkspaceView: View {
         if let activeMenu {
             LYDropdownOverlay(anchor: menuAnchorID.flatMap { menuAnchors[$0] }, dismiss: dismissMenu) {
                 switch activeMenu {
+                case .meter:
+                    MeterPicker(
+                        numerator: $document.session.numerator,
+                        denominator: $document.session.denominator,
+                        close: dismissMenu
+                    )
                 case .songKey:
                     SongKeyPicker(
                         key: Binding(
@@ -2050,6 +2058,7 @@ private struct TransportBar: View {
     let toggleRecording: () -> Void
     @EnvironmentObject private var audio: AudioEngineController
     let openSongKeyMenu: () -> Void
+    let openMeterMenu: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -2088,27 +2097,52 @@ private struct TransportBar: View {
                         .font(LYLLTHTheme.value(24))
                         .tracking(1.1)
                         .foregroundStyle(LYLLTHTheme.text)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
                 Text(statusText)
                     .font(LYLLTHTheme.label(8, weight: .bold))
                     .tracking(1.8)
                     .foregroundStyle(recorder.isActive ? LYLLTHTheme.record : (audio.isPlaying ? LYLLTHTheme.teal : LYLLTHTheme.dim))
             }
-            .frame(width: 128, alignment: .leading)
+            .frame(minWidth: 128, alignment: .leading)
+            .fixedSize()
 
-            divider
+            // Narrow windows: the utilities fold into two rows of icons, then
+            // PATTERN / SONG steps aside (SEQUENCER / ARRANGE below does the
+            // same). Time, tempo and key always keep their full width.
+            ViewThatFits(in: .horizontal) {
+                trailing(showsMode: true, compact: false)
+                trailing(showsMode: true, compact: true)
+                trailing(showsMode: false, compact: true)
+            }
+        }
+        .padding(.leading, 20)
+        .padding(.trailing, 16)
+        .frame(height: 112)
+        .background(LYLLTHTheme.deck)
+        .overlay(alignment: .bottom) { LYHairline(color: LYLLTHTheme.lineStrong) }
+    }
 
-            LYModeSwitch(activeWorkspace: $activeWorkspace)
+    private func trailing(showsMode: Bool, compact: Bool) -> some View {
+        HStack(spacing: 0) {
+            if showsMode {
+                divider
+
+                LYModeSwitch(activeWorkspace: $activeWorkspace)
                 .padding(.horizontal, 18)
+            }
 
             divider
 
             TempoReadout(
                 bpm: $session.bpm,
                 numerator: session.numerator,
-                denominator: session.denominator
+                denominator: session.denominator,
+                openMeter: openMeterMenu
             )
             .padding(.horizontal, 18)
+            .fixedSize()
 
             divider
 
@@ -2121,11 +2155,28 @@ private struct TransportBar: View {
             )
             .lyMenuAnchor("songKey")
             .padding(.horizontal, 18)
+            .fixedSize()
 
-            Spacer(minLength: 18)
+            Spacer(minLength: compact ? 8 : 18)
 
-            HStack(spacing: 6) {
+            if compact {
+                VStack(spacing: 4) {
+                    HStack(spacing: 4) { recordingUtilities(compact: true) }
+                    HStack(spacing: 4) { playbackUtilities(compact: true) }
+                }
+            } else {
+                HStack(spacing: 6) {
+                    recordingUtilities(compact: false)
+                    playbackUtilities(compact: false)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func recordingUtilities(compact: Bool) -> some View {
                 TransportUtility(
+                    compact: compact,
                     icon: "metronome",
                     title: "CLICK",
                     tint: LYLLTHTheme.teal,
@@ -2134,6 +2185,7 @@ private struct TransportBar: View {
                 )
                 .help("Metronome")
                 TransportUtility(
+                    compact: compact,
                     icon: "4.circle",
                     title: "COUNT",
                     tint: LYLLTHTheme.record,
@@ -2147,6 +2199,7 @@ private struct TransportBar: View {
                 )
                 .help("One-bar pre-roll before recording starts")
                 TransportUtility(
+                    compact: compact,
                     icon: "arrow.triangle.2.circlepath",
                     title: "TAKES",
                     tint: LYLLTHTheme.purple,
@@ -2159,6 +2212,7 @@ private struct TransportBar: View {
                 )
                 .help("Create a take for every recorded loop pass")
                 TransportUtility(
+                    compact: compact,
                     icon: "scope",
                     title: "PUNCH",
                     tint: LYLLTHTheme.record,
@@ -2170,7 +2224,12 @@ private struct TransportBar: View {
                     }
                 )
                 .help("Use the loop range as the punch-in/out range")
+    }
+
+    @ViewBuilder
+    private func playbackUtilities(compact: Bool) -> some View {
                 TransportUtility(
+                    compact: compact,
                     icon: "ear",
                     title: "MON",
                     tint: LYLLTHTheme.teal,
@@ -2183,6 +2242,7 @@ private struct TransportBar: View {
                 )
                 .help("Monitor the selected input while recording; use headphones")
                 TransportUtility(
+                    compact: compact,
                     icon: "timer",
                     title: "LAT " + String(format: "%+.0f", session.recordingSettings?.manualLatencyMS ?? 0),
                     tint: LYLLTHTheme.indigo,
@@ -2197,6 +2257,7 @@ private struct TransportBar: View {
                 )
                 .help("Manual recording latency correction in milliseconds")
                 TransportUtility(
+                    compact: compact,
                     icon: "repeat",
                     title: "LOOP",
                     tint: LYLLTHTheme.indigo,
@@ -2204,13 +2265,6 @@ private struct TransportBar: View {
                     action: toggleLoop
                 )
                 .help(loopHelp)
-            }
-        }
-        .padding(.leading, 20)
-        .padding(.trailing, 16)
-        .frame(height: 112)
-        .background(LYLLTHTheme.deck)
-        .overlay(alignment: .bottom) { LYHairline(color: LYLLTHTheme.lineStrong) }
     }
 
     private var divider: some View {
@@ -2549,18 +2603,84 @@ private struct AddTrackPanel: View {
     }
 }
 
+/// The song's time signature: the meters the engine plays.
+private struct MeterPicker: View {
+    @Binding var numerator: Int
+    @Binding var denominator: Int
+    let close: () -> Void
+
+    private static let meters: [(Int, Int, String)] = [
+        (4, 4, "FOUR BEATS A BAR"),
+        (3, 4, "THREE BEATS A BAR · WALTZ"),
+        (6, 8, "TWO SWAYING BEATS OF THREE")
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LYNightshapeMenuHeader(eyebrow: "SONG", title: "TIME SIGNATURE", accent: LYLLTHTheme.purple, close: close)
+            LYNightshapeMenuDivider()
+            VStack(spacing: 6) {
+                ForEach(Self.meters, id: \.2) { meter in
+                    let isOn = meter.0 == numerator && meter.1 == denominator
+                    Button {
+                        numerator = meter.0
+                        denominator = meter.1
+                        close()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Text("\(meter.0)/\(meter.1)")
+                                .font(LYLLTHTheme.value(15))
+                                .foregroundStyle(isOn ? LYLLTHTheme.text : LYLLTHTheme.chromeText)
+                                .frame(width: 34, alignment: .leading)
+                            Text(meter.2)
+                                .font(LYLLTHTheme.label(8, weight: .bold))
+                                .tracking(1.1)
+                                .foregroundStyle(LYLLTHTheme.dim)
+                            Spacer(minLength: 6)
+                            if isOn { LYLED(color: LYLLTHTheme.purple, size: 5) }
+                        }
+                        .padding(.horizontal, 10)
+                        .frame(height: 34)
+                        .background(isOn ? LYLLTHTheme.purple.opacity(0.08) : LYLLTHTheme.panelRaised)
+                        .overlay(alignment: .leading) { Rectangle().fill(LYLLTHTheme.purple.opacity(isOn ? 0.9 : 0.35)).frame(width: 2) }
+                        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(12)
+        }
+        .frame(width: 300)
+        .lyNightshapeMenuChrome(accent: LYLLTHTheme.purple)
+    }
+}
+
 private struct TempoReadout: View {
     @Binding var bpm: Double
     let numerator: Int
     let denominator: Int
+    var openMeter: () -> Void = {}
     @State private var dragStartBPM: Double?
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 0) {
             HStack(spacing: 6) {
-                Text("\(numerator)/\(denominator)")
-                    .font(LYLLTHTheme.value(9))
-                    .foregroundStyle(LYLLTHTheme.dim)
+                Button(action: openMeter) {
+                    HStack(spacing: 3) {
+                        Text("\(numerator)/\(denominator)")
+                            .font(LYLLTHTheme.value(10))
+                        Image(systemName: "chevron.down").font(.system(size: 6, weight: .bold))
+                    }
+                    .foregroundStyle(LYLLTHTheme.chromeText)
+                    .padding(.horizontal, 4)
+                    .frame(height: 16)
+                    .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .lyMenuAnchor("meter")
+                .help("Time signature: 4/4, 3/4 or 6/8")
                 Text("BPM")
                     .font(LYLLTHTheme.label(8.5, weight: .bold))
                     .tracking(2)
@@ -2598,6 +2718,7 @@ private struct TempoReadout: View {
 }
 
 private struct TransportUtility: View {
+    var compact = false
     let icon: String
     let title: String
     var tint = LYLLTHTheme.teal
@@ -2607,12 +2728,14 @@ private struct TransportUtility: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 5) {
-                Image(systemName: icon).font(.system(size: 12, weight: .medium))
-                Text(title).font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.4)
+                Image(systemName: icon).font(.system(size: compact ? 11 : 12, weight: .medium))
+                if !compact {
+                    Text(title).font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.4)
+                }
             }
             .foregroundStyle(isOn ? tint : LYLLTHTheme.chromeText)
             .lyBloom(tint, isOn: isOn)
-            .frame(width: 50, height: 46)
+            .frame(width: compact ? 30 : 50, height: compact ? 26 : 46)
             .background(tint.opacity(isOn ? LYLLTHTheme.controlFill : 0))
             .overlay(Rectangle().stroke(isOn ? tint.opacity(0.9) : LYLLTHTheme.lineStrong, lineWidth: 1))
             .contentShape(Rectangle())
@@ -2644,7 +2767,20 @@ struct WorkspaceStrip: View {
     var openDrumSynth: () -> Void = {}
 
     var body: some View {
-        HStack(spacing: 14) {
+        // A narrow window drops the MIDI light and the tab icons before
+        // anything wraps; the song name is what truncates after that.
+        ViewThatFits(in: .horizontal) {
+            content(narrow: false)
+            content(narrow: true)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 44)
+        .background(LYLLTHTheme.panel)
+        .overlay(alignment: .bottom) { LYHairline() }
+    }
+
+    private func content(narrow: Bool) -> some View {
+        HStack(spacing: narrow ? 10 : 14) {
             Button(action: openProjectMenu) {
                 HStack(spacing: 8) {
                     Image(systemName: "folder")
@@ -2676,10 +2812,12 @@ struct WorkspaceStrip: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .layoutPriority(-1)
             .lyMenuAnchor("stripProject")
             .help(isSaved ? "Song: new, open, save, DrumKit .fkit, export" : "This song has never been saved. Open this menu and choose SAVE")
 
-            LYViewSwitch(activeWorkspace: $activeWorkspace)
+            LYViewSwitch(activeWorkspace: $activeWorkspace, compact: narrow)
+                .fixedSize()
 
             // The drums, one click from anywhere: swap the whole kit, or open
             // the synth that makes every sound.
@@ -2695,21 +2833,23 @@ struct WorkspaceStrip: View {
                     }
                 }
                 .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.teal, compact: true))
+                .fixedSize()
                 .lyMenuAnchor("stripKit")
                 .help("Swap every drum sound at once. Patterns, levels and effects stay.")
                 Button(action: openDrumSynth) {
                     HStack(spacing: 6) {
-                        Image(systemName: "waveform.path").font(.system(size: 9, weight: .bold))
+                        if !narrow { Image(systemName: "waveform.path").font(.system(size: 9, weight: .bold)) }
                         Text("DRUM SYNTH")
                     }
                 }
                 .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.teal, compact: true))
+                .fixedSize()
                 .help("Browse, shape and load every drum sound")
             }
 
-            Spacer()
+            Spacer(minLength: 0)
 
-            LYMIDIIndicator(midi: LYMIDIInput.shared)
+            if !narrow { LYMIDIIndicator(midi: LYMIDIInput.shared).fixedSize() }
 
             Button(action: export) {
                 HStack(spacing: 7) {
@@ -2718,6 +2858,7 @@ struct WorkspaceStrip: View {
                 }
             }
             .buttonStyle(LYChromeButtonStyle(compact: true))
+            .fixedSize()
             .lyMenuAnchor("stripExport")
             .help("Export: WAV, M4A, stems, MIDI or a DrumKit project (⌘E)")
 
@@ -2748,12 +2889,8 @@ struct WorkspaceStrip: View {
                 .help("Open LYLLTH Settings (Command-,)")
                 .accessibilityLabel("Open LYLLTH Settings")
             }
-
+            .fixedSize()
         }
-        .padding(.horizontal, 16)
-        .frame(height: 44)
-        .background(LYLLTHTheme.panel)
-        .overlay(alignment: .bottom) { LYHairline() }
     }
 }
 
@@ -2761,6 +2898,7 @@ struct WorkspaceStrip: View {
 /// pattern being edited; the arrangement plays the song.
 struct LYViewSwitch: View {
     @Binding var activeWorkspace: String
+    var compact = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -2776,7 +2914,7 @@ struct LYViewSwitch: View {
         let isOn = activeWorkspace == key
         return Button { activeWorkspace = key } label: {
             HStack(spacing: 7) {
-                Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+                if !compact { Image(systemName: icon).font(.system(size: 11, weight: .semibold)) }
                 Text(title)
                     .font(LYLLTHTheme.label(9, weight: .bold))
                     .tracking(1.4)
@@ -3324,33 +3462,82 @@ private struct SequencerWorkspace: View {
         }
     }
 
+    /// One row when there's room; two rows, then icon-only pattern actions,
+    /// as the window narrows. Nothing wraps and nothing pushes the window
+    /// wider; the last resort scrolls sideways.
     private var sequencerHeader: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                sequencerTitle
+                patternControls(compact: false)
+                Spacer(minLength: 8)
+                stepControls
+            }
+            .frame(height: 58)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 10) {
+                    sequencerTitle
+                    Spacer(minLength: 8)
+                    stepControls
+                }
+                HStack(spacing: 10) {
+                    patternControls(compact: false)
+                    Spacer(minLength: 0)
+                }
+            }
+            .padding(.vertical, 8)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    patternControls(compact: true)
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 8) {
+                    stepLengths
+                    Spacer(minLength: 6)
+                    stepTools
+                }
+            }
+            .padding(.vertical, 8)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    patternControls(compact: true)
+                    stepControls
+                }
+                .frame(height: 58)
+            }
+        }
+        .padding(.horizontal, 14)
+        .background(LYLLTHTheme.panel)
+        .overlay(alignment: .bottom) { LYHairline() }
+    }
+
+    private var sequencerTitle: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("SEQUENCER")
+                .font(LYLLTHTheme.label(11, weight: .bold))
+                .tracking(1.8)
+                .foregroundStyle(LYLLTHTheme.secondary)
+            mixedNumericLabel(
+                "PATTERN \(String(format: "%02d", patternIndex + 1))  ·  \(stepCount) STEPS  ·  \((session.songKey ?? .default).name)",
+                labelFont: LYLLTHTheme.label(8),
+                numberFont: LYLLTHTheme.value(8)
+            )
+            .tracking(1)
+            .foregroundStyle(LYLLTHTheme.dim)
+            .lineLimit(1)
+        }
+        .fixedSize()
+    }
+
+    private func patternControls(compact: Bool) -> some View {
         let inSong = session.isPatternInSong(patternIndex)
-        return HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("SEQUENCER")
-                    .font(LYLLTHTheme.label(11, weight: .bold))
-                    .tracking(1.8)
-                    .foregroundStyle(LYLLTHTheme.secondary)
-                mixedNumericLabel(
-                    "PATTERN \(String(format: "%02d", patternIndex + 1))  ·  \(stepCount) STEPS  ·  \((session.songKey ?? .default).name)",
-                    labelFont: LYLLTHTheme.label(8),
-                    numberFont: LYLLTHTheme.value(8)
-                )
-                .tracking(1)
-                .foregroundStyle(LYLLTHTheme.dim)
-                .lineLimit(1)
-            }
-            .layoutPriority(-1)
-
+        return HStack(spacing: compact ? 6 : 10) {
             patternPicker
-
             HStack(spacing: 3) {
-                patternAction("plus", "NEW", help: "A new empty pattern on every track", action: { addPattern(copying: false) })
-                patternAction("plus.square.on.square", "DUPLICATE", help: "A new pattern that starts as a copy of this one", action: { addPattern(copying: true) })
-                patternAction("text.insert", inSong ? "PLACE AGAIN" : "PLACE IN SONG", help: "Put this pattern at the end of the song, on every track. SONG plays only what is placed.", action: placeInSong)
+                patternAction("plus", "NEW", compact: compact, help: "NEW: a new empty pattern on every track", action: { addPattern(copying: false) })
+                patternAction("plus.square.on.square", "DUPLICATE", compact: compact, help: "DUPLICATE: a new pattern that starts as a copy of this one", action: { addPattern(copying: true) })
+                patternAction("text.insert", inSong ? "PLACE AGAIN" : "PLACE IN SONG", compact: compact, help: "PLACE IN SONG: put this pattern at the end of the song, on every track. SONG plays only what is placed.", action: placeInSong)
             }
-
             Text(inSong ? "IN SONG" : "NOT IN SONG")
                 .font(LYLLTHTheme.label(7.5, weight: .bold))
                 .tracking(1.3)
@@ -3358,27 +3545,33 @@ private struct SequencerWorkspace: View {
                 .lyBloom(LYLLTHTheme.purple, isOn: !inSong)
                 .fixedSize()
                 .help(inSong ? "This pattern plays in the song" : "SONG does not play this pattern until you PLACE IN SONG")
+        }
+    }
 
-            Spacer(minLength: 8)
+    private var stepControls: some View {
+        HStack(spacing: 10) {
+            stepLengths
+            stepTools
+        }
+    }
 
-            HStack(spacing: 3) {
-                ForEach([16, 32, 48, 64], id: \.self) { count in
-                    Button("\(count)") { resizePattern(to: count) }
-                        .buttonStyle(LYChromeButtonStyle(active: stepCount == count, compact: true, numeric: true))
-                }
-            }
-
-            HStack(spacing: 3) {
-                sequenceTool("COPY", action: copyPattern)
-                sequenceTool("PASTE", enabled: !copiedSteps.isEmpty, action: pastePattern)
-                sequenceTool("RANDOM", action: randomizePattern)
-                sequenceTool("CLEAR", tint: LYLLTHTheme.purple, action: clearPattern)
+    private var stepLengths: some View {
+        HStack(spacing: 3) {
+            ForEach([16, 32, 48, 64], id: \.self) { count in
+                Button("\(count)") { resizePattern(to: count) }
+                    .buttonStyle(LYChromeButtonStyle(active: stepCount == count, compact: true, numeric: true))
             }
         }
-        .padding(.horizontal, 14)
-        .frame(height: 58)
-        .background(LYLLTHTheme.panel)
-        .overlay(alignment: .bottom) { LYHairline() }
+        .fixedSize()
+    }
+
+    private var stepTools: some View {
+        HStack(spacing: 3) {
+            sequenceTool("COPY", action: copyPattern)
+            sequenceTool("PASTE", enabled: !copiedSteps.isEmpty, action: pastePattern)
+            sequenceTool("RANDOM", action: randomizePattern)
+            sequenceTool("CLEAR", tint: LYLLTHTheme.purple, action: clearPattern)
+        }
     }
 
     /// Up to eight patterns show as numbers; past that, a stepper that
@@ -3416,11 +3609,11 @@ private struct SequencerWorkspace: View {
         }
     }
 
-    private func patternAction(_ icon: String, _ title: String, help: String, action: @escaping () -> Void) -> some View {
+    private func patternAction(_ icon: String, _ title: String, compact: Bool = false, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Image(systemName: icon).font(.system(size: 9, weight: .bold))
-                Text(title).lineLimit(1)
+                if !compact { Text(title).lineLimit(1) }
             }
             .fixedSize()
         }
