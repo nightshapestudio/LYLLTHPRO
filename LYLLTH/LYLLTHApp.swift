@@ -96,6 +96,12 @@ struct LYWorkspaceActions {
     var exportSong: () -> Void
     var toggleMusicalTyping: () -> Void
     var togglePlayback: () -> Void
+    var addTrack: () -> Void = {}
+    var openDrumSynth: () -> Void = {}
+    var openKits: () -> Void = {}
+    var openLUNATK: () -> Void = {}
+    /// Previous (−1) / next (+1) sound on the selected track.
+    var stepSound: (Int) -> Void = { _ in }
 }
 
 private struct LYWorkspaceActionsKey: FocusedValueKey {
@@ -137,6 +143,28 @@ struct LYProjectCommands: Commands {
                 .keyboardShortcut("k", modifiers: .command)
                 .disabled(workspace == nil)
             Divider()
+        }
+        CommandMenu("Track") {
+            Button("New Track…") { workspace?.addTrack() }
+                .keyboardShortcut("t", modifiers: .command)
+                .disabled(workspace == nil)
+            Divider()
+            Button("Drum Synth") { workspace?.openDrumSynth() }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+                .disabled(workspace == nil)
+            Button("Kits") { workspace?.openKits() }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+                .disabled(workspace == nil)
+            Button("LUNATK") { workspace?.openLUNATK() }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+                .disabled(workspace == nil)
+            Divider()
+            Button("Previous Sound") { workspace?.stepSound(-1) }
+                .keyboardShortcut("[", modifiers: .command)
+                .disabled(workspace == nil)
+            Button("Next Sound") { workspace?.stepSound(1) }
+                .keyboardShortcut("]", modifiers: .command)
+                .disabled(workspace == nil)
         }
         CommandGroup(after: .toolbar) {
             Button("Play / Stop") { workspace?.togglePlayback() }

@@ -384,12 +384,12 @@ struct WorkspaceView: View {
                                 isPlaying: audio.isPlaying,
                                 waveformState: audio.engine.state.outputWaveformState,
                                 syncEngine: { audio.syncSequencer(document.session) },
-                                kitName: currentKitName,
-                                openKits: { presentMenu(.kits, from: "seqKit") },
                                 openSound: { id in
                                     let isDrum = document.session.tracks.first { $0.id == id }?.kind == .drumkit
                                     isDrum ? openDrums(id) : openSynth(id)
-                                }
+                                },
+                                stepSound: { stepSound($0, by: $1) },
+                                openTrackMenu: { presentMenu(.addTrack, from: "seqTracks") }
                             )
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -511,6 +511,8 @@ struct WorkspaceView: View {
             audio.engine.setMainOutputVolume(volume: pow(10, (document.session.mainVolumeDB ?? 0) / 20))
             if firstOpen { plugins.scan() }
             #if DEBUG
+            // Screenshot hook: LYLLTH_DEBUG_WORKSPACE=PATTERN or SONG.
+            if let workspace = ProcessInfo.processInfo.environment["LYLLTH_DEBUG_WORKSPACE"] { activeWorkspace = workspace }
             // Screenshot hook: LYLLTH_DEBUG_FX=<FXKind raw value> opens that
             // effect on the first track at launch.
             if let raw = ProcessInfo.processInfo.environment["LYLLTH_DEBUG_FX"],
@@ -683,7 +685,9 @@ struct WorkspaceView: View {
                 activeMenu == nil && fxRequest == nil && fxPickerTarget == nil && synthTrackID == nil
                     && pianoRollClip == nil && sirenClip == nil && !drumSynthOpen
                     && audioUnits.editor == nil && recoveryCandidate == nil && !showTyping
-            }
+            },
+            stepSound: { stepSound($0, by: $1) },
+            openTrackMenuAt: { presentMenu(.addTrack, from: $0) }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1689,8 +1693,47 @@ struct WorkspaceView: View {
             saveDrumKitProject: saveDrumKitProject,
             exportSong: presentExport,
             toggleMusicalTyping: toggleMusicalTyping,
-            togglePlayback: { audio.togglePlayback() }
+            togglePlayback: { audio.togglePlayback() },
+            addTrack: { presentMenu(.addTrack, from: activeWorkspace == "PATTERN" ? "seqTracks" : "arrTracks") },
+            openDrumSynth: { openDrums(nil) },
+            openKits: { presentMenu(.kits, from: "stripKit") },
+            openLUNATK: {
+                let synths = document.session.tracks.filter { $0.kind == .instrument && $0.isChordTrack != true }
+                if let track = synths.first(where: { $0.id == selectedTrackID }) ?? synths.first { openSynth(track.id) }
+            },
+            stepSound: { step in if let id = selectedTrackID { stepSound(id, by: step) } }
         )
+    }
+
+    /// Previous / next sound on a track, within its kind, played as it lands.
+    private func stepSound(_ trackID: UUID, by step: Int) {
+        guard let index = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        let track = document.session.tracks[index]
+        selectedTrackID = trackID
+        if track.kind == .drumkit, track.samplePath == nil {
+            let mine = LYDrumUserPresets.all()
+            guard let next = LYSoundStepping.drum(from: track, step: step, userPresets: mine) else { return }
+            document.session.tracks[index].customDrumPreset = mine.contains { $0.id == next.id } ? next : nil
+            document.session.tracks[index].drumPresetID = next.id
+            audio.auditionDrum(next)
+            notice = track.name + "  ·  " + next.name.uppercased()
+        } else if let patch = track.synth,
+                  let next = LYSoundStepping.synth(from: patch, step: step, userPatches: LYSynthPresetStore.shared.presets) {
+            document.session.tracks[index].synth = next
+            audio.synthInstrument(for: trackID)?.apply(next, bpm: document.session.bpm)
+            previewSynth(trackID)
+            notice = track.name + "  ·  LUNATK " + next.name.uppercased()
+        }
+    }
+
+    /// A short note on a LUNATK track, so a new patch is heard at once.
+    /// Skipped while the song plays: the song is the preview then.
+    private func previewSynth(_ trackID: UUID) {
+        guard !audio.isPlaying, let instrument = audio.synthInstrument(for: trackID),
+              let track = document.session.tracks.first(where: { $0.id == trackID }) else { return }
+        let note = UInt8(min(max((track.rootNote ?? 48) + 12, 36), 84))
+        instrument.noteOn(note, velocity: 100, atHostTime: 0, cutoff: 1, resonance: 0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { instrument.noteOff(note, atHostTime: 0) }
     }
 
     private func toggleMusicalTyping() {
@@ -1873,6 +1916,11 @@ struct WorkspaceView: View {
                         add: { kind in
                             addTrack(kind: kind)
                             dismissMenu()
+                            // A new track wants a sound: open the browser on it.
+                            if let id = selectedTrackID {
+                                if kind == .drumkit { openDrums(id) }
+                                if kind == .instrument { openSynth(id) }
+                            }
                         },
                         addFolder: {
                             guard let selectedTrackID else { return }
@@ -2659,15 +2707,6 @@ struct WorkspaceStrip: View {
                 .help("Browse, shape and load every drum sound")
             }
 
-            Text(activeWorkspace == "PATTERN"
-                 ? "LOOPS ONE PATTERN  ·  NEW, DUPLICATE, PLACE IN SONG"
-                 : "PLAYS THE SONG  ·  DOUBLE-CLICK A PATTERN TO EDIT IT")
-                .font(LYLLTHTheme.label(7.5, weight: .bold))
-                .tracking(1.3)
-                .foregroundStyle(LYLLTHTheme.dim)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-
             Spacer()
 
             LYMIDIIndicator(midi: LYMIDIInput.shared)
@@ -2710,14 +2749,6 @@ struct WorkspaceStrip: View {
                 .accessibilityLabel("Open LYLLTH Settings")
             }
 
-            Button(action: openTrackMenu) {
-                HStack(spacing: 7) {
-                    Image(systemName: "plus").font(.system(size: 9, weight: .bold))
-                    Text("TRACK")
-                }
-            }
-            .buttonStyle(LYChromeButtonStyle(compact: true))
-            .lyMenuAnchor("stripTrack")
         }
         .padding(.horizontal, 16)
         .frame(height: 44)
@@ -3173,9 +3204,9 @@ private struct SequencerWorkspace: View {
     let isPlaying: Bool
     @ObservedObject var waveformState: OutputWaveformState
     let syncEngine: () -> Void
-    var kitName = ""
-    var openKits: () -> Void = {}
     var openSound: (UUID) -> Void = { _ in }
+    var stepSound: (UUID, Int) -> Void = { _, _ in }
+    var openTrackMenu: () -> Void = {}
 
     @State private var selectedStep: LYSelectedSequenceStep?
     @State private var stepActionTarget: LYSelectedSequenceStep?
@@ -3183,7 +3214,7 @@ private struct SequencerWorkspace: View {
     @State private var copiedSteps: [UUID: [Bool]] = [:]
     @State private var copiedLocks: [UUID: [LYStepParameters]] = [:]
 
-    private let trackWidth: CGFloat = 190
+    private let trackWidth: CGFloat = 250
     private let gridGap: CGFloat = 8
     private let minimumStepSize: CGFloat = 34
     private let maximumStepSize: CGFloat = 58
@@ -3307,25 +3338,11 @@ private struct SequencerWorkspace: View {
                 )
                 .tracking(1)
                 .foregroundStyle(LYLLTHTheme.dim)
+                .lineLimit(1)
             }
+            .layoutPriority(-1)
 
-            Button(action: openKits) {
-                HStack(spacing: 6) {
-                    Text("KIT").foregroundStyle(LYLLTHTheme.teal)
-                    Text(kitName).foregroundStyle(LYLLTHTheme.text).lineLimit(1)
-                    Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
-                }
-            }
-            .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.teal, compact: true))
-            .lyMenuAnchor("seqKit")
-            .help("Swap every drum sound at once. Patterns, levels and effects stay.")
-
-            HStack(spacing: 3) {
-                ForEach(0..<patternCount, id: \.self) { index in
-                    Button("\(index + 1)") { selectPattern(index) }
-                        .buttonStyle(LYChromeButtonStyle(active: patternIndex == index, compact: true, numeric: true))
-                }
-            }
+            patternPicker
 
             HStack(spacing: 3) {
                 patternAction("plus", "NEW", help: "A new empty pattern on every track", action: { addPattern(copying: false) })
@@ -3363,19 +3380,55 @@ private struct SequencerWorkspace: View {
         .overlay(alignment: .bottom) { LYHairline() }
     }
 
+    /// Up to eight patterns show as numbers; past that, a stepper that
+    /// stays one width however many patterns the song has.
+    @ViewBuilder
+    private var patternPicker: some View {
+        if patternCount <= 8 {
+            HStack(spacing: 3) {
+                ForEach(0..<patternCount, id: \.self) { index in
+                    Button("\(index + 1)") { selectPattern(index) }
+                        .buttonStyle(LYChromeButtonStyle(active: patternIndex == index, compact: true, numeric: true))
+                }
+            }
+        } else {
+            HStack(spacing: 3) {
+                Button { selectPattern((patternIndex - 1 + patternCount) % patternCount) } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 8, weight: .bold))
+                }
+                .buttonStyle(LYChromeButtonStyle(compact: true))
+                .help("Previous pattern")
+                mixedNumericLabel(
+                    "\(String(format: "%02d", patternIndex + 1)) / \(String(format: "%02d", patternCount))",
+                    labelFont: LYLLTHTheme.label(9, weight: .bold),
+                    numberFont: LYLLTHTheme.value(11)
+                )
+                .foregroundStyle(LYLLTHTheme.text)
+                .frame(width: 64, height: 24)
+                .overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.6), lineWidth: 1))
+                Button { selectPattern((patternIndex + 1) % patternCount) } label: {
+                    Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
+                }
+                .buttonStyle(LYChromeButtonStyle(compact: true))
+                .help("Next pattern")
+            }
+        }
+    }
+
     private func patternAction(_ icon: String, _ title: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Image(systemName: icon).font(.system(size: 9, weight: .bold))
-                Text(title)
+                Text(title).lineLimit(1)
             }
+            .fixedSize()
         }
         .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.teal, compact: true))
         .help(help)
     }
 
     private func sequenceTool(_ title: String, enabled: Bool = true, tint: Color = LYLLTHTheme.metadata, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
+        Button(action: action) { Text(title).lineLimit(1).fixedSize() }
             .buttonStyle(LYChromeButtonStyle(tint: tint, compact: true))
             .disabled(!enabled)
             .opacity(enabled ? 1 : 0.34)
@@ -3388,8 +3441,21 @@ private struct SequencerWorkspace: View {
                     .font(LYLLTHTheme.label(8, weight: .bold))
                     .tracking(1.4)
                 Spacer()
-                Text("M")
-                Text("S")
+                // Where tracks are listed is where you add one.
+                Button(action: openTrackMenu) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus").font(.system(size: 7.5, weight: .bold))
+                        Text("ADD")
+                    }
+                    .foregroundStyle(LYLLTHTheme.teal)
+                    .padding(.horizontal, 6)
+                    .frame(height: 18)
+                    .overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.6), lineWidth: 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .lyMenuAnchor("seqTracks")
+                .help("Add a track (⌘T)")
             }
             .font(LYLLTHTheme.label(7, weight: .bold))
             .foregroundStyle(LYLLTHTheme.dim)
@@ -3430,7 +3496,8 @@ private struct SequencerWorkspace: View {
                         .foregroundStyle(LYLLTHTheme.text)
                         .lineLimit(1)
                     if let sound = LYDrumSounds.soundName(for: track) {
-                        LYTrackSoundButton(sound: sound, accent: accent) { openSound(track.id) }
+                        LYTrackSoundButton(sound: sound, accent: accent, action: { openSound(track.id) },
+                                           step: { stepSound(track.id, $0) })
                     } else {
                         Text(track.isChordTrack == true ? "CHORD TRACK" : track.kind.label)
                             .font(LYLLTHTheme.label(7, weight: .bold))
@@ -3439,6 +3506,7 @@ private struct SequencerWorkspace: View {
                     }
                 }
                 Spacer(minLength: 3)
+                // Record arm lives on the song track; here it's pattern work.
                 LYTrackToggle(
                     title: "M",
                     isOn: trackStateBinding(trackIndex: trackIndex, keyPath: \.isMuted),
@@ -3448,11 +3516,6 @@ private struct SequencerWorkspace: View {
                     title: "S",
                     isOn: trackStateBinding(trackIndex: trackIndex, keyPath: \.isSolo),
                     tint: LYLLTHTheme.teal
-                )
-                LYTrackToggle(
-                    title: "R",
-                    isOn: trackStateBinding(trackIndex: trackIndex, keyPath: \.isArmed),
-                    tint: LYLLTHTheme.record
                 )
             }
             .padding(.horizontal, 10)

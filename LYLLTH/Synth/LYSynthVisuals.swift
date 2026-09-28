@@ -787,7 +787,9 @@ struct LYPresetBrowser: View {
                                         .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
                                         .padding(.leading, 8)
                                         .contentShape(Rectangle())
-                                }.buttonStyle(.plain)
+                                }
+                                .buttonStyle(.plain)
+                                .simultaneousGesture(TapGesture(count: 2).onEnded { close() })
                                 if selected == "USER" {
                                     Button { delete(item.name) } label: {
                                         Image(systemName: "xmark").font(.system(size: 7, weight: .bold)).foregroundStyle(LYLLTHTheme.dim)
@@ -827,6 +829,8 @@ struct LYPresetBrowser: View {
                     .font(LYLLTHTheme.label(7, weight: .bold)).tracking(0.6).foregroundStyle(LYLLTHTheme.dim)
                     .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             } else {
+                Text("CLICK A SOUND TO HEAR IT ON THE TRACK  ·  DOUBLE-CLICK TO KEEP IT AND CLOSE")
+                    .font(LYLLTHTheme.label(7, weight: .bold)).tracking(1).foregroundStyle(LYLLTHTheme.text)
                 Text("MACROS ON EVERY FACTORY SOUND: 1 TONE · 2 MOTION · 3 SPACE · 4 GRIT")
                     .font(LYLLTHTheme.label(7, weight: .bold)).tracking(1).foregroundStyle(LYLLTHTheme.dim)
             }

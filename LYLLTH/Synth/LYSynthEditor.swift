@@ -159,6 +159,27 @@ struct LYSynthEditor: View {
         instrument?.noteOn(UInt8(min(max(note, 0), 127)), velocity: 110, atHostTime: 0, cutoff: 1, resonance: 0)
     }
 
+    @State private var previewNote: Int?
+
+    /// A short C when the patch changes, so a sound is heard as it's picked.
+    /// Skipped while you're holding keys.
+    private func previewPatch() {
+        guard heldKeys.isEmpty else { return }
+        if let last = previewNote { instrument?.noteOff(UInt8(last), atHostTime: 0) }
+        let note = min(max(12 * (keyboardOctave + 1), 24), 96)
+        previewNote = note
+        // After the new patch reaches the instrument.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            guard previewNote == note, heldKeys.isEmpty else { return }
+            instrument?.noteOn(UInt8(note), velocity: 100, atHostTime: 0, cutoff: 1, resonance: 0)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                guard previewNote == note else { return }
+                instrument?.noteOff(UInt8(note), atHostTime: 0)
+                previewNote = nil
+            }
+        }
+    }
+
     private func stop(_ note: Int) {
         heldKeys.remove(note)
         instrument?.noteOff(UInt8(min(max(note, 0), 127)), atHostTime: 0)
@@ -271,7 +292,7 @@ struct LYSynthEditor: View {
         let all = LYSynthPatch.factory + presetStore.presets
         let index = all.firstIndex { $0.name == patch.name } ?? -1
         return HStack(spacing: 0) {
-            presetArrow("chevron.left") { if !all.isEmpty { patch = all[(index - 1 + all.count) % all.count] } }
+            presetArrow("chevron.left") { if !all.isEmpty { patch = all[(index - 1 + all.count) % all.count]; previewPatch() } }
             Button { choosingPreset.toggle() } label: {
                 VStack(spacing: 1) {
                     Text(presetStore.presets.contains { $0.name == patch.name } ? "USER PRESET" : "PRESET")
@@ -283,7 +304,7 @@ struct LYSynthEditor: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            presetArrow("chevron.right") { if !all.isEmpty { patch = all[(index + 1) % all.count] } }
+            presetArrow("chevron.right") { if !all.isEmpty { patch = all[(index + 1) % all.count]; previewPatch() } }
             Button {
                 presetDraft = patch.name == "INIT" ? "" : patch.name
                 presetError = nil
@@ -376,7 +397,8 @@ struct LYSynthEditor: View {
                 LYPresetBrowser(
                     current: patch.name,
                     user: presetStore.presets,
-                    choose: { patch = $0; choosingPreset = false },
+                    // Stays open so you can click through sounds by ear.
+                    choose: { patch = $0; previewPatch() },
                     delete: { presetStore.delete($0) },
                     close: { choosingPreset = false }
                 )

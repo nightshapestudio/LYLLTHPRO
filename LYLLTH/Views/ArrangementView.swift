@@ -34,6 +34,10 @@ struct ArrangementView: View {
     /// False while a floating window or menu sits over the arrangement, so
     /// a right-click inside it never opens a region menu underneath.
     var acceptsRightClicks: () -> Bool = { true }
+    /// Previous / next sound on a track, played as it changes.
+    var stepSound: (UUID, Int) -> Void = { _, _ in }
+    /// Opens the add-track menu from a named anchor.
+    var openTrackMenuAt: (String) -> Void = { _ in }
 
     @EnvironmentObject private var audio: AudioEngineController
 
@@ -479,6 +483,16 @@ struct ArrangementView: View {
                     .tracking(1.8)
                     .foregroundStyle(LYLLTHTheme.dim)
                 Spacer()
+                // Where tracks are listed is where you add one.
+                Button { openTrackMenuAt("arrTracks") } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "plus").font(.system(size: 8, weight: .bold))
+                        Text("ADD TRACK")
+                    }
+                }
+                .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.teal, compact: true))
+                .lyMenuAnchor("arrTracks")
+                .help("Add a drum, LUNATK, audio or return track (⌘T)")
             }
             .padding(.horizontal, 14)
             .frame(width: headerWidth, height: rulerHeight)
@@ -662,6 +676,7 @@ struct ArrangementView: View {
                 automationMode: $session.tracks[index].automationMode,
                 instrumentIcon: track.kind == .drumkit ? "waveform.path" : (track.kind == .instrument && track.isChordTrack != true ? "pianokeys" : nil),
                 openInstrument: { track.kind == .drumkit ? openDrums(track.id) : openSynth(track.id) },
+                stepSound: LYDrumSounds.soundName(for: track) == nil ? nil : { stepSound(track.id, $0) },
                 isFrozen: track.isFrozen,
                 toggleFreeze: { toggleFreeze(track.id) },
                 compact: laneHeight < 56
@@ -1362,6 +1377,7 @@ struct LYTrackHeader: View {
     var automationMode: Binding<LYAutomationMode?>? = nil
     var instrumentIcon: String? = nil
     var openInstrument: () -> Void = {}
+    var stepSound: ((Int) -> Void)? = nil
     var isFrozen = false
     var toggleFreeze: () -> Void = {}
     /// A short lane: one line instead of two.
@@ -1380,7 +1396,7 @@ struct LYTrackHeader: View {
     @ViewBuilder
     private var subtitle: some View {
         if let sound {
-            LYTrackSoundButton(sound: sound, accent: accent, action: openInstrument)
+            LYTrackSoundButton(sound: sound, accent: accent, action: openInstrument, step: stepSound)
         } else {
             Text(kind)
                 .font(LYLLTHTheme.label(7, weight: .bold))
@@ -1532,23 +1548,42 @@ struct LYTrackSoundButton: View {
     let sound: String
     let accent: Color
     let action: () -> Void
+    /// ‹ › step to the previous / next sound of the same kind and play it.
+    var step: ((Int) -> Void)? = nil
+    @State private var hovering = false
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 3) {
-                Text(sound)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 6, weight: .bold))
+        HStack(spacing: 2) {
+            if let step { arrow("chevron.left") { step(-1) }.help("Previous sound (⌘[)") }
+            Button(action: action) {
+                HStack(spacing: 3) {
+                    Text(sound)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 6, weight: .bold))
+                }
+                .font(LYLLTHTheme.label(7.5, weight: .bold))
+                .tracking(1)
+                .foregroundStyle(accent)
+                .contentShape(Rectangle())
             }
-            .font(LYLLTHTheme.label(7.5, weight: .bold))
-            .tracking(1)
-            .foregroundStyle(accent)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .help("Browse sounds for this track")
+            if let step { arrow("chevron.right") { step(1) }.help("Next sound (⌘])") }
+        }
+        .onHover { hovering = $0 }
+    }
+
+    private func arrow(_ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 6.5, weight: .bold))
+                .foregroundStyle(accent.opacity(hovering ? 1 : 0.45))
+                .frame(width: 12, height: 14)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Change this track's sound")
     }
 }
 

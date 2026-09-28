@@ -162,6 +162,7 @@
 		B992E98617D36BDD7C5942BE /* FXWindowsMore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BB13BE327985FF3958F073F /* FXWindowsMore.swift */; };
 		B9CBB8A6BB37F7A5FF09C9EB /* DrumSynthControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F97842A504B9FFCB9A8E07 /* DrumSynthControls.swift */; };
 		BCFDC588B7A5C7F4E8C9F886 /* SirenEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE3FCE9D26D3049D63A5B62C /* SirenEditor.swift */; };
+		BDCDD898806FB38DC18A19C6 /* SoundSteppingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F72DA643AF2A79998343D85 /* SoundSteppingTests.swift */; };
 		BEDFD504AE4AD5C9E2F9D00E /* SessionDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */; };
 		BEF12851075EA3C677715CCD /* NightshapeTheme+macOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2076405DA45D97F6974188B2 /* NightshapeTheme+macOS.swift */; };
 		C5FC2050CF73E1D9599F3518 /* AudioEngineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC518B98C5E542E07745D166 /* AudioEngineController.swift */; };
@@ -199,6 +200,7 @@
 		F466E72CC69A9D3452A50F01 /* LUNATKAnalogFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE54E9104F92142C7384552F /* LUNATKAnalogFeatureTests.swift */; };
 		F5073A5322475A1DCD36C06D /* LYBounce.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26A43024412B8FC79FFECBA7 /* LYBounce.swift */; };
 		F5914CB573EBA8C4B066278D /* OfflineExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6FFC78FDE604528578BAEF /* OfflineExportTests.swift */; };
+		F6425EFC86DFFF2A183B2134 /* LYSoundStepping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 135EB2581CD1ED1E9C275888 /* LYSoundStepping.swift */; };
 		F70E89261952F94EB19EEE6D /* LYVocalAligner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17EBB6531552769C95BD4558 /* LYVocalAligner.swift */; };
 		FA890E7727C5DC3B00397DA5 /* LYDrumKits.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA3051B77EEBF881B51AA9F2 /* LYDrumKits.swift */; };
 		FC3AFAEA9FF55E12B7412157 /* Inter-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 894299C0CDA7334E72335576 /* Inter-Regular.ttf */; };
@@ -250,6 +252,7 @@
 		09D35668C634C05CDD514E3C /* LYOfflineExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYOfflineExport.swift; sourceTree = "<group>"; };
 		0C99A40AA929337CAB108FFD /* LYSynthCore.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LYSynthCore.h; sourceTree = "<group>"; };
 		0F27ED40BF04A9BCA0E2B207 /* HelpCenterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpCenterTests.swift; sourceTree = "<group>"; };
+		135EB2581CD1ED1E9C275888 /* LYSoundStepping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSoundStepping.swift; sourceTree = "<group>"; };
 		14EF068925C4572F08ABDF5D /* FXWindowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FXWindowViews.swift; path = "../nightshape-drumkit-ios/Views/Components/FXWindowViews.swift"; sourceTree = "<group>"; };
 		16D07685D250C91B37E5CD8F /* LYRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYRecorder.swift; sourceTree = "<group>"; };
 		1703868BDA0F39CBC2D0032D /* Adam-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Adam-Bold.ttf"; sourceTree = "<group>"; };
@@ -314,6 +317,7 @@
 		6EFD5B0EE63778A738F5BBAA /* LYSynthPatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LYSynthPatch.swift; sourceTree = "<group>"; };
 		6F5EDEEECA0B5AF0315DC28E /* ZipArchiveReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ZipArchiveReader.swift; path = "../nightshape-drumkit-ios/Services/ZipArchiveReader.swift"; sourceTree = "<group>"; };
 		6F6FDEB2771DB26C743DA3A2 /* FKitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FKitTests.swift; sourceTree = "<group>"; };
+		6F72DA643AF2A79998343D85 /* SoundSteppingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundSteppingTests.swift; sourceTree = "<group>"; };
 		72AEB02959BB05614C81FE98 /* DrumKitLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrumKitLibrary.swift; path = "../nightshape-drumkit-ios/Services/DrumKitLibrary.swift"; sourceTree = "<group>"; };
 		762CC1543C2324F346E902F2 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
 		79A8BE359F6B7DF3674E5D8A /* Inter-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-Medium.ttf"; sourceTree = "<group>"; };
@@ -530,6 +534,7 @@
 				3584EB3AD88692550DF64DBE /* LYNoteRecording.swift */,
 				D74563EBB7FDEAEFF2337A79 /* LYRegionCommands.swift */,
 				A90DA54344A0C325DC97A88A /* LYSongFX.swift */,
+				135EB2581CD1ED1E9C275888 /* LYSoundStepping.swift */,
 				5D2710D240A4FA97144EC0A9 /* SessionModels.swift */,
 			);
 			path = Models;
@@ -597,6 +602,7 @@
 				CE3FA7ECEAC4BEB50EA59EBB /* SessionDocumentTests.swift */,
 				CE39D72F825EEC10AE76F292 /* SirenTests.swift */,
 				E4590DBB4A2CB4EEFB8F938C /* SongFXTests.swift */,
+				6F72DA643AF2A79998343D85 /* SoundSteppingTests.swift */,
 				1A2F4736A16F53868A4791F0 /* SynthCoreTests.swift */,
 				1A1922DA06A54E7620D26B2E /* SynthFeatureTests.swift */,
 				297C287AF96441E0A0F9CFA4 /* Fixtures */,
@@ -1064,6 +1070,7 @@
 				BEDFD504AE4AD5C9E2F9D00E /* SessionDocumentTests.swift in Sources */,
 				587978914D7A50ECE3DCE300 /* SirenTests.swift in Sources */,
 				8FF0057A33F063C940883B91 /* SongFXTests.swift in Sources */,
+				BDCDD898806FB38DC18A19C6 /* SoundSteppingTests.swift in Sources */,
 				162682C9152C4F5217FC0D04 /* SynthCoreTests.swift in Sources */,
 				EFD5BBF99458A4F73ACC3359 /* SynthFeatureTests.swift in Sources */,
 			);
@@ -1120,6 +1127,7 @@
 				6BACF0801CF62F413285022A /* LYRegionCommands.swift in Sources */,
 				1100D2673739C29C697A2403 /* LYScroller.swift in Sources */,
 				854046CA26DFA57FB2152650 /* LYSongFX.swift in Sources */,
+				F6425EFC86DFFF2A183B2134 /* LYSoundStepping.swift in Sources */,
 				7AAEF9D68A52E5362904BFAA /* LYSynthControls.swift in Sources */,
 				030D70F445C8B64626C87ACB /* LYSynthCore.cpp in Sources */,
 				8CEA08B2D479F0190698CA5C /* LYSynthEditor.swift in Sources */,

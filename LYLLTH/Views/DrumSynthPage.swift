@@ -27,6 +27,7 @@ struct LYDrumSynthPage: View {
     @State private var status = ""
     @State private var auditionWork: DispatchWorkItem?
     @FocusState private var saveFieldFocused: Bool
+    @FocusState private var browsing: Bool
 
     private var categories: [(DrumSynthCategory, Int)] {
         LYDrumSounds.grouped.map { group in (group.0, group.1.count + userPresets.filter { $0.category == group.0 }.count) }
@@ -64,7 +65,18 @@ struct LYDrumSynthPage: View {
         }
         .background(Color(hex: 0x0C0C0E))
         .overlay { targetMenu }
-        .onAppear(perform: start)
+        // Browse by ear: ↑ ↓ plays each sound, ← → changes category.
+        .focusable()
+        .focusEffectDisabled()
+        .focused($browsing)
+        .onKeyPress(.upArrow, phases: .down) { _ in stepPreset(-1) }
+        .onKeyPress(.downArrow, phases: .down) { _ in stepPreset(1) }
+        .onKeyPress(.leftArrow, phases: .down) { _ in stepCategory(-1) }
+        .onKeyPress(.rightArrow, phases: .down) { _ in stepCategory(1) }
+        .onAppear {
+            start()
+            browsing = true
+        }
     }
 
     private func start() {
@@ -100,7 +112,8 @@ struct LYDrumSynthPage: View {
             Button(isEdited || isMine ? "LOAD EDITED" : "LOAD") { loadSelected() }
                 .buttonStyle(LYChromeButtonStyle(active: true, tint: LYLLTHTheme.teal, compact: true))
                 .disabled(target == nil || selected == nil)
-                .help("Put this sound on \(target?.name ?? "the track") (or double-click a sound)")
+                .keyboardShortcut(.return, modifiers: .command)
+                .help("Put this sound on \(target?.name ?? "the track") (⌘Return, or double-click a sound)")
             Button { if let selected { audition(selected) } } label: {
                 HStack(spacing: 5) { Image(systemName: "play.fill").font(.system(size: 8, weight: .bold)); Text("PLAY") }
             }
@@ -219,7 +232,16 @@ struct LYDrumSynthPage: View {
                     .padding(.vertical, 4)
                 }
                 .onAppear { reader.scrollTo(selectedID, anchor: .center) }
+                .onChange(of: selectedID) { _, id in reader.scrollTo(id) }
             }
+            Text("↑ ↓ PLAY  ·  ← → CATEGORY  ·  ⌘RETURN LOADS")
+                .font(LYLLTHTheme.label(7, weight: .bold))
+                .tracking(1.1)
+                .foregroundStyle(LYLLTHTheme.dim)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, minHeight: 26)
+                .overlay(alignment: .top) { LYHairline() }
         }
         .background(LYLLTHTheme.panel)
     }
@@ -255,7 +277,26 @@ struct LYDrumSynthPage: View {
             select(preset)
             loadSelected()
         }
-        .simultaneousGesture(TapGesture().onEnded { select(preset) })
+        .simultaneousGesture(TapGesture().onEnded {
+            select(preset)
+            browsing = true
+        })
+    }
+
+    private func stepPreset(_ step: Int) -> KeyPress.Result {
+        guard !saveFieldFocused, !presets.isEmpty else { return .ignored }
+        let index = presets.firstIndex { $0.id == selectedID } ?? (step > 0 ? -1 : presets.count)
+        select(presets[min(max(index + step, 0), presets.count - 1)])
+        return .handled
+    }
+
+    private func stepCategory(_ step: Int) -> KeyPress.Result {
+        guard !saveFieldFocused, query.isEmpty else { return .ignored }
+        let all = categories.map(\.0)
+        guard let index = all.firstIndex(of: category) else { return .ignored }
+        category = all[(index + step + all.count) % all.count]
+        if let first = presets.first { select(first) }
+        return .handled
     }
 
     private func select(_ preset: DrumSynthPreset) {
