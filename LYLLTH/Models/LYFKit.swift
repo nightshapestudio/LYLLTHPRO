@@ -18,6 +18,12 @@ private struct FKitManifest: Codable {
     var savedAt: Date
 }
 
+private struct LYWorkstationContinuity: Codable {
+    var schemaVersion = 1
+    var session: LYLLTHSession
+    var assets: [String: Data]
+}
+
 /// DrumKit's `.fkit` projects in and out of LYLLTH.
 ///
 /// DrumKit has sixteen rows that all play the same numbered pattern, and a
@@ -236,7 +242,64 @@ enum LYFKit {
             session.mainFX = mainRack(from: effects)
             session.reverb = effects.reverb
         }
+        if let payload = snapshot.workstationContinuity,
+           let continuity = try? JSONDecoder().decode(LYWorkstationContinuity.self, from: payload),
+           continuity.schemaVersion <= 1 {
+            return Imported(
+                session: mergeMobile(session, into: continuity.session.migratedToCurrentSchema()),
+                assets: continuity.assets.merging(assets, uniquingKeysWith: { _, mobile in mobile }),
+                notes: notes.filter { $0.contains("was not in the file") }
+            )
+        }
         return Imported(session: session, assets: assets, notes: notes)
+    }
+
+    /// Apply what DrumKit can edit to the preserved workstation song without
+    /// discarding anything DrumKit cannot represent.
+    private static func mergeMobile(_ mobile: LYLLTHSession, into workstation: LYLLTHSession) -> LYLLTHSession {
+        var result = workstation
+        result.name = mobile.name
+        result.modifiedAt = Date()
+        result.bpm = mobile.bpm
+        result.numerator = mobile.numerator
+        result.denominator = mobile.denominator
+        result.songKey = mobile.songKey
+        result.swing = mobile.swing
+        result.activePatternIndex = mobile.activePatternIndex
+        result.mainVolumeDB = mobile.mainVolumeDB
+        result.mainFX = mobile.mainFX
+        result.reverb = mobile.reverb
+
+        let targets = result.tracks.indices.filter {
+            result.tracks[$0].kind == .drumkit || result.tracks[$0].kind == .instrument
+        }
+        let sources = mobile.tracks.filter { $0.kind == .drumkit || $0.kind == .instrument }
+        var mobileToWorkstation: [UUID: UUID] = [:]
+        for (targetIndex, source) in zip(targets, sources) {
+            mobileToWorkstation[source.id] = result.tracks[targetIndex].id
+            let preserved = result.tracks[targetIndex].clips.filter { !$0.isSequenced }
+            result.tracks[targetIndex].name = source.name
+            result.tracks[targetIndex].volumeDB = source.volumeDB
+            result.tracks[targetIndex].pan = source.pan
+            result.tracks[targetIndex].isMuted = source.isMuted
+            result.tracks[targetIndex].isSolo = source.isSolo
+            result.tracks[targetIndex].chokeGroup = source.chokeGroup
+            result.tracks[targetIndex].envelope = source.envelope
+            result.tracks[targetIndex].fx = source.fx
+            result.tracks[targetIndex].clips = source.clips + preserved
+            if result.tracks[targetIndex].kind == .drumkit {
+                result.tracks[targetIndex].drumPresetID = source.drumPresetID
+                result.tracks[targetIndex].customDrumPreset = source.customDrumPreset
+                result.tracks[targetIndex].samplePath = source.samplePath
+            }
+        }
+        result.songFX = (mobile.songFX ?? []).map { block in
+            var copy = block
+            if let id = block.trackID { copy.trackID = mobileToWorkstation[id] }
+            return copy
+        }
+        result.normalizeEngineChannelIndices()
+        return result
     }
 
     private static func parameters(from cell: PatternStepState) -> LYStepParameters {
@@ -496,6 +559,12 @@ enum LYFKit {
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        snapshot.workstationContinuity = try encoder.encode(
+            LYWorkstationContinuity(session: session, assets: assets)
+        )
+        if !notes.isEmpty {
+            notes = ["LYLLTH-only material is preserved losslessly for the return trip; DrumKit plays and edits its supported rows"]
+        }
         let manifest = FKitManifest(
             format: format,
             schemaVersion: schemaVersion,

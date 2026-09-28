@@ -331,10 +331,28 @@ enum LYMIDIExport {
         let rangeEnd = window?.endBeat ?? frames.reduce(0) { $0 + Double($1.stepCount) * lyBeatsPerStep }
         var free: [Int: [MIDIExportNote]] = [:]
         for (index, track) in musical.enumerated() where track.kind == .instrument {
+            let routedChannel = track.midiRouting?.outputChannel ?? tracks[index]?.channel ?? 0
             let notes = track.clips.filter { $0.isNoteClip && $0.isInSong && !$0.isMuted }
                 .flatMap { $0.songNotes(from: rangeStart, to: rangeEnd) }
-                .map { MIDIExportNote(startQuarters: $0.beat - rangeStart, lengthQuarters: min($0.length, rangeEnd - $0.beat),
-                                      note: $0.pitch, velocity: $0.velocity) }
+                .map { note in
+                    let expression = (note.expression ?? []).map { point in
+                        let message = LYNotePlayer.message(for: point, fallbackChannel: UInt8(routedChannel))
+                        return MIDIExportExpression(
+                            offsetQuarters: point.offset,
+                            status: message.status,
+                            data1: message.data1,
+                            data2: message.data2
+                        )
+                    }
+                    return MIDIExportNote(
+                        startQuarters: note.beat - rangeStart,
+                        lengthQuarters: min(note.length, rangeEnd - note.beat),
+                        note: note.pitch,
+                        velocity: note.velocity,
+                        channel: routedChannel,
+                        expression: expression
+                    )
+                }
             if !notes.isEmpty { free[index] = notes }
         }
         return MIDIFileExporter.data(

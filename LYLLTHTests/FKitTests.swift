@@ -64,10 +64,36 @@ final class FKitTests: XCTestCase {
     func testSavingALYLLTHSongSaysWhatDrumKitCannotHold() throws {
         var session = LYLLTHSession.starter()
         let saved = try LYFKit.exportProject(session, assets: [:])
-        XCTAssertTrue(saved.notes.contains { $0.contains("audio tracks and buses") })
+        XCTAssertTrue(saved.notes.contains { $0.contains("preserved losslessly") })
         session.tracks.removeAll { $0.kind == .audio || $0.kind == .auxiliary }
         let reopened = try LYFKit.importProject(from: LYFKit.exportProject(session, assets: [:]).data).session
         XCTAssertEqual(reopened.tracks.count, 16)
         XCTAssertEqual(reopened.tracks[0].patterns.first?.steps, session.tracks[0].patterns.first?.steps)
+    }
+
+    func testWorkstationOnlyMaterialSurvivesFKitRoundTrip() throws {
+        var session = LYLLTHSession.blank()
+        let audio = try XCTUnwrap(session.tracks.firstIndex(where: { $0.kind == .audio }))
+        session.tracks[audio].clips = [LYClip(
+            name: "VOCAL",
+            kind: .audio,
+            startBeat: 2,
+            lengthBeats: 4,
+            sourceRelativePath: "vocal.wav",
+            sourceDurationSeconds: 2
+        )]
+        session.tracks[0].automation = [LYAutomationLane(
+            target: .volume,
+            points: [LYAutomationPoint(beat: 0, value: -9)]
+        )]
+        _ = session.createFolder(name: "RHYTHM", trackIDs: Array(session.tracks.prefix(3).map(\.id)))
+        let asset = Data([0, 1, 2, 3, 4, 5])
+
+        let data = try LYFKit.exportProject(session, assets: ["vocal.wav": asset]).data
+        let reopened = try LYFKit.importProject(from: data)
+        XCTAssertEqual(reopened.assets["vocal.wav"], asset)
+        XCTAssertEqual(reopened.session.tracks.first(where: { $0.kind == .audio })?.clips.first?.name, "VOCAL")
+        XCTAssertEqual(reopened.session.tracks[0].automation, session.tracks[0].automation)
+        XCTAssertEqual(reopened.session.trackFolders?.first?.name, "RHYTHM")
     }
 }

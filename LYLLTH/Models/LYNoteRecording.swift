@@ -5,10 +5,32 @@ import Foundation
 enum LYNoteRecording {
     typealias Played = (beat: Double, length: Double, pitch: Int, velocity: Int)
 
+    struct ExpressivePlayed {
+        var beat: Double
+        var length: Double
+        var pitch: Int
+        var velocity: Int
+        var expression: [LYMIDIExpressionPoint]
+    }
+
     /// A note played over a note clip goes into that clip, at its place in
     /// the clip's repeating content. Anywhere else, the take gets a new clip
     /// on the bar, and a take that runs on grows that clip bar by bar.
     static func write(_ played: [Played], into clips: [LYClip], beatsPerBar: Double) -> [LYClip] {
+        write(
+            played.map { ExpressivePlayed(
+                beat: $0.beat,
+                length: $0.length,
+                pitch: $0.pitch,
+                velocity: $0.velocity,
+                expression: []
+            ) },
+            into: clips,
+            beatsPerBar: beatsPerBar
+        )
+    }
+
+    static func write(_ played: [ExpressivePlayed], into clips: [LYClip], beatsPerBar: Double) -> [LYClip] {
         var clips = clips
         var made: Set<UUID> = []
         for note in played.sorted(by: { $0.beat < $1.beat }) {
@@ -37,9 +59,15 @@ enum LYNoteRecording {
             let cycle = clip.noteCycleBeats
             var local = (beat - clip.startBeat + clip.loopOffsetBeats).truncatingRemainder(dividingBy: cycle)
             if local < 0 { local += cycle }
-            clips[index].notes = ((clip.notes ?? []) + [LYNote(start: local, length: note.length,
-                                                              pitch: min(max(note.pitch, 0), 127),
-                                                              velocity: min(max(note.velocity, 1), 127))])
+            var expression = note.expression
+            for pointIndex in expression.indices { expression[pointIndex].normalize(noteLength: note.length) }
+            clips[index].notes = ((clip.notes ?? []) + [LYNote(
+                start: local,
+                length: note.length,
+                pitch: min(max(note.pitch, 0), 127),
+                velocity: min(max(note.velocity, 1), 127),
+                expression: expression.isEmpty ? nil : expression
+            )])
                 .sorted { ($0.start, $0.pitch) < ($1.start, $1.pitch) }
         }
         return clips
@@ -52,6 +80,7 @@ struct LYSongNote: Equatable {
     var length: Double
     var pitch: Int
     var velocity: Int
+    var expression: [LYMIDIExpressionPoint]? = nil
 }
 
 extension LYClip {
@@ -74,7 +103,15 @@ extension LYClip {
                 guard beat >= startBeat - 0.000_1, beat >= lower, beat < upper else { continue }
                 let end = min(beat + note.length, repeatStart + cycle, clipEnd)
                 guard end > beat else { continue }
-                out.append(LYSongNote(beat: beat, length: end - beat, pitch: note.pitch, velocity: note.velocity))
+                let audibleLength = end - beat
+                let expression = note.expression?.filter { $0.offset <= audibleLength + 0.000_001 }
+                out.append(LYSongNote(
+                    beat: beat,
+                    length: audibleLength,
+                    pitch: note.pitch,
+                    velocity: note.velocity,
+                    expression: expression
+                ))
             }
         }
         return out.sorted { ($0.beat, $0.pitch) < ($1.beat, $1.pitch) }

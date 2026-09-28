@@ -458,6 +458,38 @@ final class SessionDocumentTests: XCTestCase {
         XCTAssertEqual(map.beatInterval, 0.5, accuracy: 0.000_001)
     }
 
+    func testOverlappingAudioEventsGetSymmetricCrossfade() throws {
+        let first = LYClip(name: "A", kind: .audio, startBeat: 0, lengthBeats: 4, sourceRelativePath: "a.wav")
+        let second = LYClip(name: "B", kind: .audio, startBeat: 3, lengthBeats: 4, sourceRelativePath: "b.wav")
+        let result = try XCTUnwrap(LYAudioEventEditor.crossfade(first, second, bpm: 120))
+        XCTAssertEqual(result.first.fadeOutSeconds, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(result.second.fadeInSeconds, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(result.first.fadeCurve, .equalPower)
+    }
+
+    func testWarpMarkersCanBeMovedInsertedAndRemoved() throws {
+        let marker = LYBeatMarker(index: 1, sourceTime: 0.5, confidence: 0.5, strength: 0.5)
+        let map = LYBeatMap(sourceBPM: 120, beatInterval: 0.5, firstBeatTime: 0, sourceDuration: 4,
+                            markers: [marker], confidence: 0.8, averageDriftMS: 12, maxDriftMS: 20)
+        let moved = LYWarpMarkerEditor.moving(marker.id, to: 0.6, in: map)
+        XCTAssertEqual(moved.markers[0].sourceTime, 0.6)
+        let inserted = LYWarpMarkerEditor.inserting(sourceTime: 1, beatIndex: 2, in: moved)
+        XCTAssertEqual(inserted.markers.map(\.index), [1, 2])
+        XCTAssertTrue(LYWarpMarkerEditor.removing(marker.id, from: inserted).markers.allSatisfy { $0.id != marker.id })
+    }
+
+    func testFoldersAndMixGroupsSurviveMigrationAndAffectGain() throws {
+        var session = LYLLTHSession.blank()
+        let ids = Array(session.tracks.prefix(2).map(\.id))
+        _ = session.createFolder(name: "DRUMS", trackIDs: ids)
+        _ = session.createMixGroup(name: "DRUM BUS", trackIDs: ids)
+        session.mixGroups?[0].volumeOffsetDB = -3
+        XCTAssertEqual(session.effectiveVolumeDB(for: session.tracks[0]), session.tracks[0].volumeDB - 3)
+        let decoded = try JSONDecoder().decode(LYLLTHSession.self, from: JSONEncoder().encode(session)).migratedToCurrentSchema()
+        XCTAssertEqual(decoded.trackFolders?.first?.trackIDs, ids)
+        XCTAssertEqual(decoded.mixGroups?.first?.trackIDs, ids)
+    }
+
     func testImportedAudioIsStoredInsideProjectPackage() throws {
         var document = LYLLTHSessionDocument(session: .starter())
         let imported = LYImportedAudio(

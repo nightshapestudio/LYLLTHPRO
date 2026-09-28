@@ -51,6 +51,11 @@ final class LYSynthInstrument {
         lysynth_note_off(core, Int32(note), hostTime)
     }
 
+    /// Timestamped channel voice data, used by recorded CC/aftertouch and MPE.
+    func midi(status: UInt8, data1: UInt8, data2: UInt8, atHostTime hostTime: UInt64) {
+        lysynth_midi(core, status, data1, data2, hostTime)
+    }
+
     func allNotesOff() {
         lysynth_all_notes_off(core)
     }

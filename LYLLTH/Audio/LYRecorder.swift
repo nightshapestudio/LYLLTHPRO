@@ -9,6 +9,8 @@ struct LYRecordedNote {
     /// Transport beats (quarter notes) since the transport started.
     var onBeat: Double
     var offBeat: Double?
+    var channel: Int = 0
+    var expression: [LYMIDIExpressionPoint] = []
 }
 
 struct LYRecordedAudioCapture {
@@ -199,12 +201,69 @@ final class LYRecorder: ObservableObject {
         // A note a little early for the downbeat still belongs to it.
         guard at > -0.125 else { return }
         let kind = status & 0xF0
+        let channel = Int(status & 0x0F)
         if kind == 0x90 && data2 > 0 {
-            notes.append(LYRecordedNote(note: Int(data1), velocity: Int(data2), onBeat: max(0, at), offBeat: nil))
+            notes.append(LYRecordedNote(
+                note: Int(data1),
+                velocity: Int(data2),
+                onBeat: max(0, at),
+                offBeat: nil,
+                channel: channel
+            ))
         } else if kind == 0x80 || (kind == 0x90 && data2 == 0) {
-            if let index = notes.lastIndex(where: { $0.note == Int(data1) && $0.offBeat == nil }) {
+            if let index = notes.lastIndex(where: { $0.note == Int(data1) && $0.channel == channel && $0.offBeat == nil }) {
                 notes[index].offBeat = max(at, notes[index].onBeat + 0.05)
             }
+        } else if let expression = expressionPoint(
+            kind: kind,
+            channel: channel,
+            data1: data1,
+            data2: data2,
+            at: at
+        ) {
+            // MPE member-channel expression belongs to the held note on that
+            // channel. Channel 1/master expression intentionally reaches all
+            // held notes so ordinary keyboards record as expected too.
+            for index in notes.indices where notes[index].offBeat == nil
+                && (notes[index].channel == channel || channel == 0) {
+                var point = expression
+                point.offset = max(0, at - notes[index].onBeat)
+                notes[index].expression.append(point)
+            }
+        }
+    }
+
+    private func expressionPoint(
+        kind: UInt8,
+        channel: Int,
+        data1: UInt8,
+        data2: UInt8,
+        at: Double
+    ) -> LYMIDIExpressionPoint? {
+        _ = at
+        switch kind {
+        case 0xE0:
+            let raw = Int(data1) | (Int(data2) << 7)
+            return LYMIDIExpressionPoint(offset: 0, kind: .pitchBend, value: (Double(raw) - 8_192) / 8_191, channel: channel)
+        case 0xD0:
+            return LYMIDIExpressionPoint(offset: 0, kind: .pressure, value: Double(data1) / 127, channel: channel)
+        case 0xB0:
+            let type: LYMIDIExpressionKind
+            switch data1 {
+            case 1: type = .modulation
+            case 64: type = .sustain
+            case 74: type = .timbre
+            default: type = .controlChange
+            }
+            return LYMIDIExpressionPoint(
+                offset: 0,
+                kind: type,
+                controller: type == .controlChange ? Int(data1) : nil,
+                value: Double(data2) / 127,
+                channel: channel
+            )
+        default:
+            return nil
         }
     }
 

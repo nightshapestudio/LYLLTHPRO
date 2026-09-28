@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 /// What an automation lane moves.
 enum LYAutomationTarget: Codable, Hashable {
@@ -48,6 +49,132 @@ struct LYAutomationLane: Codable, Equatable, Identifiable {
 
     mutating func sortPoints() {
         points.sort { $0.beat < $1.beat }
+    }
+
+    /// Adds or replaces one sample without growing a lane with multiple points
+    /// at effectively the same sample position.
+    mutating func write(value: Double, at beat: Double, clock: LYTimelineClock) {
+        let clampedBeat = max(0, beat)
+        let frame = clock.frame(atBeat: clampedBeat)
+        let value = min(max(value, target.range.lowerBound), target.range.upperBound)
+        if let index = points.firstIndex(where: { clock.frame(atBeat: $0.beat) == frame }) {
+            points[index].beat = clampedBeat
+            points[index].value = value
+        } else {
+            points.append(LYAutomationPoint(beat: clampedBeat, value: value))
+        }
+        sortPoints()
+    }
+}
+
+/// The one conversion used by live note scheduling, automation playback, and
+/// offline rendering. All musical time is ultimately resolved to an integer
+/// sample frame before it is handed to a renderer or host clock.
+struct LYTimelineClock: Equatable {
+    var sampleRate: Double
+    var bpm: Double
+    var startBeat: Double = 0
+    var epochHostTime: UInt64 = 0
+
+    var framesPerBeat: Double { max(sampleRate, 1) * 60 / max(bpm, 1) }
+
+    func frame(atBeat beat: Double) -> Int64 {
+        Int64(((beat - startBeat) * framesPerBeat).rounded())
+    }
+
+    func beat(atFrame frame: Int64) -> Double {
+        startBeat + Double(frame) / framesPerBeat
+    }
+
+    func hostTime(atBeat beat: Double) -> UInt64 {
+        let seconds = Double(max(0, frame(atBeat: beat))) / max(sampleRate, 1)
+        return epochHostTime + AVAudioTime.hostTime(forSeconds: seconds)
+    }
+
+    func beat(atHostTime hostTime: UInt64) -> Double {
+        guard hostTime > epochHostTime else { return startBeat }
+        let seconds = AVAudioTime.seconds(forHostTime: hostTime - epochHostTime)
+        return startBeat + seconds * max(bpm, 1) / 60
+    }
+}
+
+struct LYAutomationSample: Equatable {
+    var frame: Int64
+    var beat: Double
+    var value: Double
+}
+
+extension LYAutomationLane {
+    /// Deterministic automation samples for a render interval. Point frames are
+    /// always included, and long ramps are sampled at the renderer quantum so
+    /// live and offline paths evaluate the same curve at the same frame.
+    func samples(
+        from startFrame: Int64,
+        to endFrame: Int64,
+        clock: LYTimelineClock,
+        quantum: Int64 = 128
+    ) -> [LYAutomationSample] {
+        guard isActive, endFrame > startFrame else { return [] }
+        let step = max(1, quantum)
+        var frames = Set<Int64>()
+        var frame = startFrame
+        while frame < endFrame {
+            frames.insert(frame)
+            frame += step
+        }
+        frames.insert(endFrame - 1)
+        for point in points {
+            let pointFrame = clock.frame(atBeat: point.beat)
+            if pointFrame >= startFrame, pointFrame < endFrame { frames.insert(pointFrame) }
+        }
+        return frames.sorted().compactMap { frame in
+            let beat = clock.beat(atFrame: frame)
+            return value(at: beat).map { raw in
+                LYAutomationSample(
+                    frame: frame,
+                    beat: beat,
+                    value: min(max(raw, target.range.lowerBound), target.range.upperBound)
+                )
+            }
+        }
+    }
+}
+
+/// Stateful write-mode semantics independent of the UI control driving them.
+/// The caller samples this at transport frames; TOUCH releases immediately,
+/// LATCH keeps the last value, and WRITE records for the whole pass.
+struct LYAutomationWritePass {
+    var mode: LYAutomationMode
+    private(set) var isTouching = false
+    private(set) var latchedValue: Double?
+
+    mutating func beginTouch(value: Double) {
+        isTouching = true
+        latchedValue = value
+    }
+
+    mutating func move(to value: Double) {
+        guard isTouching || mode == .write else { return }
+        latchedValue = value
+    }
+
+    mutating func endTouch() {
+        isTouching = false
+        if mode == .touch { latchedValue = nil }
+    }
+
+    mutating func finish() {
+        isTouching = false
+        latchedValue = nil
+    }
+
+    func valueToWrite(staticValue: Double) -> Double? {
+        switch mode {
+        case .read: return nil
+        case .touch: return isTouching ? latchedValue : nil
+        case .latch: return latchedValue
+        case .write: return latchedValue ?? staticValue
+        }
     }
 }
 

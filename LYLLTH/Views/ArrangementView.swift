@@ -27,6 +27,8 @@ struct ArrangementView: View {
     var openSongFXMenu: (UUID) -> Void = { _ in }
     /// Places the pattern being edited at the end of the song.
     var placePattern: () -> Void = {}
+    var consolidateAudio: (UUID, UUID) -> Void = { _, _ in }
+    var toggleFreeze: (UUID) -> Void = { _ in }
 
     @EnvironmentObject private var audio: AudioEngineController
 
@@ -93,7 +95,7 @@ struct ArrangementView: View {
                             snap: { snapBeat($0, $0) },
                             openEditor: openSongFXMenu
                         )
-                        ForEach(Array(session.tracks.indices), id: \.self) { index in
+                        ForEach(visibleTrackIndices, id: \.self) { index in
                             trackLane(index: index)
                             AnyView(automationRows(index: index))
                         }
@@ -143,6 +145,20 @@ struct ArrangementView: View {
                 .tracking(1.2)
                 .foregroundStyle(LYLLTHTheme.dim)
             }
+            ForEach(session.trackFolders ?? []) { folder in
+                Button {
+                    guard let index = session.trackFolders?.firstIndex(where: { $0.id == folder.id }) else { return }
+                    session.trackFolders?[index].isCollapsed.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: folder.isCollapsed ? "folder.fill" : "folder")
+                        Text(folder.name)
+                        Text("\(folder.trackIDs.count)").font(LYLLTHTheme.value(7))
+                    }
+                }
+                .buttonStyle(LYChromeButtonStyle(active: folder.isCollapsed, tint: LYLLTHTheme.indigo, compact: true))
+                .help(folder.isCollapsed ? "Show tracks in \(folder.name)" : "Collapse \(folder.name)")
+            }
             Spacer()
             snapMenu
             autoZoomButton("H FIT", isOn: editor.autoHorizontalZoom) {
@@ -162,6 +178,11 @@ struct ArrangementView: View {
         .frame(height: 52)
         .background(LYLLTHTheme.panel)
         .overlay(alignment: .bottom) { LYHairline() }
+    }
+
+    private var visibleTrackIndices: [Int] {
+        let hidden = Set((session.trackFolders ?? []).filter(\.isCollapsed).flatMap(\.trackIDs))
+        return session.tracks.indices.filter { !hidden.contains(session.tracks[$0].id) }
     }
 
     private var arrangementSummary: String {
@@ -302,6 +323,11 @@ struct ArrangementView: View {
                 Spacer(minLength: 8)
 
                 eventActionButton("PREVIEW", help: "Hear this event alone") { previewAudioEvent(clip) }
+                eventActionButton("XFADE", help: "Crossfade with the overlapping event beside it", enabled: selectedCrossfadePartner != nil, action: crossfadeSelectedAudioEvent)
+                eventActionButton("CONSOLIDATE", help: "Print gain, fades, pitch and stretch into a new source") {
+                    guard let location = selectedAudioLocation else { return }
+                    consolidateAudio(session.tracks[location.track].id, clip.id)
+                }
                 eventActionButton("SPLIT  S", help: "Split at the purple edit cursor", enabled: canSplitSelectedAudioEvent, action: splitSelectedAudioEvent)
                 eventActionButton("DUP  ⌘D", help: "Duplicate right after this event", action: duplicateSelectedAudioEvent)
                 eventActionButton("DELETE", help: "Remove this event (delete key)", action: deleteSelectedAudioEvent)
@@ -602,8 +628,11 @@ struct ArrangementView: View {
                     }
                 ),
                 automationCount: (track.automation ?? []).count,
+                automationMode: $session.tracks[index].automationMode,
                 instrumentIcon: track.kind == .drumkit ? "waveform.path" : (track.kind == .instrument && track.isChordTrack != true ? "pianokeys" : nil),
-                openInstrument: { track.kind == .drumkit ? openDrums(track.id) : openSynth(track.id) }
+                openInstrument: { track.kind == .drumkit ? openDrums(track.id) : openSynth(track.id) },
+                isFrozen: track.isFrozen,
+                toggleFreeze: { toggleFreeze(track.id) }
             )
             .frame(width: headerWidth, height: laneHeight)
             .contentShape(Rectangle())
@@ -1076,6 +1105,31 @@ struct ArrangementView: View {
         selectedClipID = split.right.id
     }
 
+    private var selectedCrossfadePartner: (track: Int, clip: Int)? {
+        guard let selected = selectedAudioLocation else { return nil }
+        let clip = session.tracks[selected.track].clips[selected.clip]
+        let start = clip.startBeat
+        let end = start + clip.lengthBeats
+        return session.tracks[selected.track].clips.indices.first { index in
+            guard index != selected.clip else { return false }
+            let other = session.tracks[selected.track].clips[index]
+            guard other.kind == .audio else { return false }
+            return min(end, other.startBeat + other.lengthBeats) - max(start, other.startBeat) > 0.000_001
+        }.map { (selected.track, $0) }
+    }
+
+    private func crossfadeSelectedAudioEvent() {
+        guard let selected = selectedAudioLocation,
+              let partner = selectedCrossfadePartner,
+              let result = LYAudioEventEditor.crossfade(
+                session.tracks[selected.track].clips[selected.clip],
+                session.tracks[partner.track].clips[partner.clip],
+                bpm: session.bpm
+              ) else { return }
+        session.tracks[selected.track].clips[selected.clip] = result.first
+        session.tracks[partner.track].clips[partner.clip] = result.second
+    }
+
     private func deleteSelectedAudioEvent() {
         guard let location = selectedAudioLocation else { return }
         session.tracks[location.track].clips.remove(at: location.clip)
@@ -1189,8 +1243,11 @@ struct LYTrackHeader: View {
     var isArmed: Binding<Bool>?
     var showsAutomation: Binding<Bool>? = nil
     var automationCount = 0
+    var automationMode: Binding<LYAutomationMode?>? = nil
     var instrumentIcon: String? = nil
     var openInstrument: () -> Void = {}
+    var isFrozen = false
+    var toggleFreeze: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1251,6 +1308,34 @@ struct LYTrackHeader: View {
                     }
                     .help("Show automation lanes")
             }
+            if let automationMode {
+                let mode = automationMode.wrappedValue ?? .read
+                Button {
+                    let all = LYAutomationMode.allCases
+                    automationMode.wrappedValue = all[(all.firstIndex(of: mode)! + 1) % all.count]
+                } label: {
+                    Text(String(mode.label.prefix(1)))
+                        .font(LYLLTHTheme.label(8, weight: .bold))
+                        .foregroundStyle(mode == .read ? LYLLTHTheme.chromeText : LYLLTHTheme.record)
+                        .frame(width: 19, height: 19)
+                        .overlay(Rectangle().stroke(mode == .read ? LYLLTHTheme.lineStrong : LYLLTHTheme.record, lineWidth: 1))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Automation mode: \(mode.label). Click to cycle READ, TOUCH, LATCH and WRITE.")
+                .accessibilityLabel("Automation mode \(mode.label)")
+            }
+            Button(action: toggleFreeze) {
+                Image(systemName: isFrozen ? "snowflake.circle.fill" : "snowflake")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(isFrozen ? LYLLTHTheme.teal : LYLLTHTheme.chromeText)
+                    .frame(width: 19, height: 19)
+                    .overlay(Rectangle().stroke(isFrozen ? LYLLTHTheme.teal : LYLLTHTheme.lineStrong, lineWidth: 1))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isFrozen ? "Unfreeze and restore the original track" : "Freeze this track to audio")
+            .accessibilityLabel(isFrozen ? "Unfreeze track" : "Freeze track")
             }
             .fixedSize()
         }

@@ -605,9 +605,140 @@ struct WorkspaceView: View {
                 document.session.placePatternInSong(document.session.activePatternIndex ?? 0)
                 audio.syncSequencer(document.session)
                 audio.syncTimeline(document.session, media: document.audioMediaStore)
-            }
+            },
+            consolidateAudio: consolidateAudioEvent,
+            toggleFreeze: toggleFreeze
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func consolidateAudioEvent(trackID: UUID, clipID: UUID) {
+        guard let trackIndex = document.session.tracks.firstIndex(where: { $0.id == trackID }),
+              let clipIndex = document.session.tracks[trackIndex].clips.firstIndex(where: { $0.id == clipID }),
+              let path = document.session.tracks[trackIndex].clips[clipIndex].sourceRelativePath,
+              let data = document.audioData(for: path) else {
+            audioImportError = "THIS EVENT'S SOURCE AUDIO IS MISSING"
+            return
+        }
+        let clip = document.session.tracks[trackIndex].clips[clipIndex]
+        let bpm = document.session.bpm
+        Task { @MainActor in
+            do {
+                let rendered = try await LYAudioEventRenderer.render(
+                    data: data,
+                    fileExtension: URL(fileURLWithPath: path).pathExtension,
+                    clip: clip,
+                    projectBPM: bpm
+                )
+                let printed = try LYAudioEventRenderer.wavData(from: rendered)
+                let name = "consolidated-\(UUID().uuidString.lowercased()).wav"
+                try document.audioMediaStore.put(printed, named: name)
+                guard let currentTrack = document.session.tracks.firstIndex(where: { $0.id == trackID }),
+                      let currentClip = document.session.tracks[currentTrack].clips.firstIndex(where: { $0.id == clipID }) else { return }
+                var replacement = document.session.tracks[currentTrack].clips[currentClip]
+                replacement.sourceRelativePath = name
+                replacement.sourceStartSeconds = 0
+                replacement.sourceDurationSeconds = Double(rendered.frameLength) / rendered.format.sampleRate
+                replacement.sourceFileDurationSeconds = replacement.sourceDurationSeconds
+                replacement.sourceSampleRate = rendered.format.sampleRate
+                replacement.sourceChannelCount = Int(rendered.format.channelCount)
+                replacement.waveformPeaks = LYAudioEventRenderer.waveformPeaks(from: rendered)
+                replacement.slipOffsetSeconds = 0
+                replacement.eventGainDB = 0
+                replacement.pitchSemitones = 0
+                replacement.fadeInSeconds = 0
+                replacement.fadeOutSeconds = 0
+                replacement.stretchMode = .off
+                replacement.sourceBPM = nil
+                replacement.beatMap = nil
+                replacement.preservePitch = true
+                replacement.name += " · CONSOLIDATED"
+                document.session.tracks[currentTrack].clips[currentClip] = replacement
+                audio.syncTimeline(document.session, media: document.audioMediaStore)
+                notice = "CONSOLIDATED " + replacement.name.uppercased()
+            } catch {
+                audioImportError = "CONSOLIDATE: " + error.localizedDescription.uppercased()
+            }
+        }
+    }
+
+    private func toggleFreeze(_ trackID: UUID) {
+        guard let index = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        if let frozen = document.session.tracks[index].frozenState {
+            document.session.tracks[index].kind = frozen.kind
+            document.session.tracks[index].clips = frozen.clips
+            document.session.tracks[index].inserts = frozen.inserts
+            document.session.tracks[index].instrumentPlugin = frozen.instrumentPlugin
+            document.session.tracks[index].fx = frozen.fx
+            document.session.tracks[index].synth = frozen.synth
+            document.session.tracks[index].synthPresetID = frozen.synthPresetID
+            document.session.tracks[index].drumPresetID = frozen.drumPresetID
+            document.session.tracks[index].customDrumPreset = frozen.customDrumPreset
+            document.session.tracks[index].samplePath = frozen.samplePath
+            document.session.tracks[index].automation = frozen.automation
+            document.session.tracks[index].frozenState = nil
+            audio.syncSequencer(document.session)
+            audio.syncTimeline(document.session, media: document.audioMediaStore)
+            notice = "UNFROZE " + document.session.tracks[index].name
+            return
+        }
+
+        let session = document.session
+        Task { @MainActor in
+            do {
+                let print = try await LYTrackFreezer.render(
+                    trackID: trackID,
+                    session: session,
+                    media: document.audioMediaStore,
+                    audio: audio
+                )
+                let name = "freeze-\(trackID.uuidString.lowercased()).wav"
+                try document.audioMediaStore.put(print.data, named: name)
+                guard let current = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+                let original = document.session.tracks[current]
+                let state = LYFrozenTrackState(
+                    kind: original.kind,
+                    clips: original.clips,
+                    inserts: original.inserts,
+                    instrumentPlugin: original.instrumentPlugin,
+                    fx: original.fx,
+                    synth: original.synth,
+                    synthPresetID: original.synthPresetID,
+                    drumPresetID: original.drumPresetID,
+                    customDrumPreset: original.customDrumPreset,
+                    samplePath: original.samplePath,
+                    automation: original.automation
+                )
+                let seconds = print.window.lengthBeats * 60 / max(document.session.bpm, 1)
+                document.session.tracks[current].kind = .audio
+                document.session.tracks[current].clips = [LYClip(
+                    name: original.name + " · FREEZE",
+                    kind: .audio,
+                    startBeat: print.window.startBeat,
+                    lengthBeats: print.window.lengthBeats,
+                    sourceRelativePath: name,
+                    sourceDurationSeconds: seconds,
+                    sourceSampleRate: print.sampleRate,
+                    sourceChannelCount: 2,
+                    sourceFileDurationSeconds: seconds
+                )]
+                document.session.tracks[current].inserts = []
+                document.session.tracks[current].instrumentPlugin = nil
+                document.session.tracks[current].fx = nil
+                document.session.tracks[current].synth = nil
+                document.session.tracks[current].synthPresetID = nil
+                document.session.tracks[current].drumPresetID = nil
+                document.session.tracks[current].customDrumPreset = nil
+                document.session.tracks[current].samplePath = nil
+                document.session.tracks[current].automation = nil
+                document.session.tracks[current].frozenState = state
+                audio.syncSequencer(document.session)
+                audio.syncTimeline(document.session, media: document.audioMediaStore)
+                notice = "FROZE " + original.name
+            } catch {
+                audioImportError = "FREEZE: " + error.localizedDescription.uppercased()
+            }
+        }
     }
 
     private var inspectTarget: FXTarget {
@@ -646,7 +777,7 @@ struct WorkspaceView: View {
         let target = tracks.first { $0.id == selectedTrackID && musical($0) } ?? tracks.first { $0.isArmed && musical($0) }
         guard let track = target else { LYMIDIInput.shared.setTarget(nil); return }
         if track.synth != nil {
-            LYMIDIInput.shared.setTarget(audio.synthInstrument(for: track.id))
+            LYMIDIInput.shared.setTarget(audio.synthInstrument(for: track.id), routing: track.midiRouting)
             return
         }
         // A DrumKit drum or synth track: each note triggers the channel at
@@ -654,7 +785,7 @@ struct WorkspaceView: View {
         let session = document.session
         let engine = audio.engine
         let root = track.rootNote ?? (track.kind == .drumkit ? 36 : 48)
-        LYMIDIInput.shared.setTarget(nil, fallback: { note, _ in
+        LYMIDIInput.shared.setTarget(nil, routing: track.midiRouting, fallback: { note, _ in
             guard let channel = LYFXBridge.engineIndex(for: track.id, in: session) else { return }
             engine.auditionNote(trackIndex: channel, pitchSemitones: min(max(Int(note) - root, -48), 48))
         })
@@ -883,7 +1014,13 @@ struct WorkspaceView: View {
                     notes.map { note in
                         let on = songBeat(forTransportBeat: note.onBeat)
                         let off = note.offBeat.map { songBeat(forTransportBeat: $0) } ?? on + 0.25
-                        return (on, max(off - on, 0.03), note.note, note.velocity)
+                        return LYNoteRecording.ExpressivePlayed(
+                            beat: on,
+                            length: max(off - on, 0.03),
+                            pitch: note.note,
+                            velocity: note.velocity,
+                            expression: note.expression
+                        )
                     },
                     into: document.session.tracks[trackIndex].clips,
                     beatsPerBar: beatsPerBar
@@ -1549,6 +1686,25 @@ struct WorkspaceView: View {
                             addTrack(kind: kind)
                             dismissMenu()
                         },
+                        addFolder: {
+                            guard let selectedTrackID else { return }
+                            let number = (document.session.trackFolders?.count ?? 0) + 1
+                            _ = document.session.createFolder(
+                                name: "FOLDER " + String(format: "%02d", number),
+                                trackIDs: [selectedTrackID]
+                            )
+                            dismissMenu()
+                        },
+                        addGroup: {
+                            guard let selectedTrackID else { return }
+                            let members = document.session.folder(containing: selectedTrackID)?.trackIDs ?? [selectedTrackID]
+                            let number = (document.session.mixGroups?.count ?? 0) + 1
+                            _ = document.session.createMixGroup(
+                                name: "GROUP " + String(format: "%02d", number),
+                                trackIDs: members
+                            )
+                            dismissMenu()
+                        },
                         close: dismissMenu
                     )
                 case .export:
@@ -2086,6 +2242,8 @@ private struct KeyModeButton: View {
 
 private struct AddTrackPanel: View {
     let add: (LYTrackKind) -> Void
+    let addFolder: () -> Void
+    let addGroup: () -> Void
     let close: () -> Void
 
     var body: some View {
@@ -2126,6 +2284,20 @@ private struct AddTrackPanel: View {
                     detail: "SHARED EFFECTS + ROUTING",
                     accent: LYLLTHTheme.teal,
                     action: { add(.auxiliary) }
+                )
+                LYNightshapeMenuRow(
+                    icon: "folder",
+                    title: "FOLDER SELECTED",
+                    detail: "COLLAPSE + NAVIGATE LARGE SESSIONS",
+                    accent: LYLLTHTheme.indigo,
+                    action: addFolder
+                )
+                LYNightshapeMenuRow(
+                    icon: "rectangle.3.group",
+                    title: "GROUP SELECTED",
+                    detail: "LINK LEVEL, MUTE + SOLO",
+                    accent: LYLLTHTheme.purple,
+                    action: addGroup
                 )
             }
             .padding(14)
@@ -3569,9 +3741,20 @@ private struct MixerView: View {
                                 number: index + 1,
                                 accent: LYLLTHTheme.trackAccent(position: index),
                                 meters: meters, meterKey: session.tracks[index].id,
-                                isSelected: !isMainSelected && selectedTrackID == session.tracks[index].id
+                                isSelected: !isMainSelected && selectedTrackID == session.tracks[index].id,
+                                bpm: session.bpm,
+                                sampleRate: session.sampleRate
                             )
                             .onTapGesture { selectedTrackID = session.tracks[index].id }
+                        }
+                        ForEach(Array((session.mixGroups ?? []).indices), id: \.self) { index in
+                            MixGroupChannel(group: Binding(
+                                get: { (session.mixGroups ?? [])[index] },
+                                set: { value in
+                                    guard session.mixGroups?.indices.contains(index) == true else { return }
+                                    session.mixGroups?[index] = value
+                                }
+                            ))
                         }
                         MainChannel(
                             meters: meters, meterKey: LYMeterStore.mainKey,
@@ -3589,6 +3772,43 @@ private struct MixerView: View {
 
 }
 
+private struct MixGroupChannel: View {
+    @Binding var group: LYMixGroup
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(group.name)
+                .font(LYLLTHTheme.label(9.5, weight: .bold))
+                .tracking(0.8)
+                .foregroundStyle(LYLLTHTheme.text)
+                .lineLimit(1)
+            Text("GROUP · \(group.trackIDs.count) TRACKS")
+                .font(LYLLTHTheme.label(6.5, weight: .bold))
+                .tracking(1)
+                .foregroundStyle(LYLLTHTheme.indigo)
+            HStack(alignment: .bottom, spacing: 10) {
+                LYVerticalFader(value: $group.volumeOffsetDB, range: -48...6, accent: LYLLTHTheme.indigo)
+                    .frame(width: 26)
+                VStack(spacing: 6) {
+                    Spacer()
+                    LYTrackToggle(title: "M", isOn: $group.isMuted, tint: LYLLTHTheme.purple)
+                    LYTrackToggle(title: "S", isOn: $group.isSolo, tint: LYLLTHTheme.teal)
+                }
+            }
+            .frame(maxHeight: .infinity)
+            Text(group.volumeOffsetDB <= -47.9 ? "−∞" : String(format: "%+.1f", group.volumeOffsetDB))
+                .font(LYLLTHTheme.value(11))
+                .foregroundStyle(LYLLTHTheme.text)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(width: 112)
+        .background(LYLLTHTheme.indigo.opacity(0.055))
+        .overlay(alignment: .top) { Rectangle().fill(LYLLTHTheme.indigo).frame(height: 2) }
+        .overlay(alignment: .trailing) { Rectangle().fill(LYLLTHTheme.line).frame(width: 1) }
+    }
+}
+
 private struct MixerChannel: View {
     @Binding var track: LYTrack
     let number: Int
@@ -3596,6 +3816,58 @@ private struct MixerChannel: View {
     let meters: LYMeterStore
     let meterKey: UUID
     let isSelected: Bool
+    let bpm: Double
+    let sampleRate: Double
+    @EnvironmentObject private var audio: AudioEngineController
+    @State private var writePass = LYAutomationWritePass(mode: .read)
+
+    private var volumeBinding: Binding<Double> {
+        Binding(
+            get: { track.volumeDB },
+            set: { value in
+                track.volumeDB = value
+                writePass.mode = track.automationMode ?? .read
+                writePass.move(to: value)
+                if let writeValue = writePass.valueToWrite(staticValue: value) {
+                    recordVolume(writeValue)
+                }
+            }
+        )
+    }
+
+    private func recordVolume(_ value: Double) {
+        guard audio.isPlaying, let beat = audio.currentSongBeat() else { return }
+        var lanes = track.automation ?? []
+        let index: Int
+        if let existing = lanes.firstIndex(where: { $0.target == .volume }) {
+            index = existing
+        } else {
+            lanes.append(LYAutomationLane(target: .volume))
+            index = lanes.count - 1
+        }
+        lanes[index].write(
+            value: value,
+            at: beat,
+            clock: LYTimelineClock(sampleRate: sampleRate, bpm: bpm)
+        )
+        track.automation = lanes
+        track.showsAutomation = true
+    }
+
+    private func beginVolumeTouch() {
+        writePass.mode = track.automationMode ?? .read
+        writePass.beginTouch(value: track.volumeDB)
+    }
+
+    private func endVolumeTouch() {
+        writePass.endTouch()
+    }
+
+    private func continueAutomationPass() {
+        writePass.mode = track.automationMode ?? .read
+        guard let value = writePass.valueToWrite(staticValue: track.volumeDB) else { return }
+        recordVolume(value)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -3627,7 +3899,14 @@ private struct MixerChannel: View {
                         .frame(width: 8)
                 }
                 .frame(width: 34)
-                LYVerticalFader(value: $track.volumeDB, range: -48...6, accent: accent)
+                LYVerticalFader(
+                    value: volumeBinding,
+                    range: -48...6,
+                    accent: accent,
+                    onTouchChanged: { touching in
+                        if touching { beginVolumeTouch() } else { endVolumeTouch() }
+                    }
+                )
                     .frame(width: 26)
                 VStack(alignment: .leading, spacing: 6) {
                     Spacer(minLength: 0)
@@ -3636,6 +3915,20 @@ private struct MixerChannel: View {
                     if track.kind != .auxiliary {
                         LYTrackToggle(title: "R", isOn: $track.isArmed, tint: LYLLTHTheme.record)
                     }
+                    Button {
+                        let mode = track.automationMode ?? .read
+                        let all = LYAutomationMode.allCases
+                        track.automationMode = all[(all.firstIndex(of: mode)! + 1) % all.count]
+                        writePass.finish()
+                    } label: {
+                        Text((track.automationMode ?? .read).label)
+                            .font(LYLLTHTheme.label(6.5, weight: .bold))
+                            .foregroundStyle((track.automationMode ?? .read) == .read ? LYLLTHTheme.dim : LYLLTHTheme.record)
+                            .frame(width: 34, height: 19)
+                            .overlay(Rectangle().stroke((track.automationMode ?? .read) == .read ? LYLLTHTheme.lineStrong : LYLLTHTheme.record, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Automation write mode")
                 }
             }
             .frame(maxHeight: .infinity)
@@ -3648,6 +3941,17 @@ private struct MixerChannel: View {
         .padding(.vertical, 10)
         .frame(width: 124)
         .background(isSelected ? LYLLTHTheme.panel : Color.clear)
+        .background {
+            if audio.isPlaying, (track.automationMode ?? .read) == .write || writePass.latchedValue != nil {
+                TimelineView(.periodic(from: .now, by: 1.0 / 30)) { context in
+                    Color.clear
+                        .onChange(of: context.date) { _, _ in continueAutomationPass() }
+                }
+            }
+        }
+        .onChange(of: audio.isPlaying) { _, playing in
+            if !playing { writePass.finish() }
+        }
         .lyRisingBloom(accent, isOn: isSelected, strength: 0.7)
         .overlay(alignment: .top) {
             Rectangle().fill(isSelected ? accent : .clear).frame(height: 2).lyBloom(accent, isOn: isSelected)
@@ -3698,6 +4002,7 @@ private struct LYVerticalFader: View {
     @Binding var value: Double
     let range: ClosedRange<Double>
     var accent = LYLLTHTheme.teal
+    var onTouchChanged: (Bool) -> Void = { _ in }
     @State private var origin: Double?
 
     var body: some View {
@@ -3727,12 +4032,18 @@ private struct LYVerticalFader: View {
                 DragGesture(minimumDistance: 1)
                     .onChanged { gesture in
                         let start = origin ?? value
-                        if origin == nil { origin = value }
+                        if origin == nil {
+                            origin = value
+                            onTouchChanged(true)
+                        }
                         let span = range.upperBound - range.lowerBound
                         let scale = NSEvent.modifierFlags.contains(.option) ? 0.2 : 1.0
                         value = min(max(start - Double(gesture.translation.height / max(travel, 1)) * span * scale, range.lowerBound), range.upperBound)
                     }
-                    .onEnded { _ in origin = nil }
+                    .onEnded { _ in
+                        origin = nil
+                        onTouchChanged(false)
+                    }
             )
             .onTapGesture(count: 2) { value = 0 }
             .help("Drag for level. Option for fine. Double-click for 0 dB.")

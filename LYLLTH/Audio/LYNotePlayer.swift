@@ -79,6 +79,12 @@ final class LYNotePlayer {
     private func schedule(_ anchor: NightshapeAudioEngine.TransportAnchor) {
         guard let session, let window, window.lengthBeats > 0 else { return }
         let secondsPerBeat = anchor.stepDuration / lyBeatsPerStep
+        let clock = LYTimelineClock(
+            sampleRate: LYSynthInstrument.sampleRate,
+            bpm: 60 / secondsPerBeat,
+            startBeat: 0,
+            epochHostTime: anchor.epochHostTime
+        )
         let now = mach_absolute_time()
         let elapsed = now > anchor.epochHostTime ? AVAudioTime.seconds(forHostTime: now - anchor.epochHostTime) : 0
         let horizon = (elapsed + Self.horizonSeconds) / secondsPerBeat
@@ -86,9 +92,6 @@ final class LYNotePlayer {
         let from = scheduledThroughBeat
         let firstPass = Int(floor(from / window.lengthBeats))
         let lastPass = Int(floor(horizon / window.lengthBeats))
-        let host = { (beat: Double) -> UInt64 in
-            anchor.epochHostTime + AVAudioTime.hostTime(forSeconds: max(0, beat) * secondsPerBeat)
-        }
         for track in session.tracks where track.clips.contains(where: \.isNoteClip) {
             guard let synth = instrument(track.id) else { continue }
             for clip in track.clips where clip.isNoteClip && clip.isInSong && !clip.isMuted {
@@ -102,14 +105,65 @@ final class LYNotePlayer {
                         let onBeat = passStart + (note.beat - window.startBeat)
                         let offBeat = passStart + (noteEnd - window.startBeat)
                         let pitch = UInt8(min(max(note.pitch, 0), 127))
-                        synth.noteOn(pitch, velocity: UInt8(min(max(note.velocity, 1), 127)), atHostTime: host(onBeat), cutoff: 1, resonance: 0)
-                        synth.noteOff(pitch, atHostTime: host(max(offBeat - 0.001, onBeat + 0.01)))
+                        let noteChannel = UInt8(min(max(
+                            note.expression?.first?.channel ?? track.midiRouting?.outputChannel ?? 0,
+                            0
+                        ), 15))
+                        let usesChannelVoice = track.midiRouting?.usesMPE == true || noteChannel != 0 || note.expression?.isEmpty == false
+                        if usesChannelVoice {
+                            synth.midi(
+                                status: 0x90 | noteChannel,
+                                data1: pitch,
+                                data2: UInt8(min(max(note.velocity, 1), 127)),
+                                atHostTime: clock.hostTime(atBeat: onBeat)
+                            )
+                            for point in note.expression ?? [] {
+                                let eventBeat = onBeat + min(max(point.offset, 0), note.length)
+                                let message = Self.message(for: point, fallbackChannel: noteChannel)
+                                synth.midi(
+                                    status: message.status,
+                                    data1: message.data1,
+                                    data2: message.data2,
+                                    atHostTime: clock.hostTime(atBeat: eventBeat)
+                                )
+                            }
+                            synth.midi(
+                                status: 0x80 | noteChannel,
+                                data1: pitch,
+                                data2: 0,
+                                atHostTime: clock.hostTime(atBeat: max(offBeat - 0.001, onBeat + 0.01))
+                            )
+                        } else {
+                            synth.noteOn(pitch, velocity: UInt8(min(max(note.velocity, 1), 127)), atHostTime: clock.hostTime(atBeat: onBeat), cutoff: 1, resonance: 0)
+                            synth.noteOff(pitch, atHostTime: clock.hostTime(atBeat: max(offBeat - 0.001, onBeat + 0.01)))
+                        }
                         touched.insert(track.id)
                     }
                 }
             }
         }
         scheduledThroughBeat = horizon
+    }
+
+    nonisolated static func message(for point: LYMIDIExpressionPoint, fallbackChannel: UInt8 = 0) -> (status: UInt8, data1: UInt8, data2: UInt8) {
+        let channel = UInt8(min(max(point.channel, 0), 15))
+        let resolved = point.channel == 0 ? fallbackChannel : channel
+        let unit = UInt8(min(max(Int((min(max(point.value, 0), 1) * 127).rounded()), 0), 127))
+        switch point.kind {
+        case .pitchBend:
+            let bend = min(max(Int(((min(max(point.value, -1), 1) + 1) * 8_191.5).rounded()), 0), 16_383)
+            return (0xE0 | resolved, UInt8(bend & 0x7F), UInt8((bend >> 7) & 0x7F))
+        case .pressure:
+            return (0xD0 | resolved, unit, 0)
+        case .timbre:
+            return (0xB0 | resolved, 74, unit)
+        case .modulation:
+            return (0xB0 | resolved, 1, unit)
+        case .sustain:
+            return (0xB0 | resolved, 64, unit)
+        case .controlChange:
+            return (0xB0 | resolved, UInt8(min(max(point.controller ?? 0, 0), 127)), unit)
+        }
     }
 
     private static func structure(_ session: LYLLTHSession?) -> [String] {

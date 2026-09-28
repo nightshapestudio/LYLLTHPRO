@@ -425,8 +425,18 @@ enum LYChannelMap {
     /// audible, the way a solo in Logic keeps its reverb.
     static func isAudible(_ track: LYTrack, in session: LYLLTHSession) -> Bool {
         guard !track.isMuted else { return false }
+        let groups = session.mixGroups ?? []
+        let memberships = groups.filter { $0.trackIDs.contains(track.id) }
+        guard !memberships.contains(where: \.isMuted) else { return false }
+        let soloedGroups = groups.filter(\.isSolo)
+        if !soloedGroups.isEmpty, !soloedGroups.contains(where: { $0.trackIDs.contains(track.id) }) {
+            // Returns required by a soloed member remain audible below.
+            if track.kind != .auxiliary { return false }
+        }
         let soloed = session.tracks.filter(\.isSolo)
-        guard !soloed.isEmpty, !track.isSolo else { return true }
+        guard !soloed.isEmpty, !track.isSolo else {
+            return soloedGroups.isEmpty || soloedGroups.contains { $0.trackIDs.contains(track.id) } || track.kind == .auxiliary
+        }
         guard track.kind == .auxiliary else { return false }
         return soloed.contains { $0.outputBusID == track.id || ($0.sends ?? []).contains { $0.busID == track.id && $0.level > 0 } }
     }

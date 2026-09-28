@@ -67,4 +67,37 @@ final class AutomationTests: XCTestCase {
             XCTAssertEqual(parameter.get(rack), parameter.range.upperBound, accuracy: 1e-6, parameter.key)
         }
     }
+
+    func testTimelineClockRoundTripsOnIntegerSamples() {
+        let clock = LYTimelineClock(sampleRate: 48_000, bpm: 120, startBeat: 8)
+        XCTAssertEqual(clock.frame(atBeat: 9), 24_000)
+        XCTAssertEqual(clock.beat(atFrame: 24_000), 9, accuracy: 1e-12)
+        XCTAssertEqual(clock.frame(atBeat: clock.beat(atFrame: 12_345)), 12_345)
+    }
+
+    func testAutomationSamplingIncludesExactPointFrames() {
+        let clock = LYTimelineClock(sampleRate: 48_000, bpm: 120)
+        let lane = LYAutomationLane(target: .pan, points: [
+            LYAutomationPoint(beat: 0, value: -1),
+            LYAutomationPoint(beat: 0.25, value: 1)
+        ])
+        let samples = lane.samples(from: 0, to: 7_000, clock: clock, quantum: 128)
+        XCTAssertTrue(samples.contains { $0.frame == 6_000 && abs($0.value - 1) < 1e-9 })
+    }
+
+    func testWriteModesReleaseOrLatch() {
+        var touch = LYAutomationWritePass(mode: .touch)
+        touch.beginTouch(value: 0.4)
+        XCTAssertEqual(touch.valueToWrite(staticValue: 0), 0.4)
+        touch.endTouch()
+        XCTAssertNil(touch.valueToWrite(staticValue: 0))
+
+        var latch = LYAutomationWritePass(mode: .latch)
+        latch.beginTouch(value: 0.7)
+        latch.endTouch()
+        XCTAssertEqual(latch.valueToWrite(staticValue: 0), 0.7)
+
+        let write = LYAutomationWritePass(mode: .write)
+        XCTAssertEqual(write.valueToWrite(staticValue: -12), -12)
+    }
 }

@@ -190,8 +190,71 @@ struct LYNote: Codable, Equatable, Identifiable, Hashable {
     var pitch: Int
     /// 1…127.
     var velocity: Int = 100
+    /// Polyphonic performance recorded with the note. Values are normalized
+    /// and time is measured from the note-on, so looping and moving the clip
+    /// keeps expression attached to the note it belongs to.
+    var expression: [LYMIDIExpressionPoint]? = nil
 
     var end: Double { start + length }
+}
+
+enum LYMIDIExpressionKind: String, Codable, CaseIterable, Hashable {
+    case pitchBend
+    case pressure
+    case timbre
+    case modulation
+    case sustain
+    case controlChange
+}
+
+struct LYMIDIExpressionPoint: Codable, Equatable, Identifiable, Hashable {
+    var id = UUID()
+    /// Beats after the owning note begins.
+    var offset: Double
+    var kind: LYMIDIExpressionKind
+    /// MIDI CC number for `.controlChange`; nil for the named dimensions.
+    var controller: Int? = nil
+    /// Normalized 0...1, except pitch bend which is normalized -1...1.
+    var value: Double
+    /// The original MIDI channel. This keeps MPE member-channel identity.
+    var channel: Int = 0
+
+    mutating func normalize(noteLength: Double) {
+        offset = min(max(offset.isFinite ? offset : 0, 0), max(noteLength, 0))
+        channel = min(max(channel, 0), 15)
+        controller = controller.map { min(max($0, 0), 127) }
+        if kind == .pitchBend {
+            value = min(max(value.isFinite ? value : 0, -1), 1)
+        } else {
+            value = min(max(value.isFinite ? value : 0, 0), 1)
+        }
+    }
+}
+
+enum LYAutomationMode: String, Codable, CaseIterable {
+    case read
+    case touch
+    case latch
+    case write
+
+    var label: String { rawValue.uppercased() }
+}
+
+struct LYMIDIRouting: Codable, Equatable {
+    /// nil accepts every connected source/channel.
+    var inputSourceID: Int32? = nil
+    var inputSourceName: String? = nil
+    var inputChannel: Int? = nil
+    /// nil keeps the track internal; a destination enables MIDI thru/output.
+    var outputDestinationID: Int32? = nil
+    var outputDestinationName: String? = nil
+    var outputChannel: Int = 0
+    var usesMPE = false
+
+    mutating func normalize() {
+        inputChannel = inputChannel.map { min(max($0, 0), 15) }
+        outputChannel = min(max(outputChannel, 0), 15)
+    }
 }
 
 struct LYStepParameters: Codable, Equatable {
@@ -249,6 +312,43 @@ struct LYBeatMap: Codable, Equatable {
 struct LYBeatMapAnchor: Equatable {
     var sourceTime: Double
     var timelineTime: Double
+}
+
+/// Direct, non-destructive warp-marker edits. Detection remains automatic,
+/// but a producer can now correct, insert, or remove anchors without touching
+/// the source audio.
+enum LYWarpMarkerEditor {
+    static func moving(_ markerID: UUID, to sourceTime: Double, in map: LYBeatMap) -> LYBeatMap {
+        var edited = map
+        guard let index = edited.markers.firstIndex(where: { $0.id == markerID }) else { return map }
+        let lower = index > 0 ? edited.markers[index - 1].sourceTime + 0.001 : 0
+        let upper = index + 1 < edited.markers.count
+            ? edited.markers[index + 1].sourceTime - 0.001
+            : edited.sourceDuration
+        edited.markers[index].sourceTime = min(max(sourceTime, lower), max(lower, upper))
+        edited.markers[index].confidence = 1
+        edited.markers[index].strength = max(edited.markers[index].strength, 1)
+        return edited
+    }
+
+    static func inserting(sourceTime: Double, beatIndex: Int, in map: LYBeatMap) -> LYBeatMap {
+        var edited = map
+        edited.markers.removeAll { $0.index == beatIndex }
+        edited.markers.append(LYBeatMarker(
+            index: beatIndex,
+            sourceTime: min(max(sourceTime, 0), map.sourceDuration),
+            confidence: 1,
+            strength: 1
+        ))
+        edited.markers.sort { ($0.index, $0.sourceTime) < ($1.index, $1.sourceTime) }
+        return edited
+    }
+
+    static func removing(_ markerID: UUID, from map: LYBeatMap) -> LYBeatMap {
+        var edited = map
+        edited.markers.removeAll { $0.id == markerID }
+        return edited
+    }
 }
 
 /// Native representation of TETHR's accepted beat-correction mapping. It
@@ -915,6 +1015,58 @@ enum LYAudioEventEditor {
         copy.name = clip.name
         return copy
     }
+
+    /// Applies a symmetric equal-power (or chosen) crossfade to two audio
+    /// events that overlap. It never rewrites either source.
+    static func crossfade(
+        _ first: LYClip,
+        _ second: LYClip,
+        curve: LYAudioFadeCurve = .equalPower,
+        bpm: Double
+    ) -> (first: LYClip, second: LYClip)? {
+        guard first.kind == .audio, second.kind == .audio, bpm > 0 else { return nil }
+        var left = first.startBeat <= second.startBeat ? first : second
+        var right = first.startBeat <= second.startBeat ? second : first
+        let overlapBeats = min(left.startBeat + left.lengthBeats, right.startBeat + right.lengthBeats) - right.startBeat
+        guard overlapBeats > 0.000_001 else { return nil }
+        let seconds = overlapBeats * 60 / bpm
+        left.fadeOutSeconds = seconds
+        right.fadeInSeconds = seconds
+        left.fadeCurve = curve
+        right.fadeCurve = curve
+        return first.startBeat <= second.startBeat ? (left, right) : (right, left)
+    }
+}
+
+struct LYFrozenTrackState: Codable, Equatable {
+    var kind: LYTrackKind
+    var clips: [LYClip]
+    var inserts: [LYPluginSlot]
+    var instrumentPlugin: LYPluginSlot?
+    var fx: LYFXRack?
+    var synth: LYSynthPatch?
+    var synthPresetID: String?
+    var drumPresetID: String?
+    var customDrumPreset: DrumSynthPreset?
+    var samplePath: String?
+    var automation: [LYAutomationLane]?
+}
+
+struct LYTrackFolder: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var name: String
+    var trackIDs: [UUID]
+    var isCollapsed = false
+    var accent: LYAccent = .indigo
+}
+
+struct LYMixGroup: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var name: String
+    var trackIDs: [UUID]
+    var volumeOffsetDB: Double = 0
+    var isMuted = false
+    var isSolo = false
 }
 
 struct LYTrack: Codable, Identifiable, Equatable {
@@ -971,6 +1123,15 @@ struct LYTrack: Codable, Identifiable, Equatable {
     var automation: [LYAutomationLane]? = nil
     /// Whether the lanes are open under the track.
     var showsAutomation: Bool? = nil
+    /// Professional automation state; nil migrates as READ.
+    var automationMode: LYAutomationMode? = nil
+    /// Source/channel and optional external destination for this track.
+    var midiRouting: LYMIDIRouting? = nil
+    /// Present while a printed audio replacement is active. Unfreeze restores
+    /// every original clip, instrument, plug-in, effect and automation lane.
+    var frozenState: LYFrozenTrackState? = nil
+
+    var isFrozen: Bool { frozenState != nil }
 }
 
 extension LYTrack {
@@ -1013,7 +1174,7 @@ struct LYLoopRange: Codable, Equatable {
 }
 
 struct LYLLTHSession: Codable, Equatable {
-    static let currentSchemaVersion = 6
+    static let currentSchemaVersion = 7
 
     var schemaVersion = currentSchemaVersion
     var id = UUID()
@@ -1049,6 +1210,10 @@ struct LYLLTHSession: Codable, Equatable {
     /// DrumKit's song FX lane: filter sweeps and FRACTURE moves on a track
     /// or MAIN. Optional preserves older documents.
     var songFX: [LYSongFXBlock]? = nil
+    /// Arrangement visibility and mix-link metadata live outside tracks so
+    /// reordering tracks never breaks membership.
+    var trackFolders: [LYTrackFolder]? = nil
+    var mixGroups: [LYMixGroup]? = nil
 
     var isLoopActive: Bool { (isLoopEnabled ?? true) && loopRange != nil }
 
@@ -1261,6 +1426,43 @@ struct LYLLTHSession: Codable, Equatable {
             migrated.recordingSettings = LYRecordingSettings(preRollBars: migrated.countIn == false ? 0 : 1)
         }
 
+        // Version 7: expression/routing and large-session organization. Keep
+        // malformed external IDs or stale memberships from poisoning a song.
+        let trackIDs = Set(migrated.tracks.map(\.id))
+        for trackIndex in migrated.tracks.indices {
+            if var routing = migrated.tracks[trackIndex].midiRouting {
+                routing.normalize()
+                migrated.tracks[trackIndex].midiRouting = routing
+            }
+            for clipIndex in migrated.tracks[trackIndex].clips.indices {
+                guard var notes = migrated.tracks[trackIndex].clips[clipIndex].notes else { continue }
+                for noteIndex in notes.indices {
+                    notes[noteIndex].pitch = min(max(notes[noteIndex].pitch, 0), 127)
+                    notes[noteIndex].velocity = min(max(notes[noteIndex].velocity, 1), 127)
+                    notes[noteIndex].length = max(notes[noteIndex].length, 0.001)
+                    if var expression = notes[noteIndex].expression {
+                        for pointIndex in expression.indices {
+                            expression[pointIndex].normalize(noteLength: notes[noteIndex].length)
+                        }
+                        expression.sort { ($0.offset, $0.kind.rawValue) < ($1.offset, $1.kind.rawValue) }
+                        notes[noteIndex].expression = expression
+                    }
+                }
+                migrated.tracks[trackIndex].clips[clipIndex].notes = notes
+            }
+        }
+        migrated.trackFolders = migrated.trackFolders?.compactMap { folder in
+            var cleaned = folder
+            cleaned.trackIDs = folder.trackIDs.filter(trackIDs.contains)
+            return cleaned.trackIDs.isEmpty ? nil : cleaned
+        }
+        migrated.mixGroups = migrated.mixGroups?.compactMap { group in
+            var cleaned = group
+            cleaned.trackIDs = group.trackIDs.filter(trackIDs.contains)
+            cleaned.volumeOffsetDB = min(max(group.volumeOffsetDB, -60), 12)
+            return cleaned.trackIDs.isEmpty ? nil : cleaned
+        }
+
         migrated.schemaVersion = Self.currentSchemaVersion
         return migrated
     }
@@ -1307,6 +1509,43 @@ struct LYLLTHSession: Codable, Equatable {
 // MARK: - Patterns in the song
 
 extension LYLLTHSession {
+    func folder(containing trackID: UUID) -> LYTrackFolder? {
+        trackFolders?.first { $0.trackIDs.contains(trackID) }
+    }
+
+    func groups(containing trackID: UUID) -> [LYMixGroup] {
+        (mixGroups ?? []).filter { $0.trackIDs.contains(trackID) }
+    }
+
+    mutating func createFolder(name: String, trackIDs: [UUID]) -> UUID? {
+        let valid = Set(tracks.map(\.id))
+        let members = trackIDs.filter(valid.contains)
+        guard !members.isEmpty else { return nil }
+        var folders = trackFolders ?? []
+        for index in folders.indices { folders[index].trackIDs.removeAll { members.contains($0) } }
+        folders.removeAll { $0.trackIDs.isEmpty }
+        let folder = LYTrackFolder(name: name, trackIDs: members)
+        folders.append(folder)
+        trackFolders = folders
+        return folder.id
+    }
+
+    mutating func createMixGroup(name: String, trackIDs: [UUID]) -> UUID? {
+        let valid = Set(tracks.map(\.id))
+        let members = trackIDs.filter(valid.contains)
+        guard !members.isEmpty else { return nil }
+        let group = LYMixGroup(name: name, trackIDs: members)
+        var groups = mixGroups ?? []
+        groups.append(group)
+        mixGroups = groups
+        return group.id
+    }
+
+    func effectiveVolumeDB(for track: LYTrack) -> Double {
+        let offset = groups(containing: track.id).reduce(0) { $0 + $1.volumeOffsetDB }
+        return min(max(track.volumeDB + offset, -96), 12)
+    }
+
     private var sequencedTrackIndices: [Int] {
         tracks.indices.filter { tracks[$0].kind == .drumkit || tracks[$0].kind == .instrument }
     }

@@ -357,7 +357,7 @@ final class AudioEngineController: ObservableObject {
                 noteLengths: rendered.locks.map { Int($0.noteLength.rounded()).clamped(to: 1...64) }
             )
             }
-            let mix = SentMix(volume: track.volumeDB, pan: track.pan, muted: !LYChannelMap.isAudible(track, in: session))
+            let mix = SentMix(volume: session.effectiveVolumeDB(for: track), pan: track.pan, muted: !LYChannelMap.isAudible(track, in: session))
             let previous = sentMix[trackIndex]
             if previous?.volume != mix.volume { engine.setTrackVolume(trackIndex: trackIndex, volume: min(pow(10, mix.volume / 20), 1)) }
             if previous?.pan != mix.pan { engine.setTrackPan(trackIndex: trackIndex, pan: mix.pan) }
@@ -387,7 +387,7 @@ final class AudioEngineController: ObservableObject {
                     sentShaping[trackIndex] = nil
                 }
                 if let id = byChannel[trackIndex], let track = session.tracks.first(where: { $0.id == id }) {
-                    let mix = SentMix(volume: track.volumeDB, pan: track.pan, muted: !LYChannelMap.isAudible(track, in: session))
+                    let mix = SentMix(volume: session.effectiveVolumeDB(for: track), pan: track.pan, muted: !LYChannelMap.isAudible(track, in: session))
                     let previous = sentMix[trackIndex]
                     if previous?.volume != mix.volume { engine.setTrackVolume(trackIndex: trackIndex, volume: min(pow(10, mix.volume / 20), 3.98)) }
                     if previous?.pan != mix.pan { engine.setTrackPan(trackIndex: trackIndex, pan: mix.pan) }
@@ -741,6 +741,41 @@ enum LYAudioEventRenderer {
             }
             return output
         }.value
+    }
+
+    /// A printed event for CONSOLIDATE/FREEZE. The temporary file is removed
+    /// after its bytes are read; project media remains owned by the document.
+    static func wavData(from buffer: AVAudioPCMBuffer) throws -> Data {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LYLLTH-Print-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: buffer.format.sampleRate,
+            AVNumberOfChannelsKey: Int(buffer.format.channelCount),
+            AVLinearPCMBitDepthKey: 24,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false
+        ]
+        let file = try AVAudioFile(forWriting: url, settings: settings)
+        try file.write(from: buffer)
+        return try Data(contentsOf: url, options: .mappedIfSafe)
+    }
+
+    static func waveformPeaks(from buffer: AVAudioPCMBuffer, count: Int = 512) -> [Float] {
+        guard count > 0, buffer.frameLength > 0, let channels = buffer.floatChannelData else { return [] }
+        let frames = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        return (0..<count).map { point in
+            let lower = point * frames / count
+            let upper = max(lower + 1, min(frames, (point + 1) * frames / count))
+            var peak: Float = 0
+            for channel in 0..<channelCount {
+                for frame in lower..<upper { peak = max(peak, abs(channels[channel][frame])) }
+            }
+            return min(peak, 1)
+        }
     }
 
     private static func renderSpans(

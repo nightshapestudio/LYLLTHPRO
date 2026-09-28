@@ -66,6 +66,37 @@ final class NoteClipTests: XCTestCase {
         XCTAssertFalse(back.isSequenced, "note clips never reach the step sequencer")
     }
 
+    func testExpressionFollowsARepeatedNoteAndSurvivesSaving() throws {
+        let pressure = LYMIDIExpressionPoint(offset: 0.25, kind: .pressure, value: 0.8, channel: 3)
+        let source = clip(notes: [LYNote(start: 0, length: 1, pitch: 60, expression: [pressure])])
+        let played = source.songNotes(from: 0, to: 20)
+        XCTAssertEqual(played.count, 2)
+        XCTAssertEqual(played[1].expression?.first?.channel, 3)
+        let decoded = try JSONDecoder().decode(LYClip.self, from: JSONEncoder().encode(source))
+        XCTAssertEqual(decoded.notes?.first?.expression, [pressure])
+    }
+
+    func testExpressionProducesMPEChannelMessages() {
+        let bend = LYMIDIExpressionPoint(offset: 0, kind: .pitchBend, value: 1, channel: 4)
+        let message = LYNotePlayer.message(for: bend)
+        XCTAssertEqual(message.status, 0xE4)
+        XCTAssertEqual(message.data1, 0x7F)
+        XCTAssertEqual(message.data2, 0x7F)
+        let timbre = LYNotePlayer.message(for: LYMIDIExpressionPoint(offset: 0, kind: .timbre, value: 0.5, channel: 2))
+        XCTAssertEqual(timbre.status, 0xB2)
+        XCTAssertEqual(timbre.data1, 74)
+    }
+
+    func testExpressiveRecordingWritesIntoNoteClip() {
+        let expression = [LYMIDIExpressionPoint(offset: 0.1, kind: .modulation, value: 0.75, channel: 1)]
+        let out = LYNoteRecording.write(
+            [LYNoteRecording.ExpressivePlayed(beat: 0, length: 1, pitch: 64, velocity: 90, expression: expression)],
+            into: [],
+            beatsPerBar: 4
+        )
+        XCTAssertEqual(out.first?.notes?.first?.expression, expression)
+    }
+
     @MainActor func testMIDIExportCarriesPianoRollNotes() throws {
         var session = LYLLTHSession.starter()
         guard let index = session.tracks.firstIndex(where: { $0.kind == .instrument && $0.isChordTrack != true }) else {

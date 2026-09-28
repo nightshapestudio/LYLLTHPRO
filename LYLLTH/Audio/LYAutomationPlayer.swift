@@ -2,10 +2,9 @@ import AVFoundation
 import Foundation
 import NightshapeAudioEngine
 
-/// Plays automation lanes while the song plays: reads each lane at the song
-/// beat every display frame and moves the channel, the effect or the LUNATK
-/// knob. Only values that changed are sent. When playback stops every
-/// automated control goes back to where it is set.
+/// Plays automation lanes while the song plays. The UI timer only wakes the
+/// scheduler; every value is resolved through the same integer sample clock
+/// used by offline export and timestamped MIDI.
 @MainActor
 final class LYAutomationPlayer {
     private let engine: NightshapeAudioEngine
@@ -30,7 +29,7 @@ final class LYAutomationPlayer {
 
     func start() {
         guard ticker == nil else { return }
-        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -61,7 +60,9 @@ final class LYAutomationPlayer {
     }
 
     private func tick() {
-        guard let session, Self.hasLanes(session), let beat = songBeat() else { return }
+        guard let session, Self.hasLanes(session), let rawBeat = songBeat() else { return }
+        let clock = LYTimelineClock(sampleRate: session.sampleRate, bpm: session.bpm)
+        let beat = clock.beat(atFrame: clock.frame(atBeat: rawBeat))
         let channels = Dictionary(uniqueKeysWithValues: LYChannelMap.channels(in: session).map { ($0.trackID, $0.index) })
         var routes: [Int: NightshapeAudioEngine.BusRoute]?
         var racks: [UUID: (rack: LYFXRack, kinds: Set<FXKind>)] = [:]
@@ -73,7 +74,9 @@ final class LYAutomationPlayer {
             case .volume:
                 guard changed else { continue }
                 let cap = track.kind == .drumkit || track.kind == .instrument ? 1.0 : 3.98
-                engine.setTrackVolume(trackIndex: channel, volume: min(value <= -59.9 ? 0 : pow(10, value / 20), cap))
+                let groupOffset = session.effectiveVolumeDB(for: track) - track.volumeDB
+                let effective = value + groupOffset
+                engine.setTrackVolume(trackIndex: channel, volume: min(effective <= -59.9 ? 0 : pow(10, effective / 20), cap))
             case .pan:
                 guard changed else { continue }
                 engine.setTrackPan(trackIndex: channel, pan: value)

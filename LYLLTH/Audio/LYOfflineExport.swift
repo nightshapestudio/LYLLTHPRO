@@ -273,7 +273,7 @@ struct LYOfflineExport {
         var offline = OfflineRenderTrack(
             sourceURL: sourceURLs[index],
             sourceIdentity: sourceURLs[index]?.lastPathComponent ?? track.id.uuidString,
-            volume: Float(min(pow(10, track.volumeDB / 20), musical ? 1 : 3.98)),
+            volume: Float(min(pow(10, session.effectiveVolumeDB(for: track) / 20), musical ? 1 : 3.98)),
             muted: muted,
             pan: Float(min(max(track.pan, -1), 1)),
             insertOrder: rack.chain(isMain: false).map(\.engineKey),
@@ -337,6 +337,21 @@ struct LYOfflineExport {
         var velocity: Int32 = 0
         var cutoff: Float = 1
         var resonance: Float = 0
+        var midiStatus: UInt8? = nil
+        var midiData1: UInt8 = 0
+        var midiData2: UInt8 = 0
+        var parameterID: Int32? = nil
+        var parameterValue: Float = 0
+
+        var order: Int {
+            if parameterID != nil { return 2 }
+            guard let midiStatus else { return isOn ? 1 : 0 }
+            switch midiStatus & 0xF0 {
+            case 0x80: return 0
+            case 0x90: return 1
+            default: return 2
+            }
+        }
     }
 
     private func frame(ofWindowBeat beat: Double) -> Int64 {
@@ -385,46 +400,84 @@ struct LYOfflineExport {
                 let on = frame(ofWindowBeat: note.beat - window.startBeat)
                 let end = frame(ofWindowBeat: min(note.beat + note.length, window.endBeat) - window.startBeat)
                 let pitch = Int32(min(max(note.pitch, 0), 127))
-                events.append(NoteEvent(frame: on, isOn: true, note: pitch, velocity: Int32(min(max(note.velocity, 1), 127))))
-                events.append(NoteEvent(frame: max(end, on + 1), isOn: false, note: pitch))
+                let channel = UInt8(min(max(note.expression?.first?.channel ?? track.midiRouting?.outputChannel ?? 0, 0), 15))
+                let usesChannelVoice = track.midiRouting?.usesMPE == true || channel != 0 || note.expression?.isEmpty == false
+                if usesChannelVoice {
+                    events.append(NoteEvent(
+                        frame: on,
+                        isOn: true,
+                        note: pitch,
+                        velocity: Int32(min(max(note.velocity, 1), 127)),
+                        midiStatus: 0x90 | channel,
+                        midiData1: UInt8(pitch),
+                        midiData2: UInt8(min(max(note.velocity, 1), 127))
+                    ))
+                    for point in note.expression ?? [] {
+                        let message = LYNotePlayer.message(for: point, fallbackChannel: channel)
+                        events.append(NoteEvent(
+                            frame: on + frame(ofWindowBeat: min(max(point.offset, 0), note.length)),
+                            isOn: false,
+                            note: 0,
+                            midiStatus: message.status,
+                            midiData1: message.data1,
+                            midiData2: message.data2
+                        ))
+                    }
+                    events.append(NoteEvent(
+                        frame: max(end, on + 1),
+                        isOn: false,
+                        note: pitch,
+                        midiStatus: 0x80 | channel,
+                        midiData1: UInt8(pitch)
+                    ))
+                } else {
+                    events.append(NoteEvent(frame: on, isOn: true, note: pitch, velocity: Int32(min(max(note.velocity, 1), 127))))
+                    events.append(NoteEvent(frame: max(end, on + 1), isOn: false, note: pitch))
+                }
             }
         }
         // Offs before ons on the same frame, so a repeated note retriggers.
-        return events.sorted { $0.frame == $1.frame ? (!$0.isOn && $1.isOn) : $0.frame < $1.frame }
+        return events.sorted { $0.frame == $1.frame ? $0.order < $1.order : $0.frame < $1.frame }
     }
 
     private func lunatkStream(_ track: LYTrack, index: Int) -> OfflineStreamSource.Render {
         let instrument = LYSynthInstrument(sampleRate: sampleRate)
         instrument.apply(track.synth ?? .initPatch, bpm: session.bpm)
         let core = instrument.core
-        let events = noteEvents(for: track, index: index)
+        var events = noteEvents(for: track, index: index)
         let lanes = (track.automation ?? []).filter(\.isActive).compactMap { lane -> (Int32, LYAutomationLane)? in
             guard case .synth(let key) = lane.target, let parameter = LYSynthParameters.byKey[key] else { return nil }
             return (Int32(parameter.id), lane)
         }
         let startBeat = window.startBeat
         let framesPerBeat = secondsPerBeat * sampleRate
+        let clock = LYTimelineClock(sampleRate: sampleRate, bpm: session.bpm, startBeat: startBeat)
+        let musicalFrames = frame(ofWindowBeat: window.lengthBeats)
+        for (id, lane) in lanes {
+            for sample in lane.samples(from: 0, to: musicalFrames, clock: clock, quantum: 128) {
+                events.append(NoteEvent(
+                    frame: sample.frame,
+                    isOn: false,
+                    note: 0,
+                    parameterID: id,
+                    parameterValue: Float(sample.value)
+                ))
+            }
+        }
+        events.sort { $0.frame == $1.frame ? $0.order < $1.order : $0.frame < $1.frame }
         var next = 0
-        var sent: [Int32: Float] = [:]
         return { left, right, count, start in
             _ = instrument
-            if !lanes.isEmpty {
-                let beat = startBeat + Double(start) / framesPerBeat
-                for (id, lane) in lanes {
-                    guard let raw = lane.value(at: beat) else { continue }
-                    let range = lane.target.range
-                    let value = Float(min(max(raw, range.lowerBound), range.upperBound))
-                    guard sent[id] != value else { continue }
-                    sent[id] = value
-                    lysynth_set_param(core, id, value)
-                }
-            }
             var position = 0
             while position < count {
                 let now = start + Int64(position)
                 while next < events.count, events[next].frame <= now {
                     let event = events[next]
-                    if event.isOn {
+                    if let id = event.parameterID {
+                        lysynth_set_param(core, id, event.parameterValue)
+                    } else if let status = event.midiStatus {
+                        lysynth_midi(core, status, event.midiData1, event.midiData2, 0)
+                    } else if event.isOn {
                         lysynth_note_on(core, event.note, event.velocity, 0, event.cutoff, event.resonance)
                     } else {
                         lysynth_note_off(core, event.note, 0)
@@ -509,13 +562,12 @@ struct LYOfflineExport {
         }
         guard !lanes.isEmpty else { return nil }
         let baseRoutes = LYChannelMap.routes(in: session)
-        let startBeat = window.startBeat
-        let framesPerBeat = secondsPerBeat * sampleRate
+        let clock = LYTimelineClock(sampleRate: sampleRate, bpm: session.bpm, startBeat: window.startBeat)
         let session = session
         var sent: [String: Double] = [:]
         var sendLevels: [Int: [Int: Float]] = [:]
         return { frame, mix in
-            let beat = startBeat + Double(frame) / framesPerBeat
+            let beat = clock.beat(atFrame: frame)
             var routesChanged = false
             var racks: [Int: (rack: LYFXRack, track: LYTrack, kinds: Set<FXKind>)] = [:]
             for (track, channel, lane) in lanes {
@@ -528,7 +580,9 @@ struct LYOfflineExport {
                 switch lane.target {
                 case .volume:
                     let cap = track.kind == .drumkit || track.kind == .instrument ? 1.0 : 3.98
-                    mix.setTrackVolume(channel, min(value <= -59.9 ? 0 : pow(10, value / 20), cap))
+                    let groupOffset = session.effectiveVolumeDB(for: track) - track.volumeDB
+                    let effective = value + groupOffset
+                    mix.setTrackVolume(channel, min(effective <= -59.9 ? 0 : pow(10, effective / 20), cap))
                 case .pan:
                     mix.setTrackPan(channel, Float(value))
                 case .send(let busID):
@@ -606,6 +660,48 @@ struct LYOfflineExport {
         try await Task.detached(priority: .userInitiated) {
             try OfflineProjectRenderer().render(snapshot: snapshot, to: url, format: format, cancellation: cancellation, progress: progress)
         }.value
+    }
+}
+
+/// Reversible track printing. The returned WAV contains the track source,
+/// inserts, fader, pan, sends/returns and automation, but deliberately excludes
+/// the MAIN insert chain so unfreezing and remixing cannot double-master it.
+@MainActor
+enum LYTrackFreezer {
+    struct Print {
+        var data: Data
+        var window: LYSongWindow
+        var sampleRate: Double
+    }
+
+    static func render(
+        trackID: UUID,
+        session: LYLLTHSession,
+        media: LYProjectMediaStore,
+        audio: AudioEngineController
+    ) async throws -> Print {
+        let export = try await LYOfflineExport.prepare(session: session, media: media, audio: audio)
+        guard let channel = export.channels.first(where: { $0.track.id == trackID })?.index else {
+            throw LYBounceError.nothingToExport
+        }
+        var snapshot = export.snapshot(stem: channel)
+        snapshot.mainInsertOrder = []
+        snapshot.finaleLimiter.bypassed = true
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LYLLTH-Freeze-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        _ = try await LYOfflineExport.render(
+            snapshot,
+            to: url,
+            format: .wav24Bit,
+            cancellation: OfflineRenderCancellationToken(),
+            progress: { _ in }
+        )
+        return Print(
+            data: try Data(contentsOf: url, options: .mappedIfSafe),
+            window: export.window,
+            sampleRate: export.sampleRate
+        )
     }
 }
 
