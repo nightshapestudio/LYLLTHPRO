@@ -202,6 +202,8 @@ struct LYOfflineExport {
         snapshot.mainDeadlock = (main.deadlock ?? .neutral).parameters
         let shear = main.shear ?? .neutral
         snapshot.mainShear = shear.parameters
+        snapshot.mainDeEsser = (main.deEsser ?? .neutral).parameters
+        snapshot.mainNoiseGate = (main.noiseGate ?? .neutral).parameters
         if !shear.isBypassed { snapshot.mainEffectMotion[.shear] = shear.motion?.holdingConfiguration }
         let cabinet = main.cabinet ?? .neutral
         snapshot.mainCabinet = cabinet.parameters
@@ -309,6 +311,8 @@ struct LYOfflineExport {
         offline.deadlock = (rack.deadlock ?? .neutral).parameters
         let shear = rack.shear ?? .neutral
         offline.shear = shear.parameters
+        offline.deEsser = (rack.deEsser ?? .neutral).parameters
+        offline.noiseGate = (rack.noiseGate ?? .neutral).parameters
         if !shear.isBypassed { offline.effectMotion[.shear] = shear.motion?.holdingConfiguration }
         let cabinet = rack.cabinet ?? .neutral
         offline.cabinet = cabinet.parameters

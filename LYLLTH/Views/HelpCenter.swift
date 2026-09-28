@@ -289,18 +289,35 @@ enum LYHelpLibrary {
                     section("Read the path", "Track source → channel effects → sends and output destination → bus or MAIN. Open the inspector to see and change the selected channel’s effects, sends and destination.", tip: "Use one short shared reverb before giving every channel its own space. The mix will feel more connected and use less processing.")
                 ]),
         article("nightshape-effects", .mix, "Use NIGHTSHAPE effects", "Add, reorder, bypass and automate the built-in processors.",
-                keywords: ["fx", "eq", "compressor", "reverb", "delay", "decimator", "filter", "saturation"], related: ["mixer-routing", "automation", "audio-units"],
+                keywords: ["fx", "eq", "compressor", "reverb", "delay", "decimator", "filter", "saturation", "add effect", "insert", "plus", "menu"], related: ["de-esser", "noise-gate", "audio-units"],
                 sections: [
-                    section("Build the chain", "Open the selected channel in INSPECTOR and choose the effect picker. Add an effect, click its name to open it, and drag effects up or down to reorder the chain."),
+                    section("Add an effect", steps: ["Click the + under AUDIO FX in the channel strip.", "Point at a folder: TONE, DYNAMICS, SPACE, MOTION, DESTRUCTION or OUTPUT. It opens to the right.", "Click an effect. It goes on the end of the chain and its window opens."], tip: "Start typing as soon as the menu opens. The search looks through every folder, and Return adds the first match.", note: "Effects already on the channel say ON. Clicking one opens it; the − beside it takes it off."),
+                    section("Build the chain", "Click an effect's name in the strip to open it. Drag effects up or down to change the order. Sound goes through them from top to bottom."),
                     section("Bypass and compare", "Use the effect’s power control for a level-matched comparison. A louder result can sound better even when the processing is not helping."),
                     section("Share ambience", "Use the channel’s reverb send or a bus for common space. Insert an effect when it should change only that track.", tip: "Make EQ cuts while the whole song plays. A sound that is impressive alone can be too large for its job.")
+                ]),
+        article("de-esser", .mix, "Tame harsh esses with the DE-ESSER", "Pull down S and T sounds without dulling the rest of the voice.",
+                keywords: ["de-esser", "deesser", "sibilance", "esses", "harsh", "hiss", "vocal", "s sounds"], related: ["noise-gate", "nightshape-effects", "siren-tune"],
+                sections: [
+                    section("Set it up", steps: ["Add DE-ESSER from DYNAMICS in the + menu. LEAD VOCAL is a good start.", "Turn on LISTEN and sweep FREQUENCY until you hear mostly the hiss of the esses. Turn LISTEN off.", "Lower THRESHOLD until the meter reads a few dB of cut on each S, and nothing between them.", "Set RANGE to the most it should ever take off."], tip: "Most voices sit between 5 and 8 kHz. Lower voices and darker mics often need 4 to 5 kHz."),
+                    section("Read the window", "The line across the top is the output. It dips at the band you picked, by as much as it is cutting right now. The meter on the right shows the band's level against THRESHOLD, and the number above it is the cut in dB."),
+                    section("Choose a mode", "BAND dips only the band around FREQUENCY and leaves everything else alone. SHELF pulls down everything above FREQUENCY, for bright cymbals or an airy mix. WIDE turns the whole signal down while an S sounds, which is gentler on a thin voice but moves the level more."),
+                    section("Where to put it", "Put it after EQ, so a treble boost does not add esses it then has to catch, and before a compressor, so the compressor does not react to them. It never touches audio below THRESHOLD.", note: "Too much makes a singer sound like they have a lisp. If the S turns into a TH, back RANGE off.")
+                ]),
+        article("noise-gate", .mix, "Clean up a track with the NOISE GATE", "Silence the hum, bleed and breaths between the parts you want.",
+                keywords: ["noise gate", "gate", "bleed", "hum", "hiss", "tighten drums", "threshold", "hold", "hysteresis", "key"], related: ["de-esser", "nightshape-effects", "no-sound"],
+                sections: [
+                    section("Set it up", steps: ["Add NOISE GATE from DYNAMICS in the + menu.", "Play the track and watch the KEY meter. Set THRESHOLD above the noise between notes and below the quietest note you want to keep.", "Set RELEASE by ear: short for tight drums, longer for a voice or guitar so notes can ring out.", "Raise HOLD if the gate chatters on and off during a note."]),
+                    section("Read the window", "The shape shows what the gate does to a note: it opens during ATTACK, stays open for HOLD, then falls in a straight line over RELEASE, down to RANGE. The meter shows the key level against THRESHOLD. The lamp says OPEN or SHUT."),
+                    section("Keep bleed out", "On the KEY page, KEY LOW and KEY HIGH filter what the gate listens to, not what you hear. A snare gate with KEY LOW at 200 Hz ignores the kick bleeding into its mic. KEY LISTEN plays the filtered key so you can check it."),
+                    section("Hysteresis and range", "HYSTERESIS makes it close a few dB lower than it opens, so a note hovering at the threshold does not flutter. RANGE sets how far it closes. At the top of its travel it reads SILENT; 10 to 20 dB just turns the noise down.", tip: "On vocals, a RANGE of 15 to 25 dB sounds natural. Silence between phrases can sound more wrong than the breaths did.")
                 ]),
         article("audio-units", .mix, "Host Audio Unit instruments and effects", "Load third-party plug-ins, edit them and recover from a failed scan.",
                 keywords: ["au", "plugin", "third party", "validation", "quarantine", "delay compensation", "instrument"], related: ["plugin-problems", "latency", "mixer-routing"],
                 sections: [
-                    section("Load a plug-in", "Open LIBRARY and choose AU INST for an instrument or AU FX for an effect. Select the destination track, then load the plug-in. Its editor opens from the channel inspector."),
+                    section("Load a plug-in", "For an effect, click the + under AUDIO FX in the channel strip and open AUDIO UNITS. Plug-ins are listed by maker. For an instrument, open LIBRARY and choose AU INST with the track selected. The editor opens once it loads, and again from the channel inspector."),
                     section("Timing and state", "LYLLTH stores the plug-in state with the project and accounts for reported processing delay in playback and export. Save after configuring a complex instrument or effect."),
-                    section("Quarantine", "A plug-in that repeatedly fails validation or loading is quarantined so it cannot hold up every session. In the PROJECT browser, choose the reset action for that plug-in only when you are ready to test it again.", tip: "Add or update one plug-in at a time. If the session changes behavior, you will know which component to check.")
+                    section("Quarantine", "A plug-in that fails to load three times is quarantined, so it cannot hold up every session. That includes one that made LYLLTH quit while it loaded. Quarantined plug-ins are listed at the bottom of AU INST and AU FX in LIBRARY. Click one to reset it, or use RESET QUARANTINE under Settings ▸ Plug-ins.", tip: "Add or update one plug-in at a time. If the session changes behavior, you will know which component to check.")
                 ]),
         article("automation", .mix, "Draw and write automation", "Move channel and effect controls across the song.",
                 keywords: ["lane", "read", "touch", "latch", "write", "volume automation", "parameter"], related: ["automation-modes", "nightshape-effects", "mixer-routing"],
@@ -359,7 +376,8 @@ enum LYHelpLibrary {
                 sections: [
                     section("Start with the obvious path", steps: ["Press Space and confirm the playhead moves.", "Check that the track and MAIN are not muted and no unrelated solo is active.", "Raise the track and MAIN faders to a safe normal position.", "Confirm the correct macOS output device is available and its volume is up."]),
                     section("Check the source", "For patterns, confirm the pattern is placed in SONG or switch to PATTERN playback. For a note clip, confirm the instrument is loaded. For audio, open PROJECT and check that the file is present."),
-                    section("Narrow it down", "Bypass channel effects and hosted Audio Units one at a time. If one plug-in stops the path, save the project, remove or reset that plug-in, then test again.")
+                    section("Narrow it down", "Bypass channel effects and hosted Audio Units one at a time. If one plug-in stops the path, save the project, remove or reset that plug-in, then test again."),
+                    section("A gate that never opens", "A NOISE GATE with THRESHOLD above the part stays shut the whole time. Open its window and watch the lamp while the track plays. If it reads SHUT, lower THRESHOLD or check that KEY LOW and KEY HIGH are not filtering out the part itself.")
                 ]),
         article("recording-problems", .solve, "Recording does not start or lands late", "Fix missing input, an unarmed track or a timing offset.",
                 keywords: ["won't record", "no waveform", "permission", "microphone", "late", "early", "offset"], related: ["record-audio", "latency", "punch-takes"],

@@ -88,6 +88,7 @@
 		6B4BF4D2FD74FB3868170070 /* LUNATKBankRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 173F297644479B0758C8F0A2 /* LUNATKBankRenderTests.swift */; };
 		6B891FE545C1EF55634E328C /* LYSynthEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8249E5B5CE85685DDD1A42 /* LYSynthEditor.swift */; };
 		6BC4A02A72BA7BED0E447C30 /* LYSynthInstrument.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9405C470F3A00F3CB1F2855 /* LYSynthInstrument.swift */; };
+		6CC083FA822AA6CE280D5B4E /* FXStartMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1E1DD6B09A34CAFE9EDAD69 /* FXStartMenu.swift */; };
 		6E98A0974A6201257826EF93 /* Adam-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DD2467CDCE9B421E3430FFFE /* Adam-Light.ttf */; };
 		6EB5E2EC452F50EEAE662534 /* DemoSongTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 637B1718F7DA61B6C7D4695D /* DemoSongTests.swift */; };
 		6F3A38A7891F6397397D6048 /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58289C4D0CEE2BB6D1E5268 /* WorkspaceView.swift */; };
@@ -347,6 +348,7 @@
 		DD2467CDCE9B421E3430FFFE /* Adam-Light.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Adam-Light.ttf"; sourceTree = "<group>"; };
 		DEAA1E35780E10604349C74F /* NightshapeAudioEngine */ = {isa = PBXFileReference; lastKnownFileType = folder; name = NightshapeAudioEngine; path = "../nightshape-drumkit-ios/NightshapeAudioEngine"; sourceTree = SOURCE_ROOT; };
 		DFAB0361C23B88BFF6CA3B3F /* Adam-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Adam-Medium.ttf"; sourceTree = "<group>"; };
+		E1E1DD6B09A34CAFE9EDAD69 /* FXStartMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXStartMenu.swift; sourceTree = "<group>"; };
 		E4590DBB4A2CB4EEFB8F938C /* SongFXTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongFXTests.swift; sourceTree = "<group>"; };
 		E616346F0537A425342E176A /* AutomationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationTests.swift; sourceTree = "<group>"; };
 		E67BF43BB0AB1DE22EEB35A8 /* SignalBloomModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SignalBloomModels.swift; path = "../nightshape-drumkit-ios/Models/SignalBloomModels.swift"; sourceTree = "<group>"; };
@@ -650,6 +652,7 @@
 				513D2E0A410B83980A7B0903 /* ChannelStripInspector.swift */,
 				7B5A010271292EDECA656A29 /* DrumKitSequencerVisuals.swift */,
 				24183797B508D69982E65468 /* DrumSoundBrowser.swift */,
+				E1E1DD6B09A34CAFE9EDAD69 /* FXStartMenu.swift */,
 				05C3A9FF391869346BFAFED1 /* FXWindowHost.swift */,
 				C85CBEE150C50927589765DD /* HelpCenter.swift */,
 				9F2F2EB003613BEE2E9DD354 /* MusicalTyping.swift */,
@@ -1052,6 +1055,7 @@
 				8FD0114398BD1F462E32E0FF /* EQEditOverlayView.swift in Sources */,
 				F2B1793B2708C9009DAE7244 /* ExperimentalFXNavigation.swift in Sources */,
 				A72727F891A861CF9EBE3149 /* FXRack.swift in Sources */,
+				6CC083FA822AA6CE280D5B4E /* FXStartMenu.swift in Sources */,
 				65C17AB3FAC85EBFA6A6433C /* FXWindowHost.swift in Sources */,
 				43F41B9FECA4D8B43B63D747 /* FXWindowViews.swift in Sources */,
 				B992E98617D36BDD7C5942BE /* FXWindowsMore.swift in Sources */,

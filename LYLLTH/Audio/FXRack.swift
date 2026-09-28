@@ -22,6 +22,10 @@ struct LYFXRack: Codable, Equatable {
     var undertow: UndertowState? = nil
     var splitField: SplitFieldState? = nil
     var shear: ShearState? = nil
+    /// The DE-ESSER.
+    var deEsser: DeEsserState? = nil
+    /// The NOISE GATE.
+    var noiseGate: NoiseGateState? = nil
     var cabinet: CabinetState? = nil
     var pump: PumpState? = nil
     var finale: FinaleState? = nil
@@ -79,6 +83,8 @@ struct LYFXRack: Codable, Equatable {
         case .undertow: return !(undertow ?? .neutral).isBypassed
         case .splitField: return !(splitField ?? .neutral).isBypassed
         case .shear: return !(shear ?? .neutral).isBypassed
+        case .deEsser: return !(deEsser ?? .neutral).isBypassed
+        case .noiseGate: return !(noiseGate ?? .neutral).isBypassed
         case .cabinet: return !(cabinet ?? .neutral).isBypassed
         case .pump: return !(pump ?? .neutral).isBypassed
         case .delay: return !(signalBloom ?? .neutral).isBypassed
@@ -106,6 +112,8 @@ struct LYFXRack: Codable, Equatable {
         case .undertow: var s = undertow ?? .neutral; s.isBypassed.toggle(); undertow = s
         case .splitField: var s = splitField ?? .neutral; s.isBypassed.toggle(); splitField = s
         case .shear: var s = shear ?? .neutral; s.isBypassed.toggle(); shear = s
+        case .deEsser: var s = deEsser ?? .neutral; s.isBypassed.toggle(); deEsser = s
+        case .noiseGate: var s = noiseGate ?? .neutral; s.isBypassed.toggle(); noiseGate = s
         case .cabinet: var s = cabinet ?? .neutral; s.isBypassed.toggle(); cabinet = s
         case .pump: var s = pump ?? .neutral; s.isBypassed.toggle(); pump = s
         case .delay: var s = signalBloom ?? .neutral; s.isBypassed.toggle(); signalBloom = s
@@ -302,6 +310,12 @@ enum LYFXBridge {
             let s = rack.shear ?? .neutral
             if let index { engine.setShear(trackIndex: index, parameters: s.parameters) } else { engine.setMainShear(parameters: s.parameters) }
             engine.setEffectMotion(.shear, trackIndex: index, configuration: s.isBypassed ? nil : s.motion?.holdingConfiguration)
+        case .deEsser:
+            let s = rack.deEsser ?? .neutral
+            if let index { engine.setDeEsser(trackIndex: index, parameters: s.parameters) } else { engine.setMainDeEsser(parameters: s.parameters) }
+        case .noiseGate:
+            let s = rack.noiseGate ?? .neutral
+            if let index { engine.setNoiseGate(trackIndex: index, parameters: s.parameters) } else { engine.setMainNoiseGate(parameters: s.parameters) }
         case .cabinet:
             let s = rack.cabinet ?? .neutral
             if let index { engine.setCabinet(trackIndex: index, parameters: s.parameters) } else { engine.setMainCabinet(parameters: s.parameters) }

@@ -302,6 +302,16 @@ struct LYFXWindowHost: View {
             return AnyView(ShearWindowView(targetName: targetName, state: rack.shear ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
                                            onStateChange: { state in update(.shear) { $0.shear = state } }, onToggleEngaged: toggle(.shear),
                                            onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .deEsser:
+            return AnyView(DeEsserWindowView(targetName: targetName, state: rack.deEsser ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                             meter: { [engineIndex] in engine.deEsserMeter(trackIndex: engineIndex) },
+                                             onStateChange: { state in update(.deEsser) { $0.deEsser = state } }, onToggleEngaged: toggle(.deEsser),
+                                             onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .noiseGate:
+            return AnyView(NoiseGateWindowView(targetName: targetName, state: rack.noiseGate ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                               meter: { [engineIndex] in engine.noiseGateMeter(trackIndex: engineIndex) },
+                                               onStateChange: { state in update(.noiseGate) { $0.noiseGate = state } }, onToggleEngaged: toggle(.noiseGate),
+                                               onTransportTap: transportTap, onCancel: cancel, onDone: done))
         case .cabinet:
             return AnyView(CabinetWindowView(targetName: targetName, state: rack.cabinet ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
                                              meter: { [engineIndex] in engineIndex.map { engine.cabinetMeter(trackIndex: $0) } ?? engine.mainCabinetMeter() },

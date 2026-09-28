@@ -811,3 +811,28 @@ final class CompPlaybackTests: XCTestCase {
         XCTAssertEqual(session.withCompsExpanded(), session)
     }
 }
+
+final class DeEsserAndGateRackTests: XCTestCase {
+    func testDeEsserAndGateSurviveTheProjectFile() throws {
+        var rack = LYFXRack()
+        var deEsser = DeEsserState.factoryPresets[1].state
+        deEsser.listen = true
+        rack.deEsser = deEsser
+        rack.noiseGate = NoiseGateState.factoryPresets[2].state
+        rack.order = [.noiseGate, .eq, .deEsser]
+        let back = try JSONDecoder().decode(LYFXRack.self, from: JSONEncoder().encode(rack))
+        XCTAssertEqual(back.deEsser?.frequency, deEsser.frequency)
+        XCTAssertEqual(back.deEsser?.listen, false, "LISTEN is never saved on")
+        XCTAssertEqual(back.noiseGate, rack.noiseGate)
+        XCTAssertTrue(back.isEngaged(.deEsser, isMain: false, reverb: .neutral))
+        XCTAssertEqual(back.chain(isMain: false).prefix(3), [.noiseGate, .eq, .deEsser])
+    }
+
+    func testTheMenuFilesEveryEffectInAFolder() {
+        let offered = FXKind.controlDeckCases.filter { $0.isAvailable(for: .track(UUID())) }
+        XCTAssertTrue(offered.contains(.deEsser))
+        XCTAssertTrue(offered.contains(.noiseGate))
+        XCTAssertEqual(FXKind.deEsser.category, .dynamics)
+        XCTAssertEqual(FXKind.noiseGate.title, "NOISE GATE")
+    }
+}

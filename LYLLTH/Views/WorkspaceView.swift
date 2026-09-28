@@ -1305,6 +1305,10 @@ struct WorkspaceView: View {
             audioImportError = "SELECT A TRACK BEFORE LOADING AN AUDIO UNIT"
             return
         }
+        installAudioUnit(descriptor, on: trackID)
+    }
+
+    private func installAudioUnit(_ descriptor: LYAudioUnitDescriptor, on trackID: UUID) {
         Task { @MainActor in
             do {
                 document.session = try await audioUnits.install(
@@ -1547,24 +1551,38 @@ struct WorkspaceView: View {
         openFX(kind, target: target)
     }
 
+    /// The + menu beside a channel strip: folders of effects that open to
+    /// the right, over the arrangement.
     @ViewBuilder
     private var fxPickerOverlay: some View {
         if let target = fxPickerTarget {
             let close = { withAnimation(LYLLTHTheme.snap) { fxPickerTarget = nil } }
-            ZStack {
-                Color.black.opacity(0.76)
-                    .ignoresSafeArea()
-                    .onTapGesture(perform: close)
-                FXPickerWindowView(
-                    targetName: target == .main ? "MAIN MIX" : (document.session.tracks.first { .track($0.id) == target }?.name ?? "TRACK"),
-                    target: target,
-                    chainOrder: LYFXBridge.rack(for: target, in: document.session).chain(isMain: target == .main),
-                    onToggle: { toggleMembership($0, target: target) },
-                    onDone: close
-                )
-                .frame(width: 380)
-                .frame(maxHeight: 640)
-                .scaleEffect(1.25)
+            let anchor = menuAnchors[target == .main ? "fxAdd.main" : "fxAdd.track"]
+            let trackID: UUID? = { if case .track(let id) = target { return id } else { return nil } }()
+            GeometryReader { geo in
+                let x = min((anchor?.maxX ?? geo.size.width / 3) + 8, max(8, geo.size.width - 240))
+                let y = min(max(8, (anchor?.minY ?? geo.size.height / 3) - 60), max(8, geo.size.height - 520))
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: close)
+                    LYFXStartMenu(
+                        targetName: target == .main ? "MAIN MIX" : (document.session.tracks.first { $0.id == trackID }?.name ?? "TRACK"),
+                        target: target,
+                        chain: LYFXBridge.rack(for: target, in: document.session).chain(isMain: target == .main),
+                        audioUnits: trackID == nil ? [] : plugins.effects,
+                        add: { kind in
+                            toggleMembership(kind, target: target)
+                            openFX(kind, target: target)
+                        },
+                        open: { openFX($0, target: target) },
+                        remove: { toggleMembership($0, target: target) },
+                        addAudioUnit: { unit in if let trackID { installAudioUnit(unit, on: trackID) } },
+                        close: close
+                    )
+                    .offset(x: x, y: y)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+                }
             }
             .preferredColorScheme(.dark)
             .zIndex(150)
@@ -2774,6 +2792,8 @@ private struct LYNightshapeEffect: Hashable {
         .init(name: "DEADLOCK", detail: "CRUSH · CRUNCH", category: "DESTRUCTION", accent: .purple),
         .init(name: "ANVIL", detail: "ROOT · RING", category: "DESTRUCTION", accent: .purple),
         .init(name: "SHEAR", detail: "FOLD · SYMMETRY", category: "DESTRUCTION", accent: .purple),
+        .init(name: "DE-ESSER", detail: "FREQUENCY · RANGE", category: "DYNAMICS", accent: .teal),
+        .init(name: "NOISE GATE", detail: "THRESHOLD · HOLD", category: "DYNAMICS", accent: .indigo),
         .init(name: "ELASTIC LIMITER", detail: "FINAL LIMIT", category: "OUTPUT", accent: nil)
     ]
 }

@@ -633,7 +633,8 @@ private struct LYChannelStrip: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("Add or remove effects")
+                    .lyMenuAnchor(isMain ? "fxAdd.main" : "fxAdd.track")
+                    .help("Add an effect")
                 }
             } else {
                 Text("PAST SIXTEEN CHANNELS\nNO FX")
