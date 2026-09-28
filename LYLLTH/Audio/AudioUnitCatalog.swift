@@ -110,6 +110,11 @@ final class LYAudioUnitValidationStore {
         persist()
     }
 
+    func resetAllQuarantined() {
+        records = records.filter { !$0.value.isQuarantined }
+        persist()
+    }
+
     private func persist() {
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -168,6 +173,11 @@ final class AudioUnitCatalog: ObservableObject {
 
     func resetQuarantine(_ descriptor: LYAudioUnitDescriptor) {
         validation.reset(descriptor.id)
+        scan()
+    }
+
+    func resetAllQuarantine() {
+        validation.resetAllQuarantined()
         scan()
     }
 }

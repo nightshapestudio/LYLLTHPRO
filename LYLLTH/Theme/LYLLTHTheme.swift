@@ -7,18 +7,18 @@ enum LYLLTHTheme {
     static let panelRaised = Color(hex: 0x141418)
     static let panelPressed = Color(hex: 0x18181E)
 
-    static let line = Color.white.opacity(0.085)
-    static let lineStrong = Color(hex: 0x343440)
-    static let lineFocused = Color(hex: 0x57586A)
+    static var line: Color { Color.white.opacity(LYAppPreferences.highContrast() ? 0.16 : 0.085) }
+    static var lineStrong: Color { Color(hex: LYAppPreferences.highContrast() ? 0x555568 : 0x343440) }
+    static var lineFocused: Color { Color(hex: LYAppPreferences.highContrast() ? 0x77798E : 0x57586A) }
 
     // Text has two tiers on the dark ground and nothing dimmer, same as
     // DrumKit: near-white for anything read, #888899 for the quiet tier.
     // `secondary` is the heading register only. Dimming is not a hierarchy
     // tool here; size, weight, tracking and placement are.
     static let text = Color(hex: 0xEEEEFF)
-    static let secondary = Color(hex: 0xB6B8C6)
-    static let metadata = Color(hex: 0x888899)
-    static let dim = Color(hex: 0x888899)
+    static var secondary: Color { Color(hex: LYAppPreferences.highContrast() ? 0xD2D4E1 : 0xB6B8C6) }
+    static var metadata: Color { Color(hex: LYAppPreferences.highContrast() ? 0xB6B8C6 : 0x888899) }
+    static var dim: Color { metadata }
     /// OFF chrome: unlit LEDs, empty meter wells. Never text.
     static let off = Color(hex: 0x3A3A48)
     static let chrome = Color(hex: 0xDCE6FA)
@@ -63,6 +63,7 @@ enum LYLLTHTheme {
     }
 
     static func label(_ size: CGFloat = 10, weight: Font.Weight = .medium) -> Font {
+        let size = size * LYAppPreferences.textScale()
         switch weight {
         case .ultraLight, .thin, .light:
             return .custom("Adam-Light", size: size)
@@ -77,6 +78,7 @@ enum LYLLTHTheme {
     /// label. Adam is the display face for short uppercase labels; in long
     /// lowercase lines its rounded letters read as a novelty face.
     static func body(_ size: CGFloat = 12, weight: Font.Weight = .regular) -> Font {
+        let size = size * LYAppPreferences.textScale()
         switch weight {
         case .medium:
             return .custom("Inter-Medium", size: size)
@@ -91,7 +93,7 @@ enum LYLLTHTheme {
     /// Labels stay in Adam; reported values use the quiet, thin SF display cut
     /// with fixed-width figures so changing values never shift laterally.
     static func value(_ size: CGFloat = 12) -> Font {
-        .system(size: size, weight: .thin, design: .default).monospacedDigit()
+        .system(size: size * LYAppPreferences.textScale(), weight: .thin, design: .default).monospacedDigit()
     }
 
     static func wordmark(_ size: CGFloat) -> Font {

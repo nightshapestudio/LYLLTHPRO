@@ -30,6 +30,11 @@ final class AudioEngineController: ObservableObject {
         return player
     }()
 
+    /// Set once a song window has done its first-open work: recovery,
+    /// Audio Unit restore, plug-in scan. A redraw for a new text size must
+    /// not repeat it.
+    var hasOpenedWorkspace = false
+
     func connectAudioUnitHost(_ host: LYAudioUnitHost) {
         automationPlayer.pluginParameter = { [weak host] slot, address, value, hostTime in
             host?.scheduleParameter(slotID: slot, address: address, normalizedValue: value, hostTime: hostTime)

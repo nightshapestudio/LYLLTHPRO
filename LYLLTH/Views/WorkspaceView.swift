@@ -127,7 +127,8 @@ func mixedNumericLabel(
     numberFont: Font
 ) -> Text {
     string.reduce(Text("")) { partial, character in
-        let isNumericGlyph = character.isNumber || "/:.−+–—".contains(character)
+        // "%" too: Adam has no usable percent sign.
+        let isNumericGlyph = character.isNumber || "/:.−+–—%".contains(character)
         return partial + Text(String(character)).font(isNumericGlyph ? numberFont : labelFont)
     }
 }
@@ -246,6 +247,7 @@ struct WorkspaceView: View {
     @EnvironmentObject private var audioUnits: LYAudioUnitHost
     @Environment(\.undoManager) private var undoManager
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @StateObject private var history = LYDocumentHistory()
 
     @State private var selectedTrackID: UUID?
@@ -324,7 +326,8 @@ struct WorkspaceView: View {
                         isSaved: fileURL != nil,
                         openTrackMenu: { presentMenu(.addTrack, from: "stripTrack") },
                         export: presentExport,
-                        openHelp: { openWindow(id: "lyllth-help") }
+                        openHelp: { openWindow(id: "lyllth-help") },
+                        openSettings: { openSettings() }
                     )
 
                 HStack(spacing: 0) {
@@ -458,31 +461,38 @@ struct WorkspaceView: View {
         .focusedSceneValue(\.lyWorkspace, workspaceActions)
         .onAppear {
             audio.connectAudioUnitHost(audioUnits)
-            let needsRelink = document.audioNeedingRelink.count
-            if needsRelink > 0 {
-                notice = "\(needsRelink) AUDIO FILE\(needsRelink == 1 ? " IS" : "S ARE") MISSING OR DAMAGED  ·  RELINK IN LIBRARY ▸ PROJECT"
-                showBrowser = true
-                selectedBrowserGroup = "PROJECT"
-            }
-            recoveryCandidate = LYRecoveryJournal.recoverable(
-                projectID: document.session.id,
-                newerThan: document.session.modifiedAt
-            )
+            // First open of this song window only. A text size or contrast
+            // change redraws the view, and none of this may happen twice:
+            // recovery prompts, recording recovery, Audio Unit restore.
+            let firstOpen = !audio.hasOpenedWorkspace
+            audio.hasOpenedWorkspace = true
             history.begin(document.session)
-            if let orphan = LYRecordingJournal.recoverable(projectID: document.session.id) {
-                recoverRecording(orphan)
+            if firstOpen {
+                let needsRelink = document.audioNeedingRelink.count
+                if needsRelink > 0 {
+                    notice = "\(needsRelink) AUDIO FILE\(needsRelink == 1 ? " IS" : "S ARE") MISSING OR DAMAGED  ·  RELINK IN LIBRARY ▸ PROJECT"
+                    showBrowser = true
+                    selectedBrowserGroup = "PROJECT"
+                }
+                recoveryCandidate = LYRecoveryJournal.recoverable(
+                    projectID: document.session.id,
+                    newerThan: document.session.modifiedAt
+                )
+                if let orphan = LYRecordingJournal.recoverable(projectID: document.session.id) {
+                    recoverRecording(orphan)
+                }
+                if document.isFromDrumKit {
+                    notice = (["OPENED FROM DRUMKIT  ·  SAVE KEEPS IT AS A LYLLTH SONG"] + document.importNotes.map { $0.uppercased() })
+                        .joined(separator: "  ·  ")
+                }
+                // Project wavetables first, so synth tracks find them when they load.
+                LYWavetableLibrary.shared.register(projectTables: document.wavetables)
+                Task { @MainActor in
+                    document.session = await audioUnits.restore(document.session, engine: audio.engine)
+                }
             }
-            if document.isFromDrumKit {
-                notice = (["OPENED FROM DRUMKIT  ·  SAVE KEEPS IT AS A LYLLTH SONG"] + document.importNotes.map { $0.uppercased() })
-                    .joined(separator: "  ·  ")
-            }
-            // Project wavetables first, so synth tracks find them when they load.
-            LYWavetableLibrary.shared.register(projectTables: document.wavetables)
             selectedTrackID = selectedTrackID ?? document.session.tracks.first?.id
             audio.prepare(document.session)
-            Task { @MainActor in
-                document.session = await audioUnits.restore(document.session, engine: audio.engine)
-            }
             LYMIDIInput.shared.start()
             DispatchQueue.main.async { updateMIDITarget() }
             audio.setTransportMode(transportMode, session: document.session, media: document.audioMediaStore)
@@ -490,7 +500,7 @@ struct WorkspaceView: View {
             LYFXBridge.pushAll(document.session, engine: audio.engine)
             meters.track(document.session, engine: audio.engine)
             audio.engine.setMainOutputVolume(volume: pow(10, (document.session.mainVolumeDB ?? 0) / 20))
-            plugins.scan()
+            if firstOpen { plugins.scan() }
             #if DEBUG
             // Screenshot hook: LYLLTH_DEBUG_FX=<FXKind raw value> opens that
             // effect on the first track at launch.
@@ -2529,6 +2539,7 @@ struct WorkspaceStrip: View {
     let openTrackMenu: () -> Void
     let export: () -> Void
     let openHelp: () -> Void
+    let openSettings: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
@@ -2606,6 +2617,17 @@ struct WorkspaceStrip: View {
                 .buttonStyle(.plain)
                 .help("Open LYLLTH Help (Command-?)")
                 .accessibilityLabel("Open LYLLTH Help")
+                Button(action: openSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(LYLLTHTheme.metadata)
+                        .frame(width: 28, height: 25)
+                        .contentShape(Rectangle())
+                        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Open LYLLTH Settings (Command-,)")
+                .accessibilityLabel("Open LYLLTH Settings")
             }
 
             Button(action: openTrackMenu) {

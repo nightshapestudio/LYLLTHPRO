@@ -19,6 +19,7 @@ struct LYLLTHApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             LYProjectCommands()
+            LYSettingsCommands()
             LYHelpCommands()
         }
 
@@ -27,6 +28,10 @@ struct LYLLTHApp: App {
         }
         .defaultSize(width: 1_100, height: 760)
         .windowResizability(.contentMinSize)
+
+        Settings {
+            LYSettingsView()
+        }
     }
 }
 
@@ -38,7 +43,10 @@ enum LYNewSong {
 
     static func take() -> LYLLTHSession {
         defer { demo = false }
-        return demo ? .demoSong() : .blank()
+        guard !demo else { return .demoSong() }
+        var session = LYLLTHSession.blank()
+        LYAppPreferences.applyNewProjectDefaults(to: &session)
+        return session
     }
 
     static func openDemo() {
@@ -56,6 +64,8 @@ private struct LYDocumentWorkspace: View {
     @StateObject private var audio: AudioEngineController
     @StateObject private var plugins = AudioUnitCatalog()
     @StateObject private var audioUnits = LYAudioUnitHost()
+    @AppStorage(LYPreferenceKey.interfaceTextScale) private var textScale = 1.0
+    @AppStorage(LYPreferenceKey.highContrast) private var highContrast = false
 
     init(document: Binding<LYLLTHSessionDocument>, fileURL: URL?) {
         _document = document
@@ -64,7 +74,11 @@ private struct LYDocumentWorkspace: View {
     }
 
     var body: some View {
+        // A text size or contrast change redraws the song view from scratch.
+        // Only the view: the engine, plug-ins and document live out here, and
+        // the shutdown hook stays outside so a redraw never stops the audio.
         WorkspaceView(document: $document, fileURL: fileURL)
+            .id("\(textScale)-\(highContrast)")
             .environmentObject(audio)
             .environmentObject(plugins)
             .environmentObject(audioUnits)
@@ -139,6 +153,17 @@ struct LYHelpCommands: Commands {
         CommandGroup(replacing: .help) {
             Button("LYLLTH Help") { openWindow(id: "lyllth-help") }
                 .keyboardShortcut("?", modifiers: .command)
+        }
+    }
+}
+
+struct LYSettingsCommands: Commands {
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { openSettings() }
+                .keyboardShortcut(",", modifiers: .command)
         }
     }
 }

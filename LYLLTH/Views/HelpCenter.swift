@@ -509,6 +509,8 @@ struct LYHelpCenterView: View {
     @State private var category: LYHelpCategory? = .start
     @State private var selectedArticleID = "welcome"
     @FocusState private var searchFocused: Bool
+    @AppStorage(LYPreferenceKey.interfaceTextScale) private var textScale = 1.0
+    @AppStorage(LYPreferenceKey.highContrast) private var highContrast = false
 
     private var results: [LYHelpArticle] {
         LYHelpLibrary.search(query, category: query.isEmpty ? category : nil)
@@ -543,6 +545,7 @@ struct LYHelpCenterView: View {
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
         }
+        .id("\(textScale)-\(highContrast)")
     }
 
     private var header: some View {

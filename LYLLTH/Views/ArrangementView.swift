@@ -1444,7 +1444,8 @@ struct LYTrackHeader: View {
                 .foregroundStyle(isOn ? tint : LYLLTHTheme.chromeText)
                 .lineLimit(1)
                 .padding(.horizontal, width == nil ? 6 : 0)
-                .frame(width: width, height: 17)
+                // Fixed widths grow with the text size setting.
+                .frame(width: width.map { $0 * CGFloat(LYAppPreferences.textScale()) }, height: 17)
                 .background(tint.opacity(isOn ? 0.12 : 0))
                 .overlay(Rectangle().stroke(isOn ? tint : LYLLTHTheme.lineStrong, lineWidth: 1))
                 .lyBloom(tint, isOn: isOn)
