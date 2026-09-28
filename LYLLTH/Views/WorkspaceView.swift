@@ -245,6 +245,7 @@ struct WorkspaceView: View {
     @EnvironmentObject private var plugins: AudioUnitCatalog
     @EnvironmentObject private var audioUnits: LYAudioUnitHost
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.openWindow) private var openWindow
     @StateObject private var history = LYDocumentHistory()
 
     @State private var selectedTrackID: UUID?
@@ -321,7 +322,8 @@ struct WorkspaceView: View {
                         projectName: document.session.name,
                         isSaved: fileURL != nil,
                         openTrackMenu: { presentMenu(.addTrack, from: "stripTrack") },
-                        export: presentExport
+                        export: presentExport,
+                        openHelp: { openWindow(id: "lyllth-help") }
                     )
 
                 HStack(spacing: 0) {
@@ -2473,6 +2475,7 @@ struct WorkspaceStrip: View {
     var isSaved = true
     let openTrackMenu: () -> Void
     let export: () -> Void
+    let openHelp: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
@@ -2539,6 +2542,17 @@ struct WorkspaceStrip: View {
                 VisibilityButton(icon: "books.vertical", help: "Library", isOn: $showBrowser)
                 VisibilityButton(icon: "rectangle.bottomthird.inset.filled", help: "Mixer", isOn: $showMixer)
                 VisibilityButton(icon: "slider.vertical.3", help: "Inspector", isOn: $showInspector)
+                Button(action: openHelp) {
+                    Image(systemName: "questionmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(LYLLTHTheme.metadata)
+                        .frame(width: 28, height: 25)
+                        .contentShape(Rectangle())
+                        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Open LYLLTH Help (Command-?)")
+                .accessibilityLabel("Open LYLLTH Help")
             }
 
             Button(action: openTrackMenu) {

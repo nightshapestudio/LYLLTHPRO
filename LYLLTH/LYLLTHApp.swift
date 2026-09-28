@@ -19,7 +19,14 @@ struct LYLLTHApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             LYProjectCommands()
+            LYHelpCommands()
         }
+
+        Window("LYLLTH Help", id: "lyllth-help") {
+            LYHelpCenterView()
+        }
+        .defaultSize(width: 1_100, height: 760)
+        .windowResizability(.contentMinSize)
     }
 }
 
@@ -121,6 +128,17 @@ struct LYProjectCommands: Commands {
             Button("Play / Stop") { workspace?.togglePlayback() }
                 .keyboardShortcut(.space, modifiers: [])
                 .disabled(workspace == nil)
+        }
+    }
+}
+
+struct LYHelpCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .help) {
+            Button("LYLLTH Help") { openWindow(id: "lyllth-help") }
+                .keyboardShortcut("?", modifiers: .command)
         }
     }
 }
