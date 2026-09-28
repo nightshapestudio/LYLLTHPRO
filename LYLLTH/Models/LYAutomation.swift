@@ -11,6 +11,8 @@ enum LYAutomationTarget: Codable, Hashable {
     case fx(String)
     /// A LUNATK parameter, by its patch key.
     case synth(String)
+    /// A hosted Audio Unit parameter. Values are normalized 0...1.
+    case plugin(UUID, UInt64)
 }
 
 struct LYAutomationPoint: Codable, Equatable, Identifiable {
@@ -244,6 +246,7 @@ extension LYAutomationTarget {
         case .synth(let key):
             guard let parameter = LYSynthParameters.byKey[key] else { return 0...1 }
             return Double(parameter.range.lowerBound)...Double(parameter.range.upperBound)
+        case .plugin: return 0...1
         }
     }
 
@@ -254,6 +257,7 @@ extension LYAutomationTarget {
         case .send(let id): return "SEND · " + (session.tracks.first { $0.id == id }?.name ?? "BUS")
         case .fx(let key): return LYFXAutomation.byKey[key]?.label ?? key.uppercased()
         case .synth(let key): return "LUNATK · " + LYSynthAutomation.label(key)
+        case .plugin: return "AUDIO UNIT PARAMETER"
         }
     }
 
@@ -281,6 +285,7 @@ extension LYAutomationTarget {
         case .synth(let key):
             guard let parameter = LYSynthParameters.byKey[key] else { return 0 }
             return Double((track.synth ?? .initPatch).value(parameter.id))
+        case .plugin: return 0
         }
     }
 }

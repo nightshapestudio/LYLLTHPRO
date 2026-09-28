@@ -199,6 +199,7 @@ final class LYTimelineAudioPlayer {
     // MARK: Model
 
     func update(session: LYLLTHSession, media: LYProjectMediaStore, window: LYSongWindow) {
+        let session = session.withCompsExpanded()
         LYChannelMap.ensureChannels(for: session, engine: engine)
         let structureChanged = self.window != window || Self.structure(of: session) != Self.structure(of: self.session)
         self.session = session

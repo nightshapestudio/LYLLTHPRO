@@ -87,6 +87,39 @@ final class LYProjectMediaStore: @unchecked Sendable {
         lock.lock(); files.insert(name); lock.unlock()
     }
 
+    /// Copies an external original into project-owned working media without
+    /// first materialising the whole recording in memory.
+    func putFile(at sourceURL: URL, named name: String) throws {
+        guard Self.isValidAssetName(name) else { throw CocoaError(.fileWriteInvalidFileName) }
+        let destination = rootURL.appendingPathComponent(name, isDirectory: false)
+        let manager = FileManager.default
+        // Copied aside first, so a failed copy never loses the file it replaces.
+        let staged = rootURL.appendingPathComponent(".relink-\(UUID().uuidString)", isDirectory: false)
+        try manager.copyItem(at: sourceURL, to: staged)
+        do {
+            if manager.fileExists(atPath: destination.path) {
+                _ = try manager.replaceItemAt(destination, withItemAt: staged)
+            } else {
+                try manager.moveItem(at: staged, to: destination)
+            }
+        } catch {
+            try? manager.removeItem(at: staged)
+            throw error
+        }
+        lock.lock(); files.insert(name); lock.unlock()
+    }
+
+    /// How removed media leaves the store. Tests swap in a plain delete.
+    nonisolated(unsafe) static var discard: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
+
+    func remove(_ name: String) throws {
+        guard Self.isValidAssetName(name) else { throw CocoaError(.fileWriteInvalidFileName) }
+        let target = rootURL.appendingPathComponent(name, isDirectory: false)
+        // To the Trash, not deleted: undo can bring back an event that used it.
+        if FileManager.default.fileExists(atPath: target.path) { try Self.discard(target) }
+        lock.lock(); files.remove(name); lock.unlock()
+    }
+
     func replace(with assets: [String: Data]) {
         for (name, data) in assets { try? put(data, named: name) }
     }
@@ -100,7 +133,10 @@ final class LYProjectMediaStore: @unchecked Sendable {
     func fileWrappers() throws -> [String: FileWrapper] {
         try Dictionary(uniqueKeysWithValues: names.compactMap { name in
             guard let url = url(for: name) else { return nil }
-            let wrapper = try FileWrapper(url: url, options: .immediate)
+            // An empty option set keeps large files lazy. Foundation streams
+            // their contents when the package is written instead of copying
+            // every recording into one peak-memory spike here.
+            let wrapper = try FileWrapper(url: url, options: [])
             wrapper.preferredFilename = name
             return (name, wrapper)
         })
@@ -109,9 +145,25 @@ final class LYProjectMediaStore: @unchecked Sendable {
     func rememberProjectSnapshot(_ data: Data) { previousProjectData = data }
 
     func sha256(for name: String) -> String? {
-        guard let data = data(for: name) else { return nil }
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard let url = url(for: name), let stream = InputStream(url: url) else { return nil }
+        stream.open(); defer { stream.close() }
+        var digest = SHA256()
+        var bytes = [UInt8](repeating: 0, count: 1_048_576)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&bytes, maxLength: bytes.count)
+            if count < 0 { return nil }
+            if count == 0 { break }
+            digest.update(data: Data(bytes[0..<count]))
+        }
+        return digest.finalize().map { String(format: "%02x", $0) }.joined()
     }
+}
+
+struct LYMediaIntegrityIssue: Equatable, Identifiable {
+    enum Kind: String { case missing, corrupt }
+    var id: String { kind.rawValue + ":" + name }
+    var kind: Kind
+    var name: String
 }
 
 /// A small, atomic edit journal outside the package. It is intentionally
@@ -176,6 +228,9 @@ struct LYLLTHSessionDocument: FileDocument {
     /// Custom LUNATK wavetables the song uses, raw Float32 frames by
     /// name, so a song opens with its sounds on any Mac.
     var wavetables: [String: Data] = [:]
+    /// Problems are non-fatal: the song opens with silent placeholders so the
+    /// user can relink media instead of losing access to the entire project.
+    private(set) var mediaIntegrityIssues: [LYMediaIntegrityIssue] = []
 
     init(session: LYLLTHSession = .starter()) {
         self.session = session.migratedToCurrentSchema()
@@ -209,6 +264,7 @@ struct LYLLTHSessionDocument: FileDocument {
         let decoder = JSONDecoder()
         let primaryData = children["project.json"]?.regularFileContents
         let recoveryData = children["Recovery"]?.fileWrappers?["project.json"]?.regularFileContents
+        let backupData = children["Backups"]?.fileWrappers?["project-previous.json"]?.regularFileContents
         let manifest = children["manifest.json"]?.regularFileContents.flatMap {
             try? decoder.decode(LYLLTHManifest.self, from: $0)
         }
@@ -224,6 +280,9 @@ struct LYLLTHSessionDocument: FileDocument {
         } else if let recoveryData, let recovery = try? decoder.decode(LYLLTHSession.self, from: recoveryData) {
             decoded = recovery
             decodedData = recoveryData
+        } else if let backupData, let backup = try? decoder.decode(LYLLTHSession.self, from: backupData) {
+            decoded = backup
+            decodedData = backupData
         } else {
             throw CocoaError(.fileReadCorruptFile)
         }
@@ -236,12 +295,17 @@ struct LYLLTHSessionDocument: FileDocument {
             wrappers: children["Audio"]?.fileWrappers ?? [:],
             previousProjectData: decodedData
         )
-        if let listed = manifest?.audioFiles, Set(listed) != Set(mediaStore.names) {
-            throw CocoaError(.fileReadCorruptFile)
+        if let listed = manifest?.audioFiles {
+            let present = Set(mediaStore.names)
+            mediaIntegrityIssues += Set(listed).subtracting(present).sorted().map {
+                LYMediaIntegrityIssue(kind: .missing, name: $0)
+            }
         }
         if let expected = manifest?.audioSHA256 {
-            let corrupt = expected.contains { name, digest in mediaStore.sha256(for: name) != digest }
-            if corrupt { throw CocoaError(.fileReadCorruptFile) }
+            mediaIntegrityIssues += expected.compactMap { name, digest in
+                guard mediaStore.contains(name), mediaStore.sha256(for: name) != digest else { return nil }
+                return LYMediaIntegrityIssue(kind: .corrupt, name: name)
+            }.sorted { $0.name < $1.name }
         }
         wavetables = children["Wavetables"]?.fileWrappers?.reduce(into: [:]) { result, entry in
             guard let data = entry.value.regularFileContents else { return }
@@ -341,6 +405,45 @@ struct LYLLTHSessionDocument: FileDocument {
         }
         session.tracks[trackIndex].clips.append(clip)
         return clip.id
+    }
+
+    var referencedAudioNames: Set<String> {
+        Set(session.tracks.flatMap(\.clips).flatMap { clip -> [String] in
+            var paths = [clip.sourceRelativePath].compactMap { $0 }
+            paths += (clip.takes ?? []).map(\.sourceRelativePath)
+            return paths
+        })
+    }
+
+    var missingAudioNames: [String] {
+        referencedAudioNames.filter { !mediaStore.contains($0) }.sorted()
+    }
+
+    /// Referenced media that is missing or failed its checksum on open.
+    var audioNeedingRelink: [String] {
+        let corrupt = mediaIntegrityIssues.filter { $0.kind == .corrupt }.map(\.name)
+        return Array(Set(missingAudioNames + corrupt).intersection(referencedAudioNames)).sorted()
+    }
+
+    var orphanedAudioNames: [String] {
+        Set(mediaStore.names).subtracting(referencedAudioNames).sorted()
+    }
+
+    /// Replaces a missing/corrupt original while preserving every event and
+    /// take reference that points at its project-relative name.
+    mutating func relinkAudio(named name: String, from sourceURL: URL) throws {
+        guard referencedAudioNames.contains(name) else { throw CocoaError(.fileNoSuchFile) }
+        try mediaStore.putFile(at: sourceURL, named: name)
+        mediaIntegrityIssues.removeAll { $0.name == name }
+    }
+
+    /// Moves media no event or take references to the Trash. Returns the
+    /// names moved.
+    @discardableResult
+    mutating func cleanupOrphanedAudio() throws -> [String] {
+        let names = orphanedAudioNames
+        for name in names { try mediaStore.remove(name) }
+        return names
     }
 
     private func uniqueAudioName(_ proposed: String) -> String {

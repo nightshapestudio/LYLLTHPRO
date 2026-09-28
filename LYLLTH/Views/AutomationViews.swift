@@ -207,6 +207,7 @@ struct LYAutomationLaneHeader: View {
 
 /// What a lane can move on a track, NIGHTSHAPE dropdown style.
 struct LYAutomationTargetPanel: View {
+    @EnvironmentObject private var audioUnits: LYAudioUnitHost
     let track: LYTrack
     let session: LYLLTHSession
     let current: LYAutomationTarget?
@@ -230,6 +231,17 @@ struct LYAutomationTargetPanel: View {
                     if track.synth != nil {
                         ForEach(LYSynthAutomation.groups, id: \.title) { group in
                             section("LUNATK · " + group.title, targets: group.keys.map { .synth($0) })
+                        }
+                    }
+                    ForEach(([track.instrumentPlugin].compactMap { $0 } + track.inserts)
+                        .filter { $0.format == .audioUnit }) { slot in
+                        let parameters = audioUnits.parameters(slotID: slot.id)
+                        if !parameters.isEmpty {
+                            section(slot.name.uppercased(), targets: parameters.map { .plugin(slot.id, $0.address) },
+                                    detail: { target in
+                                guard case .plugin(_, let address) = target else { return nil }
+                                return parameters.first { $0.address == address }?.name.uppercased()
+                            })
                         }
                     }
                 }

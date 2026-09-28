@@ -11,6 +11,7 @@ final class LYDocumentHistory: ObservableObject {
     private var ignoreNextChange = false
     private var pendingApply: ((LYLLTHSession) -> Void)?
     private weak var pendingManager: UndoManager?
+    private var pendingActionName = "Edit Project"
 
     func begin(_ session: LYLLTHSession) {
         current = session
@@ -23,7 +24,10 @@ final class LYDocumentHistory: ObservableObject {
             return
         }
         guard let previous = current, previous != next else { return }
-        if pendingUndo == nil { pendingUndo = previous }
+        if pendingUndo == nil {
+            pendingUndo = previous
+            pendingActionName = LYUndoActionName.describe(from: previous, to: next)
+        }
         current = next
         pendingApply = apply
         pendingManager = undoManager
@@ -46,7 +50,7 @@ final class LYDocumentHistory: ObservableObject {
         manager.registerUndo(withTarget: self) { target in
             target.restore(snapshot, undoManager: manager, apply: apply)
         }
-        manager.setActionName("Edit Project")
+        manager.setActionName(pendingActionName)
         if let current { LYRecoveryJournal.write(current) }
     }
 
@@ -68,8 +72,36 @@ final class LYDocumentHistory: ObservableObject {
         undoManager.registerUndo(withTarget: self) { target in
             target.restore(redo, undoManager: undoManager, apply: apply)
         }
-        undoManager.setActionName("Edit Project")
+        undoManager.setActionName(LYUndoActionName.describe(from: snapshot, to: redo))
         LYRecoveryJournal.write(snapshot)
+    }
+}
+
+enum LYUndoActionName {
+    static func describe(from old: LYLLTHSession, to new: LYLLTHSession) -> String {
+        if old.bpm != new.bpm { return "Change Tempo" }
+        if old.loopRange != new.loopRange || old.isLoopEnabled != new.isLoopEnabled { return "Edit Cycle" }
+        if old.tracks.count != new.tracks.count { return old.tracks.count < new.tracks.count ? "Add Track" : "Delete Track" }
+        if old.trackFolders != new.trackFolders { return "Edit Track Folder" }
+        if old.mixGroups != new.mixGroups { return "Edit Mix Group" }
+        for (before, after) in zip(old.tracks, new.tracks) where before != after {
+            if before.name != after.name { return "Rename Track" }
+            if before.volumeDB != after.volumeDB { return "Adjust Track Volume" }
+            if before.pan != after.pan { return "Adjust Track Pan" }
+            if before.isMuted != after.isMuted { return "Toggle Mute" }
+            if before.isSolo != after.isSolo { return "Toggle Solo" }
+            if before.isArmed != after.isArmed { return "Toggle Record Arm" }
+            if before.automation != after.automation { return "Edit Automation" }
+            if before.inserts != after.inserts || before.instrumentPlugin != after.instrumentPlugin { return "Edit Plug-ins" }
+            if before.clips != after.clips {
+                let oldIDs = Set(before.clips.map(\.id)), newIDs = Set(after.clips.map(\.id))
+                if newIDs.count > oldIDs.count { return "Add Region" }
+                if newIDs.count < oldIDs.count { return "Delete Region" }
+                return "Edit Region"
+            }
+        }
+        if old.mainVolumeDB != new.mainVolumeDB { return "Adjust Main Volume" }
+        return "Edit Project"
     }
 }
 
@@ -298,6 +330,10 @@ struct WorkspaceView: View {
                             selection: $selectedBrowserGroup,
                             selectedItem: $selectedBrowserItem,
                             projectAudio: document.audioAssetNames,
+                            missingAudio: document.audioNeedingRelink,
+                            unusedAudio: document.orphanedAudioNames,
+                            onRelink: { relinkAudio(named: $0) },
+                            onRemoveUnused: { removeUnusedAudio() },
                             onEffect: { addEffectFromLibrary(named: $0) },
                             onSound: { openSoundFromLibrary($0) },
                             onAudioUnit: { installAudioUnit($0) },
@@ -417,6 +453,13 @@ struct WorkspaceView: View {
         .frame(minWidth: 960, minHeight: 640)
         .focusedSceneValue(\.lyWorkspace, workspaceActions)
         .onAppear {
+            audio.connectAudioUnitHost(audioUnits)
+            let needsRelink = document.audioNeedingRelink.count
+            if needsRelink > 0 {
+                notice = "\(needsRelink) AUDIO FILE\(needsRelink == 1 ? " IS" : "S ARE") MISSING OR DAMAGED  ·  RELINK IN LIBRARY ▸ PROJECT"
+                showBrowser = true
+                selectedBrowserGroup = "PROJECT"
+            }
             recoveryCandidate = LYRecoveryJournal.recoverable(
                 projectID: document.session.id,
                 newerThan: document.session.modifiedAt
@@ -943,7 +986,10 @@ struct WorkspaceView: View {
 
     private func toggleRecording() {
         if recorder.isActive { finishRecording(); return }
-        let audioTargets = document.session.tracks.filter { $0.kind == .audio && $0.isArmed }.map(\.id)
+        let legacyInput = document.session.recordingSettings?.inputChannel ?? 0
+        let audioTargets = document.session.tracks.filter { $0.kind == .audio && $0.isArmed }.map {
+            LYAudioRecordTarget(trackID: $0.id, inputChannel: $0.audioInputChannel ?? legacyInput)
+        }
         let armedAudio = !audioTargets.isEmpty
         let settings = document.session.recordingSettings ?? LYRecordingSettings(
             preRollBars: document.session.countIn == false ? 0 : 1
@@ -955,8 +1001,7 @@ struct WorkspaceView: View {
                 preRollBeats: settings.preRollBars * max(document.session.numerator, 1),
                 recordAudio: armedAudio,
                 projectID: document.session.id,
-                targetTrackIDs: audioTargets,
-                inputChannel: settings.inputChannel,
+                audioTargets: audioTargets,
                 inputMonitoring: settings.inputMonitoring,
                 onError: { audioImportError = $0 }
             )
@@ -976,9 +1021,9 @@ struct WorkspaceView: View {
     }
 
     private func finishRecording() {
-        recorder.stop(audio: audio) { notes, take in
+        recorder.stop(audio: audio) { notes, takes in
             writeRecordedNotes(notes)
-            if let take { placeRecordedAudio(take) }
+            placeRecordedAudio(takes)
         }
     }
 
@@ -1081,38 +1126,38 @@ struct WorkspaceView: View {
         }
     }
 
-    private func placeRecordedAudio(_ capture: LYRecordedAudioCapture) {
+    /// Places every armed track's take. The recording journal is cleared only
+    /// when all of them are in the song, so a failure stays recoverable.
+    private func placeRecordedAudio(_ captures: [LYRecordedAudioCapture]) {
+        guard !captures.isEmpty else { return }
+        Task { @MainActor in
+            var placedAll = true
+            for capture in captures where await !placeRecordedAudio(capture) { placedAll = false }
+            if placedAll { LYRecordingJournal.complete(projectID: document.session.id) }
+        }
+    }
+
+    private func placeRecordedAudio(_ capture: LYRecordedAudioCapture) async -> Bool {
         let settings = document.session.recordingSettings ?? LYRecordingSettings()
         let latencySeconds = max(0, capture.measuredLatencySeconds + settings.manualLatencyMS / 1_000)
         let latencyBeats = latencySeconds * max(document.session.bpm, 1) / 60
         let correctedTransportBeat = max(0, capture.startBeat - latencyBeats)
         let beat = activeWorkspace == "PATTERN" ? 0 : songBeat(forTransportBeat: correctedTransportBeat)
-        Task { @MainActor in
-            do {
+        do {
                 var imported = try await LYAudioImporter.importFile(at: capture.url)
                 imported.displayName = "RECORDING " + String(format: "%02d", document.session.tracks.flatMap(\.clips).filter { $0.name.hasPrefix("RECORDING") }.count + 1)
-                guard let firstTrack = capture.targetTrackIDs.first else { return }
+                let firstTrack = capture.targetTrackID
                 let firstClipID = document.addImportedAudio(imported, toTrackID: firstTrack, atBeat: beat)
                 guard let firstTrackIndex = document.session.tracks.firstIndex(where: { $0.id == firstTrack }),
-                      let firstClipIndex = document.session.tracks[firstTrackIndex].clips.firstIndex(where: { $0.id == firstClipID }) else { return }
+                      let firstClipIndex = document.session.tracks[firstTrackIndex].clips.firstIndex(where: { $0.id == firstClipID }) else { return false }
 
                 var clip = document.session.tracks[firstTrackIndex].clips[firstClipIndex]
                 configureRecordedTakes(&clip, imported: imported, settings: settings)
                 document.session.tracks[firstTrackIndex].clips[firstClipIndex] = clip
-
-                // Multiple armed tracks receive independent events that refer
-                // to the same immutable captured source instead of duplicating
-                // potentially gigabytes of audio.
-                for trackID in capture.targetTrackIDs.dropFirst() {
-                    guard let target = document.session.tracks.firstIndex(where: { $0.id == trackID }) else { continue }
-                    var copy = clip
-                    copy.id = UUID()
-                    document.session.tracks[target].clips.append(copy)
-                }
-                LYRecordingJournal.complete(projectID: document.session.id)
-            } catch {
-                audioImportError = error.localizedDescription
-            }
+                return true
+        } catch {
+            audioImportError = error.localizedDescription
+            return false
         }
     }
 
@@ -1125,12 +1170,16 @@ struct WorkspaceView: View {
             return
         }
         notice = "RECOVERING INTERRUPTED RECORDING"
-        placeRecordedAudio(LYRecordedAudioCapture(
-            url: URL(fileURLWithPath: entry.filePath),
-            startBeat: 0,
-            targetTrackIDs: targets,
-            measuredLatencySeconds: 0
-        ))
+        let files = entry.files ?? targets.map {
+            LYRecordingJournal.Entry.File(trackID: $0, inputChannel: 0, filePath: entry.filePath)
+        }
+        placeRecordedAudio(files.filter { targets.contains($0.trackID) && FileManager.default.fileExists(atPath: $0.filePath) }.map { file in
+            LYRecordedAudioCapture(
+                url: URL(fileURLWithPath: file.filePath), startBeat: 0,
+                targetTrackID: file.trackID, inputChannel: file.inputChannel,
+                measuredLatencySeconds: 0
+            )
+        })
     }
 
     private func configureRecordedTakes(
@@ -1201,6 +1250,35 @@ struct WorkspaceView: View {
             }
         default:
             break
+        }
+    }
+
+    /// Replaces a missing or damaged audio file. Every event and take that
+    /// names it plays the new file.
+    private func relinkAudio(named name: String) {
+        let panel = NSOpenPanel()
+        panel.title = "RELINK " + name.uppercased()
+        panel.message = "Choose the audio file to use for \(name)."
+        panel.prompt = "RELINK"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try document.relinkAudio(named: name, from: url)
+            audio.syncTimeline(document.session, media: document.audioMediaStore)
+            notice = "RELINKED " + name.uppercased()
+        } catch {
+            audioImportError = "Could not relink \(name): \(error.localizedDescription)"
+        }
+    }
+
+    private func removeUnusedAudio() {
+        do {
+            let moved = try document.cleanupOrphanedAudio()
+            notice = moved.isEmpty ? "NO UNUSED AUDIO" : "MOVED \(moved.count) UNUSED AUDIO FILE\(moved.count == 1 ? "" : "S") TO THE TRASH"
+        } catch {
+            audioImportError = "Could not move unused audio: \(error.localizedDescription)"
         }
     }
 
@@ -2615,6 +2693,10 @@ private struct BrowserPanel: View {
     @Binding var selection: String
     @Binding var selectedItem: String
     let projectAudio: [String]
+    var missingAudio: [String] = []
+    var unusedAudio: [String] = []
+    var onRelink: (String) -> Void = { _ in }
+    var onRemoveUnused: () -> Void = {}
     let onEffect: (String) -> Void
     let onSound: (String) -> Void
     let onAudioUnit: (LYAudioUnitDescriptor) -> Void
@@ -2729,14 +2811,36 @@ private struct BrowserPanel: View {
         case "AU FX":
             pluginRows(plugins.effects, empty: "NO AUDIO UNIT EFFECTS FOUND")
         default:
-            let files = filter(projectAudio.sorted())
-            if files.isEmpty {
+            let missing = filter(missingAudio)
+            if !missing.isEmpty {
+                section("MISSING  ·  CLICK TO RELINK")
+                ForEach(missing, id: \.self) { name in
+                    row(name.uppercased(), detail: "RELINK…", color: LYLLTHTheme.record, symbol: "exclamationmark.triangle")
+                        .simultaneousGesture(TapGesture().onEnded { onRelink(name) })
+                        .help("Choose the file to use for \(name). Every event and take that uses it keeps working.")
+                }
+            }
+            let unused = Set(unusedAudio)
+            let files = filter(projectAudio.sorted()).filter { !missingAudio.contains($0) && !unused.contains($0) }
+            if files.isEmpty && missing.isEmpty && unused.isEmpty {
                 emptyNote("NO AUDIO IN THIS PROJECT YET\nDRAG A FILE ONTO AN AUDIO TRACK")
-            } else {
+            } else if !files.isEmpty {
                 section("AUDIO")
                 ForEach(files, id: \.self) { name in
                     row(name.uppercased(), detail: nil, color: LYLLTHTheme.purple, symbol: "waveform")
                 }
+            }
+            let unusedShown = filter(unusedAudio)
+            if !unusedShown.isEmpty {
+                section("UNUSED  ·  NOTHING PLAYS THESE")
+                ForEach(unusedShown, id: \.self) { name in
+                    row(name.uppercased(), detail: nil, color: LYLLTHTheme.dim, symbol: "waveform")
+                }
+                Button("MOVE UNUSED TO TRASH", action: onRemoveUnused)
+                    .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.purple, compact: true))
+                    .help("Moves \(unusedAudio.count) unused audio file(s) to the Trash. The saved song keeps them until you save.")
+                    .padding(.horizontal, 14)
+                    .padding(.top, 6)
             }
         }
     }
@@ -2751,6 +2855,16 @@ private struct BrowserPanel: View {
                 row(descriptor.name.uppercased(), detail: descriptor.manufacturer.uppercased(), color: LYLLTHTheme.indigo, symbol: "square.stack.3d.up")
                     .simultaneousGesture(TapGesture().onEnded { onAudioUnit(descriptor) })
                     .help("Load \(descriptor.name) on the selected track")
+            }
+        }
+        let instruments = descriptors.first?.isInstrument ?? (selection == "AU INST")
+        let quarantined = plugins.quarantined.filter { $0.isInstrument == instruments && matches($0.name) }
+        if !quarantined.isEmpty {
+            section("QUARANTINED  ·  CLICK TO RESET")
+            ForEach(quarantined) { descriptor in
+                row(descriptor.name.uppercased(), detail: "FAILED TO LOAD 3 TIMES · RESET", color: LYLLTHTheme.record, symbol: "exclamationmark.octagon")
+                    .simultaneousGesture(TapGesture().onEnded { plugins.resetQuarantine(descriptor) })
+                    .help("Clear \(descriptor.name)'s failures so it can be loaded again")
             }
         }
     }

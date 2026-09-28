@@ -52,6 +52,71 @@ final class SessionDocumentTests: XCTestCase {
         XCTAssertEqual(recovered.session.tracks, source.session.tracks)
     }
 
+    func testCorruptPrimaryAndRecoveryFallBackToPreviousBackup() throws {
+        let source = LYLLTHSessionDocument(session: .starter())
+        let wrapper = try source.packageFileWrapper()
+        var children = try XCTUnwrap(wrapper.fileWrappers)
+        children["project.json"] = FileWrapper(regularFileWithContents: Data("bad".utf8))
+        children["Recovery"] = FileWrapper(directoryWithFileWrappers: [
+            "project.json": FileWrapper(regularFileWithContents: Data("also bad".utf8))
+        ])
+
+        let recovered = try LYLLTHSessionDocument(fileWrapper: FileWrapper(directoryWithFileWrappers: children))
+
+        XCTAssertEqual(recovered.session.id, source.session.id)
+        XCTAssertEqual(recovered.session.tracks, source.session.tracks)
+    }
+
+    func testMissingMediaOpensAsRelinkablePlaceholder() throws {
+        var source = LYLLTHSessionDocument(session: .starter())
+        let imported = LYImportedAudio(fileName: "voice.wav", displayName: "VOICE", data: Data([1, 2, 3]),
+                                       duration: 1, sampleRate: 48_000, channelCount: 1,
+                                       waveformPeaks: [0.5], sourceBPM: nil, beatMap: nil)
+        _ = source.addImportedAudio(imported, toTrackID: nil, atBeat: 0)
+        let wrapper = try source.packageFileWrapper()
+        var children = try XCTUnwrap(wrapper.fileWrappers)
+        children["Audio"] = FileWrapper(directoryWithFileWrappers: [:])
+
+        var opened = try LYLLTHSessionDocument(fileWrapper: FileWrapper(directoryWithFileWrappers: children))
+
+        XCTAssertEqual(opened.missingAudioNames, ["voice.wav"])
+        XCTAssertEqual(opened.mediaIntegrityIssues, [LYMediaIntegrityIssue(kind: .missing, name: "voice.wav")])
+        let replacement = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+        defer { try? FileManager.default.removeItem(at: replacement) }
+        try Data([9, 8, 7]).write(to: replacement)
+        try opened.relinkAudio(named: "voice.wav", from: replacement)
+        XCTAssertTrue(opened.missingAudioNames.isEmpty)
+        XCTAssertEqual(opened.audioData(for: "voice.wav"), Data([9, 8, 7]))
+    }
+
+    func testOrphanCleanupKeepsReferencedTakeSources() throws {
+        var document = LYLLTHSessionDocument(session: .starter())
+        let used = LYImportedAudio(fileName: "used.wav", displayName: "USED", data: Data([1]), duration: 1,
+                                   sampleRate: 48_000, channelCount: 1, waveformPeaks: [], sourceBPM: nil, beatMap: nil)
+        _ = document.addImportedAudio(used, toTrackID: nil, atBeat: 0)
+        document.audioAssets["orphan.wav"] = Data([2])
+
+        let discard = LYProjectMediaStore.discard
+        LYProjectMediaStore.discard = { try FileManager.default.removeItem(at: $0) }
+        defer { LYProjectMediaStore.discard = discard }
+        XCTAssertEqual(document.orphanedAudioNames, ["orphan.wav"])
+        XCTAssertEqual(try document.cleanupOrphanedAudio(), ["orphan.wav"])
+        XCTAssertEqual(document.audioAssetNames, ["used.wav"])
+    }
+
+    func testUndoNamesDescribeProfessionalActions() {
+        let original = LYLLTHSession.starter()
+        var tempo = original
+        tempo.bpm = 131
+        XCTAssertEqual(LYUndoActionName.describe(from: original, to: tempo), "Change Tempo")
+        var volume = original
+        volume.tracks[0].volumeDB -= 2
+        XCTAssertEqual(LYUndoActionName.describe(from: original, to: volume), "Adjust Track Volume")
+        var clip = original
+        clip.tracks[0].clips[0].lengthBeats += 1
+        XCTAssertEqual(LYUndoActionName.describe(from: original, to: clip), "Edit Region")
+    }
+
     func testMediaStoreIsFileBackedAndPackageRoundTrips() throws {
         var document = LYLLTHSessionDocument(session: .starter())
         let imported = LYImportedAudio(
@@ -103,6 +168,33 @@ final class SessionDocumentTests: XCTestCase {
         XCTAssertEqual(reopened.session.tracks[audioIndex].clips[0].takes, [take])
         XCTAssertEqual(reopened.session.tracks[0].inserts.last?.state, Data([1, 2, 3]))
         XCTAssertEqual(reopened.session.tracks[0].inserts.last?.reportedLatencySeconds, 0.012)
+    }
+
+    func testTakeLanePromotionBuildsNonDestructiveComp() throws {
+        let first = LYAudioTake(name: "TAKE 01", sourceRelativePath: "take.caf",
+                                sourceStartSeconds: 0, durationSeconds: 4)
+        let second = LYAudioTake(name: "TAKE 02", sourceRelativePath: "take.caf",
+                                 sourceStartSeconds: 4, durationSeconds: 4)
+        var clip = LYClip(name: "REC", kind: .audio, startBeat: 0, lengthBeats: 8,
+                          sourceRelativePath: "take.caf")
+        clip.takes = [first, second]
+        clip.activeTakeID = first.id
+        clip.compSegments = [LYCompSegment(startBeat: 0, lengthBeats: 8, takeID: first.id)]
+
+        let comp = LYTakeLaneEditor.promote(takeID: second.id, from: 2, to: 5, in: clip)
+
+        XCTAssertEqual(comp.compSegments?.map(\.startBeat), [0, 2, 5])
+        XCTAssertEqual(comp.compSegments?.map(\.lengthBeats), [2, 3, 3])
+        XCTAssertEqual(comp.compSegments?.map(\.takeID), [first.id, second.id, first.id])
+        XCTAssertEqual(comp.takes, clip.takes, "comping never rewrites source takes")
+    }
+
+    func testPerTrackAudioInputsRoundTrip() throws {
+        var session = LYLLTHSession.starter()
+        let audio = try XCTUnwrap(session.tracks.firstIndex(where: { $0.kind == .audio }))
+        session.tracks[audio].audioInputChannel = 3
+        let back = try JSONDecoder().decode(LYLLTHSession.self, from: JSONEncoder().encode(session))
+        XCTAssertEqual(back.tracks[audio].audioInputChannel, 3)
     }
 
     func testStarterExposesFullDesktopSequencer() {
@@ -628,5 +720,94 @@ final class BlankSongTests: XCTestCase {
             XCTAssertEqual(track.songRegions.count, 1, track.name)
         }
         XCTAssertFalse(session.hasPatternsOutsideSong)
+    }
+}
+
+@MainActor
+final class AudioUnitValidationTests: XCTestCase {
+    private func storeURL() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("au-validation-\(UUID().uuidString).json")
+    }
+
+    func testThreeFailuresQuarantineAndSuccessClears() {
+        let url = storeURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = LYAudioUnitValidationStore(url: url)
+        let error = NSError(domain: "test", code: 1)
+        for _ in 0..<2 { store.registerFailure("aufx:test", error: error) }
+        XCTAssertFalse(store.isQuarantined("aufx:test"))
+        store.registerFailure("aufx:test", error: error)
+        XCTAssertTrue(store.isQuarantined("aufx:test"))
+        XCTAssertTrue(LYAudioUnitValidationStore(url: url).isQuarantined("aufx:test"), "quarantine survives relaunch")
+        store.reset("aufx:test")
+        XCTAssertFalse(LYAudioUnitValidationStore(url: url).isQuarantined("aufx:test"))
+    }
+
+    func testALoadThatNeverFinishedCountsAsAFailureNextLaunch() {
+        let url = storeURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        LYAudioUnitValidationStore(url: url).beginLoad("aumu:crashy")
+        // LYLLTH "crashed" here: the load never ended.
+        let relaunched = LYAudioUnitValidationStore(url: url)
+        XCTAssertEqual(relaunched.records["aumu:crashy"]?.consecutiveFailures, 1)
+        XCTAssertEqual(LYAudioUnitValidationStore(url: url).records["aumu:crashy"]?.consecutiveFailures, 1,
+                       "counted once, not on every later launch")
+    }
+
+    func testAFinishedLoadIsNotCountedAsACrash() {
+        let url = storeURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = LYAudioUnitValidationStore(url: url)
+        store.beginLoad("aufx:fine")
+        store.registerSuccess("aufx:fine")
+        XCTAssertEqual(LYAudioUnitValidationStore(url: url).records["aufx:fine"]?.consecutiveFailures, 0)
+    }
+}
+
+final class CompPlaybackTests: XCTestCase {
+    private func loopRecording() -> (LYClip, LYAudioTake, LYAudioTake) {
+        let first = LYAudioTake(name: "TAKE 01", sourceRelativePath: "rec.caf", sourceStartSeconds: 0, durationSeconds: 4)
+        let second = LYAudioTake(name: "TAKE 02", sourceRelativePath: "rec.caf", sourceStartSeconds: 4, durationSeconds: 4)
+        var clip = LYClip(name: "REC", kind: .audio, startBeat: 8, lengthBeats: 8,
+                          sourceRelativePath: "rec.caf", sourceStartSeconds: 0, sourceDurationSeconds: 4)
+        clip.takes = [first, second]
+        clip.activeTakeID = first.id
+        clip.compSegments = [LYCompSegment(startBeat: 0, lengthBeats: 8, takeID: first.id)]
+        return (clip, first, second)
+    }
+
+    func testCompPlaysEachSectionFromItsTake() {
+        let (clip, first, second) = loopRecording()
+        let comp = LYTakeLaneEditor.promote(takeID: second.id, from: 2, to: 5, in: clip)
+        let pieces = LYTakeLaneEditor.pieces(of: comp)
+
+        XCTAssertEqual(pieces.map(\.startBeat), [8, 10, 13])
+        XCTAssertEqual(pieces.map(\.lengthBeats), [2, 3, 3])
+        XCTAssertEqual(pieces.map(\.sourceStartSeconds), [first.sourceStartSeconds, second.sourceStartSeconds, first.sourceStartSeconds])
+        // Each piece enters its take where the section falls in the region.
+        XCTAssertEqual(pieces.map(\.loopOffsetBeats), [0, 2, 5])
+        XCTAssertEqual(pieces[0].fadeOutSeconds, LYTakeLaneEditor.compSeamSeconds)
+        XCTAssertEqual(pieces[1].fadeInSeconds, LYTakeLaneEditor.compSeamSeconds)
+        XCTAssertTrue(pieces.allSatisfy { $0.compSegments == nil && $0.takes == nil })
+    }
+
+    func testChoosingAWholeTakeChangesWhatPlays() {
+        let (clip, _, second) = loopRecording()
+        let chosen = LYTakeLaneEditor.chooseWholeTake(second.id, in: clip)
+        XCTAssertEqual(LYTakeLaneEditor.pieces(of: chosen).map(\.sourceStartSeconds), [second.sourceStartSeconds])
+    }
+
+    func testPunchTrimCarriesToEveryTake() {
+        var (clip, _, second) = loopRecording()
+        clip.sourceStartSeconds = 1  // punched in one second into the pass
+        let chosen = LYTakeLaneEditor.chooseWholeTake(second.id, in: clip)
+        XCTAssertEqual(LYTakeLaneEditor.pieces(of: chosen).first?.sourceStartSeconds, 5)
+    }
+
+    func testPlainRegionsAreUntouched() {
+        var session = LYLLTHSession.starter()
+        let audio = session.tracks.firstIndex { $0.kind == .audio }!
+        session.tracks[audio].clips = [LYClip(name: "A", kind: .audio, startBeat: 0, lengthBeats: 4, sourceRelativePath: "a.wav")]
+        XCTAssertEqual(session.withCompsExpanded(), session)
     }
 }

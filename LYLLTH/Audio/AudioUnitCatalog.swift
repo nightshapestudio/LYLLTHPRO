@@ -26,11 +26,113 @@ struct LYAudioUnitDescriptor: Identifiable, Hashable {
     }
 }
 
+struct LYAudioUnitValidationRecord: Codable, Equatable {
+    var identifier: String
+    var successfulLoads = 0
+    var consecutiveFailures = 0
+    var lastError: String? = nil
+    var lastChecked = Date()
+    var isQuarantined: Bool { consecutiveFailures >= 3 }
+}
+
+/// Load history for every Audio Unit, shared by the browser and every song
+/// window. A load is marked in flight on disk before it starts, so a plug-in
+/// that crashes or hangs LYLLTH while loading counts as a failure on the
+/// next launch.
+@MainActor
+final class LYAudioUnitValidationStore {
+    static let shared = LYAudioUnitValidationStore()
+
+    private struct Saved: Codable {
+        var records: [String: LYAudioUnitValidationRecord] = [:]
+        var inFlight: [String] = []
+    }
+
+    private(set) var records: [String: LYAudioUnitValidationRecord] = [:]
+    private var inFlight: [String] = []
+    private let url: URL
+
+    init(url: URL? = nil) {
+        let manager = FileManager.default
+        let base = (try? manager.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                     appropriateFor: nil, create: true)) ?? manager.temporaryDirectory
+        self.url = url ?? base.appendingPathComponent("LYLLTH/Audio Unit Validation.json")
+        if let data = try? Data(contentsOf: self.url) {
+            if let saved = try? JSONDecoder().decode(Saved.self, from: data) {
+                records = saved.records
+                // Loads that never finished: LYLLTH quit or crashed mid-load.
+                for identifier in saved.inFlight { recordFailure(identifier, message: "LYLLTH closed while this Audio Unit was loading") }
+                if !saved.inFlight.isEmpty { persist() }
+            } else if let legacy = try? JSONDecoder().decode([String: LYAudioUnitValidationRecord].self, from: data) {
+                records = legacy
+            }
+        }
+    }
+
+    func beginLoad(_ identifier: String) {
+        inFlight.append(identifier)
+        persist()
+    }
+
+    func endLoad(_ identifier: String) {
+        if let index = inFlight.firstIndex(of: identifier) { inFlight.remove(at: index) }
+    }
+
+    func isQuarantined(_ identifier: String) -> Bool { records[identifier]?.isQuarantined == true }
+
+    func registerSuccess(_ identifier: String) {
+        endLoad(identifier)
+        var record = records[identifier] ?? LYAudioUnitValidationRecord(identifier: identifier)
+        record.successfulLoads += 1
+        record.consecutiveFailures = 0
+        record.lastError = nil
+        record.lastChecked = Date()
+        records[identifier] = record
+        persist()
+    }
+
+    func registerFailure(_ identifier: String, error: Error) {
+        endLoad(identifier)
+        recordFailure(identifier, message: error.localizedDescription)
+        persist()
+    }
+
+    private func recordFailure(_ identifier: String, message: String) {
+        var record = records[identifier] ?? LYAudioUnitValidationRecord(identifier: identifier)
+        record.consecutiveFailures += 1
+        record.lastError = message
+        record.lastChecked = Date()
+        records[identifier] = record
+    }
+
+    func reset(_ identifier: String) {
+        records.removeValue(forKey: identifier)
+        persist()
+    }
+
+    private func persist() {
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(Saved(records: records, inFlight: inFlight)).write(to: url, options: .atomic)
+        } catch {
+            #if DEBUG
+            NSLog("[AUDIO UNIT VALIDATION] %@", error.localizedDescription)
+            #endif
+        }
+    }
+}
+
 @MainActor
 final class AudioUnitCatalog: ObservableObject {
     @Published private(set) var instruments: [LYAudioUnitDescriptor] = []
     @Published private(set) var effects: [LYAudioUnitDescriptor] = []
     @Published private(set) var isScanning = false
+    @Published private(set) var quarantined: [LYAudioUnitDescriptor] = []
+    private let validation: LYAudioUnitValidationStore
+
+    init(validation: LYAudioUnitValidationStore = .shared) {
+        self.validation = validation
+    }
 
     func scan() {
         guard !isScanning else { return }
@@ -56,9 +158,17 @@ final class AudioUnitCatalog: ObservableObject {
             )
         }
 
-        instruments = mapped.filter(\.isInstrument).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        effects = mapped.filter { !$0.isInstrument }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        quarantined = mapped.filter { validation.isQuarantined($0.id) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let available = mapped.filter { !validation.isQuarantined($0.id) }
+        instruments = available.filter(\.isInstrument).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        effects = available.filter { !$0.isInstrument }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         isScanning = false
+    }
+
+    func resetQuarantine(_ descriptor: LYAudioUnitDescriptor) {
+        validation.reset(descriptor.id)
+        scan()
     }
 }
 
@@ -114,6 +224,17 @@ final class LYAudioUnitHost: ObservableObject {
     private var instruments: [UUID: LYHostedAudioUnitInstrument] = [:]
     private var observers: [UUID: AUParameterObserverToken] = [:]
     private var stateWork: DispatchWorkItem?
+    private let validation = LYAudioUnitValidationStore.shared
+
+    struct Parameter: Identifiable, Hashable {
+        var id: AUParameterAddress { address }
+        var slotID: UUID
+        var address: AUParameterAddress
+        var name: String
+        var minimum: AUValue
+        var maximum: AUValue
+        var value: AUValue
+    }
 
     func install(
         _ descriptor: LYAudioUnitDescriptor,
@@ -131,7 +252,7 @@ final class LYAudioUnitHost: ObservableObject {
             throw NSError(domain: "LYLLTH.AudioUnitHost", code: 2,
                           userInfo: [NSLocalizedDescriptionKey: "Audio Unit instruments require an instrument track."])
         }
-        let unit = try await instantiate(descriptor.componentDescription)
+        let unit = try await load(identifier: descriptor.id, description: descriptor.componentDescription)
         var slot = LYPluginSlot(
             format: .audioUnit,
             identifier: descriptor.id,
@@ -169,7 +290,7 @@ final class LYAudioUnitHost: ObservableObject {
             guard let channel = LYChannelMap.channels(in: session).first(where: { $0.trackID == session.tracks[trackIndex].id })?.index else { continue }
             if var slot = session.tracks[trackIndex].instrumentPlugin {
                 do {
-                    let unit = try await instantiate(Self.description(for: slot))
+                    let unit = try await load(identifier: slot.identifier, description: Self.description(for: slot))
                     Self.apply(slot.state, to: unit)
                     slot.validationError = nil
                     slot.reportedLatencySeconds = unit.auAudioUnit.latency
@@ -188,7 +309,7 @@ final class LYAudioUnitHost: ObservableObject {
             where session.tracks[trackIndex].inserts[slotIndex].format == .audioUnit {
                 var slot = session.tracks[trackIndex].inserts[slotIndex]
                 do {
-                    let unit = try await instantiate(Self.description(for: slot))
+                    let unit = try await load(identifier: slot.identifier, description: Self.description(for: slot))
                     Self.apply(slot.state, to: unit)
                     slot.validationError = nil
                     slot.reportedLatencySeconds = unit.auAudioUnit.latency
@@ -237,6 +358,24 @@ final class LYAudioUnitHost: ObservableObject {
         }
     }
 
+    func parameters(slotID: UUID) -> [Parameter] {
+        guard let parameters = units[slotID]?.auAudioUnit.parameterTree?.allParameters else { return [] }
+        return parameters.map {
+            Parameter(slotID: slotID, address: $0.address, name: $0.displayName,
+                      minimum: $0.minValue, maximum: $0.maxValue, value: $0.value)
+        }
+    }
+
+    /// Values in project automation are normalized so a plug-in update can
+    /// change its display units without invalidating the lane.
+    func scheduleParameter(slotID: UUID, address: AUParameterAddress, normalizedValue: Double,
+                           hostTime: UInt64) {
+        guard let parameter = units[slotID]?.auAudioUnit.parameterTree?.parameter(withAddress: address) else { return }
+        let unit = AUValue(min(max(normalizedValue, 0), 1))
+        let value = parameter.minValue + unit * (parameter.maxValue - parameter.minValue)
+        parameter.setValue(value, originator: nil, atHostTime: hostTime, eventType: .value)
+    }
+
     private func applyEffects(for track: LYTrack, channel: Int, engine: NightshapeAudioEngine) throws {
         let chain = track.inserts.compactMap { slot -> AVAudioUnit? in
             guard slot.format == .audioUnit, slot.isBypassed == false else { return nil }
@@ -272,7 +411,37 @@ final class LYAudioUnitHost: ObservableObject {
         engine.applyPluginDelayCompensation(secondsByTrack: totals)
     }
 
-    private func instantiate(_ description: AudioComponentDescription) async throws -> AVAudioUnit {
+    /// Loads a unit through quarantine: refused while quarantined, marked in
+    /// flight on disk while loading, and failed after a timeout so a hung
+    /// plug-in cannot stall the song.
+    private func load(identifier: String, description: AudioComponentDescription) async throws -> AVAudioUnit {
+        guard !validation.isQuarantined(identifier) else {
+            throw NSError(domain: "LYLLTH.AudioUnitHost", code: 4, userInfo: [NSLocalizedDescriptionKey:
+                "QUARANTINED AFTER REPEATED LOAD FAILURES. RESET IT UNDER QUARANTINED AUDIO UNITS IN THE LIBRARY."])
+        }
+        validation.beginLoad(identifier)
+        do {
+            let unit = try await withThrowingTaskGroup(of: AVAudioUnit.self) { group in
+                group.addTask { try await self.instantiate(description) }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(Self.loadTimeoutSeconds))
+                    throw NSError(domain: "LYLLTH.AudioUnitHost", code: 5,
+                                  userInfo: [NSLocalizedDescriptionKey: "The Audio Unit did not finish loading in \(Int(Self.loadTimeoutSeconds)) seconds."])
+                }
+                defer { group.cancelAll() }
+                return try await group.next()!
+            }
+            validation.registerSuccess(identifier)
+            return unit
+        } catch {
+            validation.registerFailure(identifier, error: error)
+            throw error
+        }
+    }
+
+    static let loadTimeoutSeconds = 20.0
+
+    private nonisolated func instantiate(_ description: AudioComponentDescription) async throws -> AVAudioUnit {
         try await withCheckedThrowingContinuation { continuation in
             AVAudioUnit.instantiate(with: description, options: [.loadOutOfProcess]) { unit, error in
                 if let unit { continuation.resume(returning: unit) }

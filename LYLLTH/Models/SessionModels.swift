@@ -167,6 +167,100 @@ struct LYCompSegment: Codable, Identifiable, Equatable {
     var takeID: UUID
 }
 
+enum LYTakeLaneEditor {
+    /// Promotes a take across a beat range, splitting existing comp pieces
+    /// without changing or rewriting any source recording.
+    static func promote(takeID: UUID, from startBeat: Double, to endBeat: Double,
+                        in source: LYClip) -> LYClip {
+        guard source.kind == .audio, (source.takes ?? []).contains(where: { $0.id == takeID }) else { return source }
+        var clip = source
+        let start = min(max(startBeat, 0), clip.lengthBeats)
+        let end = min(max(endBeat, start), clip.lengthBeats)
+        guard end - start > 0.000_001 else { return clip }
+        let fallback = clip.activeTakeID ?? takeID
+        let existing = (clip.compSegments?.isEmpty == false ? clip.compSegments! : [
+            LYCompSegment(startBeat: 0, lengthBeats: clip.lengthBeats, takeID: fallback)
+        ])
+        var boundaries = Set([0.0, clip.lengthBeats, start, end])
+        for segment in existing {
+            boundaries.insert(min(max(segment.startBeat, 0), clip.lengthBeats))
+            boundaries.insert(min(max(segment.startBeat + segment.lengthBeats, 0), clip.lengthBeats))
+        }
+        let sorted = boundaries.sorted()
+        var result: [LYCompSegment] = []
+        for pair in zip(sorted, sorted.dropFirst()) where pair.1 - pair.0 > 0.000_001 {
+            let midpoint = (pair.0 + pair.1) * 0.5
+            let chosen = midpoint >= start && midpoint < end ? takeID :
+                (existing.first { midpoint >= $0.startBeat && midpoint < $0.startBeat + $0.lengthBeats }?.takeID ?? fallback)
+            if let last = result.indices.last, result[last].takeID == chosen,
+               abs(result[last].startBeat + result[last].lengthBeats - pair.0) < 0.000_001 {
+                result[last].lengthBeats += pair.1 - pair.0
+            } else {
+                result.append(LYCompSegment(startBeat: pair.0, lengthBeats: pair.1 - pair.0, takeID: chosen))
+            }
+        }
+        clip.compSegments = result
+        clip.activeTakeID = takeID
+        return clip
+    }
+
+    static func chooseWholeTake(_ takeID: UUID, in source: LYClip) -> LYClip {
+        promote(takeID: takeID, from: 0, to: source.lengthBeats, in: source)
+    }
+
+    /// Fade at each cut inside a comp, so switching takes never clicks.
+    static let compSeamSeconds = 0.005
+
+    /// What a comped region plays: one piece per comp segment, each reading
+    /// its own take from where the segment falls. A region without a comp
+    /// plays as it is.
+    static func pieces(of clip: LYClip) -> [LYClip] {
+        guard clip.kind == .audio, let takes = clip.takes, !takes.isEmpty,
+              let segments = clip.compSegments, !segments.isEmpty else { return [clip] }
+        // A punch-in trims the region inside its take; every take is trimmed
+        // the same way, since loop passes are the same length.
+        let base = takes.first {
+            $0.sourceRelativePath == clip.sourceRelativePath
+                && clip.sourceStartSeconds >= $0.sourceStartSeconds - 0.000_001
+                && clip.sourceStartSeconds < $0.sourceStartSeconds + $0.durationSeconds
+        }
+        let trim = base.map { clip.sourceStartSeconds - $0.sourceStartSeconds } ?? 0
+        let ordered = segments.sorted { $0.startBeat < $1.startBeat }
+        let pieces = ordered.enumerated().compactMap { index, segment -> LYClip? in
+            guard let take = takes.first(where: { $0.id == segment.takeID }),
+                  segment.lengthBeats > 0.000_001 else { return nil }
+            var piece = clip
+            piece.id = segment.id
+            piece.startBeat = clip.startBeat + segment.startBeat
+            piece.lengthBeats = min(segment.lengthBeats, clip.lengthBeats - segment.startBeat)
+            piece.sourceRelativePath = take.sourceRelativePath
+            piece.sourceStartSeconds = take.sourceStartSeconds + trim
+            piece.sourceDurationSeconds = clip.sourceDurationSeconds
+            piece.loopOffsetBeats = clip.loopOffsetBeats + segment.startBeat
+            piece.fadeInSeconds = index == 0 ? clip.fadeInSeconds : compSeamSeconds
+            piece.fadeOutSeconds = index == ordered.count - 1 ? clip.fadeOutSeconds : compSeamSeconds
+            piece.takes = nil
+            piece.compSegments = nil
+            piece.normalizeAudioEvent()
+            return piece
+        }
+        return pieces.isEmpty ? [clip] : pieces
+    }
+}
+
+extension LYLLTHSession {
+    /// The song as playback and export hear it: comped regions become one
+    /// plain region per comp segment.
+    func withCompsExpanded() -> LYLLTHSession {
+        guard tracks.contains(where: { $0.clips.contains { ($0.compSegments?.isEmpty == false) && $0.kind == .audio } }) else { return self }
+        var copy = self
+        for index in copy.tracks.indices where copy.tracks[index].kind == .audio {
+            copy.tracks[index].clips = copy.tracks[index].clips.flatMap(LYTakeLaneEditor.pieces(of:))
+        }
+        return copy
+    }
+}
+
 struct LYRecordingSettings: Codable, Equatable {
     /// Bars heard before the record downbeat. Zero starts immediately.
     var preRollBars = 1
@@ -1088,6 +1182,9 @@ struct LYTrack: Codable, Identifiable, Equatable {
     var isSolo = false
     /// Record arm. Optional preserves older documents.
     var isRecordArmed: Bool? = nil
+    /// Zero-based hardware input for this audio track. Optional migrates to
+    /// the session's legacy shared input selection.
+    var audioInputChannel: Int? = nil
     var inputName: String?
     var isChordTrack: Bool? = nil
     var chordPresetID: String? = nil

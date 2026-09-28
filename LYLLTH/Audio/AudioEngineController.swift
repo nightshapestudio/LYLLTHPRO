@@ -23,8 +23,18 @@ final class AudioEngineController: ObservableObject {
         let player = LYAutomationPlayer(engine: engine)
         player.instrument = { [weak self] id in self?.instruments[id] }
         player.songBeat = { [weak self] in self?.currentSongBeat() }
+        player.window = { [weak self] in
+            guard let self, self.transportMode == .song else { return nil }
+            return self.songWindow
+        }
         return player
     }()
+
+    func connectAudioUnitHost(_ host: LYAudioUnitHost) {
+        automationPlayer.pluginParameter = { [weak host] slot, address, value, hostTime in
+            host?.scheduleParameter(slotID: slot, address: address, normalizedValue: value, hostTime: hostTime)
+        }
+    }
     private lazy var timeline: LYTimelineAudioPlayer = {
         let player = LYTimelineAudioPlayer(engine: engine)
         player.onRenderError = { [weak self] message in self?.audioEventError = message }

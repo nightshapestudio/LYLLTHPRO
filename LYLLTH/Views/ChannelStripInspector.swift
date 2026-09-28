@@ -163,6 +163,7 @@ struct ChannelStripInspector: View {
 
     private enum RoutingMenu { case addSend(UUID), output(UUID) }
     @State private var routingMenu: RoutingMenu?
+    @State private var takeEditorTrackID: UUID?
     @State private var anchors: [String: CGRect] = [:]
     static let space = "LYInspector"
 
@@ -191,11 +192,29 @@ struct ChannelStripInspector: View {
         .overlay(alignment: .trailing) { Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1) }
         .coordinateSpace(name: Self.space)
         .onPreferenceChange(LYMenuAnchorKey.self) { anchors = $0 }
-        .overlay { routingOverlay }
-        .onChange(of: selectedTrackID) { _, _ in routingMenu = nil }
+        .overlay {
+            ZStack {
+                routingOverlay
+                takeEditorOverlay
+            }
+        }
+        .onChange(of: selectedTrackID) { _, _ in routingMenu = nil; takeEditorTrackID = nil }
     }
 
     // MARK: Routing
+
+    @ViewBuilder
+    private var takeEditorOverlay: some View {
+        if let trackID = takeEditorTrackID,
+           let trackIndex = session.tracks.firstIndex(where: { $0.id == trackID }),
+           let clipIndex = session.tracks[trackIndex].clips.lastIndex(where: { ($0.takes?.count ?? 0) > 1 }) {
+            Color.black.opacity(0.68).contentShape(Rectangle()).onTapGesture { takeEditorTrackID = nil }
+            LYTakeLanePanel(clip: $session.tracks[trackIndex].clips[clipIndex]) {
+                takeEditorTrackID = nil
+            }
+            .padding(12)
+        }
+    }
 
     @ViewBuilder
     private var routingOverlay: some View {
@@ -315,7 +334,7 @@ struct ChannelStripInspector: View {
                 : (track.kind == .drumkit ? { openDrums(track.id) }
                 : (track.kind == .instrument || track.synth != nil ? { openSynth(track.id) } : nil)),
             takeLabel: takeLabel(for: track),
-            cycleTake: track.kind == .audio ? { cycleTake(trackIndex: index) } : nil,
+            cycleTake: track.kind == .audio ? { takeEditorTrackID = track.id } : nil,
             rack: rack,
             reverb: session.reverb ?? .neutral,
             isMain: false,
@@ -410,10 +429,11 @@ struct ChannelStripInspector: View {
     private func cycleInput(trackIndex: Int) {
         guard session.tracks.indices.contains(trackIndex) else { return }
         let count = max(audio.engine.inputConfiguration()?.channelCount ?? 1, 1)
-        var settings = session.recordingSettings ?? LYRecordingSettings()
-        settings.inputChannel = (settings.inputChannel + 1) % count
-        session.recordingSettings = settings
-        session.tracks[trackIndex].inputName = "INPUT \(settings.inputChannel + 1)"
+        let current = session.tracks[trackIndex].audioInputChannel
+            ?? session.recordingSettings?.inputChannel ?? 0
+        let next = (current + 1) % count
+        session.tracks[trackIndex].audioInputChannel = next
+        session.tracks[trackIndex].inputName = "INPUT \(next + 1)"
     }
 
     private func takeLabel(for track: LYTrack) -> String? {
@@ -437,6 +457,63 @@ struct ChannelStripInspector: View {
         clip.sourceDurationSeconds = take.durationSeconds
         clip.compSegments = [LYCompSegment(startBeat: 0, lengthBeats: clip.lengthBeats, takeID: take.id)]
         session.tracks[trackIndex].clips[clipIndex] = clip
+    }
+}
+
+private struct LYTakeLanePanel: View {
+    @Binding var clip: LYClip
+    let close: () -> Void
+    private let slices = 8
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LYNightshapeMenuHeader(eyebrow: clip.name, title: "TAKE LANES · COMP", accent: LYLLTHTheme.purple, close: close)
+            LYNightshapeMenuDivider()
+            VStack(spacing: 6) {
+                ForEach(clip.takes ?? []) { take in
+                    HStack(spacing: 5) {
+                        Button {
+                            clip = LYTakeLaneEditor.chooseWholeTake(take.id, in: clip)
+                        } label: {
+                            Text(take.name)
+                                .font(LYLLTHTheme.label(8, weight: .bold))
+                                .tracking(0.8)
+                                .foregroundStyle(clip.activeTakeID == take.id ? LYLLTHTheme.purple : LYLLTHTheme.text)
+                                .frame(width: 70, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                        ForEach(0..<slices, id: \.self) { index in
+                            let start = clip.lengthBeats * Double(index) / Double(slices)
+                            let end = clip.lengthBeats * Double(index + 1) / Double(slices)
+                            let chosen = takeAt((start + end) * 0.5) == take.id
+                            Button {
+                                clip = LYTakeLaneEditor.promote(takeID: take.id, from: start, to: end, in: clip)
+                            } label: {
+                                Rectangle()
+                                    .fill(chosen ? LYLLTHTheme.purple.opacity(0.75) : LYLLTHTheme.panelRaised)
+                                    .overlay(Rectangle().stroke(chosen ? LYLLTHTheme.purple : LYLLTHTheme.lineStrong, lineWidth: 1))
+                                    .frame(height: 22)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Use \(take.name), section \(index + 1)")
+                        }
+                    }
+                }
+                Text("CLICK A TAKE NAME FOR THE WHOLE REGION · CLICK CELLS TO BUILD A COMP")
+                    .font(LYLLTHTheme.label(6.5, weight: .bold))
+                    .tracking(0.9)
+                    .foregroundStyle(LYLLTHTheme.dim)
+                    .padding(.top, 4)
+            }
+            .padding(12)
+        }
+        .frame(width: 430)
+        .lyNightshapeMenuChrome(accent: LYLLTHTheme.purple)
+    }
+
+    private func takeAt(_ beat: Double) -> UUID? {
+        clip.compSegments?.first { beat >= $0.startBeat && beat < $0.startBeat + $0.lengthBeats }?.takeID
+            ?? clip.activeTakeID
     }
 }
 

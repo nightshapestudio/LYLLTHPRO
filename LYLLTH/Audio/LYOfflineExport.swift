@@ -45,6 +45,7 @@ struct LYOfflineExport {
     /// Resolves every source once: drum sounds rendered, samples on disk,
     /// audio events rendered at the export rate. Stem passes reuse it.
     static func prepare(session: LYLLTHSession, media: LYProjectMediaStore, audio: AudioEngineController) async throws -> LYOfflineExport {
+        let session = session.withCompsExpanded()
         let window = audio.exportWindow(session)
         var export = LYOfflineExport(
             session: session,
@@ -557,6 +558,7 @@ struct LYOfflineExport {
             (track.automation ?? []).filter { lane in
                 guard lane.isActive else { return false }
                 if case .synth = lane.target { return false }
+                if case .plugin = lane.target { return false }
                 return true
             }.map { (track, index, $0) }
         }
@@ -596,6 +598,8 @@ struct LYOfflineExport {
                     entry.kinds.insert(parameter.kind)
                     racks[channel] = entry
                 case .synth:
+                    break
+                case .plugin:
                     break
                 }
             }

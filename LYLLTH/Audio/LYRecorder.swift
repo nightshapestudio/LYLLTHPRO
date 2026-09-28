@@ -16,16 +16,28 @@ struct LYRecordedNote {
 struct LYRecordedAudioCapture {
     var url: URL
     var startBeat: Double
-    var targetTrackIDs: [UUID]
+    var targetTrackID: UUID
+    var inputChannel: Int
     var measuredLatencySeconds: Double
+}
+
+struct LYAudioRecordTarget: Equatable {
+    var trackID: UUID
+    var inputChannel: Int
 }
 
 enum LYRecordingJournal {
     struct Entry: Codable {
+        struct File: Codable {
+            var trackID: UUID
+            var inputChannel: Int
+            var filePath: String
+        }
         var projectID: UUID
         var targetTrackIDs: [UUID]
         var filePath: String
         var startedAt: Date
+        var files: [File]? = nil
     }
 
     private static func url(for projectID: UUID) -> URL {
@@ -36,15 +48,18 @@ enum LYRecordingJournal {
             .appendingPathComponent(projectID.uuidString + ".json")
     }
 
-    static func begin(projectID: UUID, targetTrackIDs: [UUID], fileURL: URL) {
+    static func begin(projectID: UUID, targets: [(LYAudioRecordTarget, URL)]) {
+        guard let first = targets.first else { return }
         let destination = url(for: projectID)
         do {
             try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(Entry(
                 projectID: projectID,
-                targetTrackIDs: targetTrackIDs,
-                filePath: fileURL.path,
-                startedAt: Date()
+                targetTrackIDs: targets.map { $0.0.trackID },
+                filePath: first.1.path,
+                startedAt: Date(),
+                files: targets.map { Entry.File(trackID: $0.0.trackID, inputChannel: $0.0.inputChannel,
+                                          filePath: $0.1.path) }
             )).write(to: destination, options: .atomic)
         } catch {
             #if DEBUG
@@ -56,7 +71,10 @@ enum LYRecordingJournal {
     static func recoverable(projectID: UUID) -> Entry? {
         guard let data = try? Data(contentsOf: url(for: projectID)),
               let entry = try? JSONDecoder().decode(Entry.self, from: data),
-              FileManager.default.fileExists(atPath: entry.filePath) else { return nil }
+              (entry.files ?? [Entry.File(trackID: entry.targetTrackIDs.first ?? UUID(), inputChannel: 0,
+                                    filePath: entry.filePath)]).contains(where: {
+                  FileManager.default.fileExists(atPath: $0.filePath)
+              }) else { return nil }
         return entry
     }
 
@@ -80,7 +98,7 @@ final class LYRecorder: ObservableObject {
     private var transportStartHost: UInt64 = 0
     private weak var recordingEngine: NightshapeAudioEngine?
     private var projectID: UUID?
-    private var targetTrackIDs: [UUID] = []
+    private var audioTargets: [LYAudioRecordTarget] = []
     private var measuredLatencySeconds = 0.0
 
     var isActive: Bool { phase != .idle }
@@ -94,8 +112,7 @@ final class LYRecorder: ObservableObject {
         preRollBeats: Int,
         recordAudio: Bool,
         projectID: UUID,
-        targetTrackIDs: [UUID],
-        inputChannel: Int,
+        audioTargets: [LYAudioRecordTarget],
         inputMonitoring: Bool,
         onError: @escaping (String) -> Void
     ) {
@@ -110,7 +127,7 @@ final class LYRecorder: ObservableObject {
         let countStart = mach_absolute_time() + lead
         transportStartHost = preRollBeats > 0 ? countStart + AVAudioTime.hostTime(forSeconds: beat * Double(preRollBeats)) : countStart
         self.projectID = projectID
-        self.targetTrackIDs = targetTrackIDs
+        self.audioTargets = audioTargets
         measuredLatencySeconds = engine.inputConfiguration()?.measuredLatencySeconds ?? 0
 
         LYMIDIInput.shared.recordHandler = { [weak self] status, data1, data2, host in
@@ -120,11 +137,16 @@ final class LYRecorder: ObservableObject {
         recordingAudio = false
         if recordAudio {
             do {
-                let url = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("LYLLTH-Recording-\(UUID().uuidString).caf")
+                let targets = audioTargets.map { target in
+                    (target, FileManager.default.temporaryDirectory
+                        .appendingPathComponent("LYLLTH-Recording-\(target.trackID.uuidString)-\(UUID().uuidString).caf"))
+                }
                 try engine.setInputMonitoring(inputMonitoring)
-                try engine.beginInputRecording(to: url, channel: inputChannel)
-                LYRecordingJournal.begin(projectID: projectID, targetTrackIDs: targetTrackIDs, fileURL: url)
+                try engine.beginInputRecording(targets: targets.map {
+                    NightshapeAudioEngine.InputRecordingTarget(id: $0.0.trackID, url: $0.1,
+                                                               channel: $0.0.inputChannel)
+                })
+                LYRecordingJournal.begin(projectID: projectID, targets: targets)
                 recordingAudio = true
             } catch {
                 onError("AUDIO INPUT: " + error.localizedDescription.uppercased())
@@ -156,7 +178,7 @@ final class LYRecorder: ObservableObject {
 
     /// Stops recording and the transport. `finish` receives the notes and,
     /// if audio was recorded, its file and the transport beat it starts on.
-    func stop(audio: AudioEngineController, finish: @escaping ([LYRecordedNote], LYRecordedAudioCapture?) -> Void) {
+    func stop(audio: AudioEngineController, finish: @escaping ([LYRecordedNote], [LYRecordedAudioCapture]) -> Void) {
         guard phase != .idle else { return }
         countInTimer?.invalidate()
         countInTimer = nil
@@ -172,21 +194,24 @@ final class LYRecorder: ObservableObject {
         audio.stop()
         try? audio.engine.setInputMonitoring(false)
         phase = .idle
-        guard recordingAudio else { finish(captured, nil); return }
+        guard recordingAudio else { finish(captured, []); return }
         recordingAudio = false
-        audio.engine.endInputRecording { [weak self] result in
+        audio.engine.endInputRecordings { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success(let take):
-                let startBeat = anchor.map { self.beat(at: take.firstSampleHostTime, anchor: $0) } ?? 0
-                finish(captured, LYRecordedAudioCapture(
-                    url: take.url,
-                    startBeat: max(0, startBeat),
-                    targetTrackIDs: self.targetTrackIDs,
-                    measuredLatencySeconds: self.measuredLatencySeconds
-                ))
+            case .success(let takes):
+                finish(captured, takes.map { take in
+                    let startBeat = anchor.map { self.beat(at: take.firstSampleHostTime, anchor: $0) } ?? 0
+                    return LYRecordedAudioCapture(
+                        url: take.url,
+                        startBeat: max(0, startBeat),
+                        targetTrackID: take.id,
+                        inputChannel: take.channel,
+                        measuredLatencySeconds: self.measuredLatencySeconds
+                    )
+                })
             case .failure:
-                finish(captured, nil)
+                finish(captured, [])
             }
         }
     }
