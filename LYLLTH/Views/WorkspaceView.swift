@@ -3054,6 +3054,8 @@ private struct LYNightshapeEffect: Hashable {
     static let all: [LYNightshapeEffect] = [
         .init(name: "EQUALIZER", detail: "5-BAND", category: "TONE", accent: .teal),
         .init(name: "TAPE SATURATION", detail: "DRIVE · HEAD", category: "TONE", accent: .indigo),
+        .init(name: "TUBE SATURATION", detail: "DRIVE · BIAS", category: "TONE", accent: .purple),
+        .init(name: "HARMONIC EXCITER", detail: "HIGH · LOW", category: "TONE", accent: .teal),
         .init(name: "FILTER", detail: "CUTOFF · RES", category: "TONE", accent: .teal),
         .init(name: "STACK", detail: "AMP · CAB", category: "TONE", accent: .purple),
         .init(name: "COMPRESSOR", detail: "PUNCH · GLUE", category: "DYNAMICS", accent: .indigo),

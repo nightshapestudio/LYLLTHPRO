@@ -868,3 +868,28 @@ final class MediaReferenceTests: XCTestCase {
         XCTAssertEqual(document.missingAudioNames, ["fkit-kick.wav"])
     }
 }
+
+final class TubeAndExciterRackTests: XCTestCase {
+    func testTubeAndExciterSurviveTheProjectFile() throws {
+        var rack = LYFXRack()
+        rack.tube = TubeSaturationState.factoryPresets[3].state
+        var exciter = HarmonicExciterState.factoryPresets[1].state
+        exciter.listen = true
+        rack.exciter = exciter
+        rack.order = [.eq, .tube, .exciter]
+        let back = try JSONDecoder().decode(LYFXRack.self, from: JSONEncoder().encode(rack))
+        XCTAssertEqual(back.tube, rack.tube)
+        XCTAssertEqual(back.exciter?.highFrequency, exciter.highFrequency)
+        XCTAssertEqual(back.exciter?.listen, false, "LISTEN is never saved on")
+        XCTAssertTrue(back.isEngaged(.tube, isMain: false, reverb: .neutral))
+        XCTAssertEqual(back.chain(isMain: false).prefix(3), [.eq, .tube, .exciter])
+    }
+
+    func testTheyAreFiledUnderTone() {
+        let offered = FXKind.controlDeckCases.filter { $0.isAvailable(for: .main) }
+        XCTAssertTrue(offered.contains(.tube))
+        XCTAssertTrue(offered.contains(.exciter))
+        XCTAssertEqual(FXKind.tube.category, .tone)
+        XCTAssertEqual(FXKind.exciter.title, "HARMONIC EXCITER")
+    }
+}

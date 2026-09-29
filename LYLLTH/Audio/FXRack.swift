@@ -26,6 +26,10 @@ struct LYFXRack: Codable, Equatable {
     var deEsser: DeEsserState? = nil
     /// The NOISE GATE.
     var noiseGate: NoiseGateState? = nil
+    /// TUBE SATURATION.
+    var tube: TubeSaturationState? = nil
+    /// The HARMONIC EXCITER.
+    var exciter: HarmonicExciterState? = nil
     var cabinet: CabinetState? = nil
     var pump: PumpState? = nil
     var finale: FinaleState? = nil
@@ -85,6 +89,8 @@ struct LYFXRack: Codable, Equatable {
         case .shear: return !(shear ?? .neutral).isBypassed
         case .deEsser: return !(deEsser ?? .neutral).isBypassed
         case .noiseGate: return !(noiseGate ?? .neutral).isBypassed
+        case .tube: return !(tube ?? .neutral).isBypassed
+        case .exciter: return !(exciter ?? .neutral).isBypassed
         case .cabinet: return !(cabinet ?? .neutral).isBypassed
         case .pump: return !(pump ?? .neutral).isBypassed
         case .delay: return !(signalBloom ?? .neutral).isBypassed
@@ -114,6 +120,8 @@ struct LYFXRack: Codable, Equatable {
         case .shear: var s = shear ?? .neutral; s.isBypassed.toggle(); shear = s
         case .deEsser: var s = deEsser ?? .neutral; s.isBypassed.toggle(); deEsser = s
         case .noiseGate: var s = noiseGate ?? .neutral; s.isBypassed.toggle(); noiseGate = s
+        case .tube: var s = tube ?? .neutral; s.isBypassed.toggle(); tube = s
+        case .exciter: var s = exciter ?? .neutral; s.isBypassed.toggle(); exciter = s
         case .cabinet: var s = cabinet ?? .neutral; s.isBypassed.toggle(); cabinet = s
         case .pump: var s = pump ?? .neutral; s.isBypassed.toggle(); pump = s
         case .delay: var s = signalBloom ?? .neutral; s.isBypassed.toggle(); signalBloom = s
@@ -316,6 +324,12 @@ enum LYFXBridge {
         case .noiseGate:
             let s = rack.noiseGate ?? .neutral
             if let index { engine.setNoiseGate(trackIndex: index, parameters: s.parameters) } else { engine.setMainNoiseGate(parameters: s.parameters) }
+        case .tube:
+            let s = rack.tube ?? .neutral
+            if let index { engine.setTube(trackIndex: index, parameters: s.parameters) } else { engine.setMainTube(parameters: s.parameters) }
+        case .exciter:
+            let s = rack.exciter ?? .neutral
+            if let index { engine.setExciter(trackIndex: index, parameters: s.parameters) } else { engine.setMainExciter(parameters: s.parameters) }
         case .cabinet:
             let s = rack.cabinet ?? .neutral
             if let index { engine.setCabinet(trackIndex: index, parameters: s.parameters) } else { engine.setMainCabinet(parameters: s.parameters) }

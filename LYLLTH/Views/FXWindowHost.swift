@@ -312,6 +312,16 @@ struct LYFXWindowHost: View {
                                                meter: { [engineIndex] in engine.noiseGateMeter(trackIndex: engineIndex) },
                                                onStateChange: { state in update(.noiseGate) { $0.noiseGate = state } }, onToggleEngaged: toggle(.noiseGate),
                                                onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .tube:
+            return AnyView(TubeSaturationWindowView(targetName: targetName, state: rack.tube ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                               meter: { [engineIndex] in engine.tubeMeter(trackIndex: engineIndex) },
+                                               onStateChange: { state in update(.tube) { $0.tube = state } }, onToggleEngaged: toggle(.tube),
+                                               onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .exciter:
+            return AnyView(HarmonicExciterWindowView(targetName: targetName, state: rack.exciter ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
+                                               meter: { [engineIndex] in engine.exciterMeter(trackIndex: engineIndex) },
+                                               onStateChange: { state in update(.exciter) { $0.exciter = state } }, onToggleEngaged: toggle(.exciter),
+                                               onTransportTap: transportTap, onCancel: cancel, onDone: done))
         case .cabinet:
             return AnyView(CabinetWindowView(targetName: targetName, state: rack.cabinet ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
                                              meter: { [engineIndex] in engineIndex.map { engine.cabinetMeter(trackIndex: $0) } ?? engine.mainCabinetMeter() },
