@@ -217,7 +217,9 @@ struct LYSirenEditor: View {
             Text("\(Int((value.wrappedValue * 100).rounded()))%")
                 .font(LYLLTHTheme.value(9))
                 .foregroundStyle(LYLLTHTheme.secondary)
-                .frame(width: 30, alignment: .leading)
+                .lineLimit(1)
+                .fixedSize()
+                .frame(minWidth: 34, alignment: .leading)
         }
         .help(help)
     }
