@@ -4,6 +4,22 @@ import SwiftUI
 /// Logic's plug-in menu. Hovering a folder opens it; clicking an effect adds
 /// it to the channel and opens its window. Effects already on the channel
 /// are marked and can be taken off from here.
+/// A filled insert slot in a channel strip, which its ▾ menu can clear or
+/// fill with something else.
+enum LYFXSlotRef: Equatable {
+    case effect(FXKind)
+    case audioUnit(UUID)
+
+    /// The slot's menu anchor, unique per strip.
+    func anchorID(isMain: Bool) -> String {
+        let strip = isMain ? "main" : "track"
+        switch self {
+        case .effect(let kind): return "fxSlot.\(strip).\(kind.rawValue)"
+        case .audioUnit(let id): return "fxSlot.\(strip).\(id.uuidString)"
+        }
+    }
+}
+
 struct LYFXStartMenu: View {
     let targetName: String
     let target: FXTarget
@@ -18,6 +34,10 @@ struct LYFXStartMenu: View {
     let close: () -> Void
     /// A folder to show open when the menu appears.
     var initialCategory: FXKind.Category? = nil
+    /// Opened from a filled slot: the effect in it. Choosing an effect puts
+    /// it in that slot instead, and NO EFFECT empties it (Logic's slot menu).
+    var replacing: String? = nil
+    var clearSlot: (() -> Void)? = nil
 
     private enum Folder: Hashable {
         case category(FXKind.Category)
@@ -71,11 +91,12 @@ struct LYFXStartMenu: View {
     private var rootColumn: some View {
         column(width: rootWidth, accent: LYLLTHTheme.teal) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("ADD EFFECT")
+                Text(replacing == nil ? "ADD EFFECT" : "SLOT  ·  " + targetName.uppercased())
                     .font(LYLLTHTheme.label(8, weight: .bold))
                     .tracking(1.8)
                     .foregroundStyle(LYLLTHTheme.teal)
-                Text(targetName.uppercased())
+                    .lineLimit(1)
+                Text((replacing ?? targetName).uppercased())
                     .font(LYLLTHTheme.label(11.5, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(LYLLTHTheme.text)
@@ -104,6 +125,11 @@ struct LYFXStartMenu: View {
             .padding(.bottom, 8)
 
             LYNightshapeMenuDivider()
+
+            if let clearSlot {
+                noEffectRow(clearSlot)
+                LYNightshapeMenuDivider()
+            }
 
             VStack(spacing: 1) {
                 ForEach(FXKind.Category.allCases) { category in
@@ -215,8 +241,40 @@ struct LYFXStartMenu: View {
     // MARK: Rows
 
     private func choose(_ kind: FXKind) {
-        if chain.contains(kind) { open(kind) } else { add(kind) }
+        if replacing != nil || !chain.contains(kind) { add(kind) } else { open(kind) }
         close()
+    }
+
+    /// Empties the slot: Logic's "No Plug-in".
+    private func noEffectRow(_ clear: @escaping () -> Void) -> some View {
+        let hovered = hoveredRow == "none"
+        return Button {
+            clear()
+            close()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "circle.slash")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(LYLLTHTheme.purple)
+                    .frame(width: 16)
+                Text("NO EFFECT")
+                    .font(LYLLTHTheme.label(10, weight: .bold))
+                    .tracking(1)
+                    .foregroundStyle(hovered ? LYLLTHTheme.text : LYLLTHTheme.secondary)
+                Spacer(minLength: 6)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+            .background(hovered ? LYLLTHTheme.purple.opacity(0.1) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            hoveredRow = inside ? "none" : (hoveredRow == "none" ? nil : hoveredRow)
+            if inside { folder = nil }
+        }
+        .padding(.vertical, 4)
+        .help("Take \(replacing ?? "this effect") off the channel")
     }
 
     private func folderRow(title: String, icon: String?, count: Int, isOpen: Bool,

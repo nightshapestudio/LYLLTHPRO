@@ -893,3 +893,24 @@ final class TubeAndExciterRackTests: XCTestCase {
         XCTAssertEqual(FXKind.exciter.title, "HARMONIC EXCITER")
     }
 }
+
+final class AddingAnEffectSwitchesItOnTests: XCTestCase {
+    /// Logic inserts a plug-in running. Every effect that can be bypassed
+    /// must be on once it is added.
+    func testEveryInsertIsOnOnceAdded() {
+        for kind in FXKind.controlDeckCases where kind != .eq && kind != .reverb {
+            for isMain in [false, true] {
+                let target: FXTarget = isMain ? .main : .track(UUID())
+                guard kind.isAvailable(for: target) else { continue }
+                var rack = LYFXRack()
+                var chain = rack.chain(isMain: isMain)
+                if !chain.contains(kind) { chain.append(kind) }
+                rack.order = chain
+                rack.engage(kind, isMain: isMain)
+                XCTAssertTrue(rack.isEngaged(kind, isMain: isMain, reverb: .neutral), "\(kind.title) is on once added (MAIN: \(isMain))")
+                rack.engage(kind, isMain: isMain)
+                XCTAssertTrue(rack.isEngaged(kind, isMain: isMain, reverb: .neutral), "engaging twice leaves \(kind.title) on")
+            }
+        }
+    }
+}

@@ -270,6 +270,8 @@ struct WorkspaceView: View {
     @State private var fxRequest: LYFXWindowRequest?
     @State private var fxOriginal: (rack: LYFXRack, reverb: ReverbState?) = (LYFXRack(), nil)
     @State private var fxPickerTarget: FXTarget?
+    /// Set when the menu was opened from a filled slot's ▾.
+    @State private var fxPickerSlot: LYFXSlotRef?
     @State private var synthTrackID: UUID?
     @State private var showTyping = false
     /// The note clip open in the piano roll: (track, clip).
@@ -366,10 +368,21 @@ struct WorkspaceView: View {
                             meters: meters,
                             openFX: { openFX($0, target: $1) },
                             toggleFX: { toggleFX($0, target: $1) },
-                            openPicker: { target in withAnimation(LYLLTHTheme.snap) { fxPickerTarget = target } },
+                            openPicker: { target in
+                                withAnimation(LYLLTHTheme.snap) {
+                                    fxPickerSlot = nil
+                                    fxPickerTarget = target
+                                }
+                            },
                             openSynth: { openSynth($0) },
                             openDrums: { openDrums($0) },
-                            close: { showInspector = false }
+                            close: { showInspector = false },
+                            openSlotMenu: { target, slot in
+                                withAnimation(LYLLTHTheme.snap) {
+                                    fxPickerSlot = slot
+                                    fxPickerTarget = target
+                                }
+                            }
                         )
                         .frame(width: 297)
                         .transition(.move(edge: .leading).combined(with: .opacity))
@@ -1565,13 +1578,71 @@ struct WorkspaceView: View {
     }
 
     /// Adds or removes an effect from a chain, as DrumKit's ADD / REMOVE does.
+    /// Puts an effect on the channel (switched on, as Logic inserts a
+    /// plug-in running) or takes it off.
     private func toggleMembership(_ kind: FXKind, target: FXTarget) {
         var rack = LYFXBridge.rack(for: target, in: document.session)
         var chain = rack.chain(isMain: target == .main)
-        if let index = chain.firstIndex(of: kind) { chain.remove(at: index) } else { chain.append(kind) }
-        rack.order = chain
+        if let index = chain.firstIndex(of: kind) {
+            chain.remove(at: index)
+            rack.order = chain
+        } else {
+            chain.append(kind)
+            rack.order = chain
+            rack.engage(kind, isMain: target == .main)
+        }
         LYFXBridge.setRack(rack, for: target, in: &document.session)
         LYFXBridge.pushRack(target: target, session: document.session, engine: audio.engine)
+    }
+
+    /// The name a filled slot's menu shows.
+    private func slotTitle(_ slot: LYFXSlotRef, target: FXTarget) -> String {
+        switch slot {
+        case .effect(let kind): return kind.title
+        case .audioUnit(let id):
+            guard case .track(let trackID) = target else { return "AUDIO UNIT" }
+            return document.session.tracks.first { $0.id == trackID }?.inserts.first { $0.id == id }?.name.uppercased() ?? "AUDIO UNIT"
+        }
+    }
+
+    /// NO EFFECT in a slot's menu.
+    private func clearSlot(_ slot: LYFXSlotRef, target: FXTarget) {
+        switch slot {
+        case .effect(let kind):
+            if LYFXBridge.rack(for: target, in: document.session).chain(isMain: target == .main).contains(kind) {
+                toggleMembership(kind, target: target)
+            }
+            if fxRequest?.kind == kind && fxRequest?.target == target { fxRequest = nil }
+        case .audioUnit(let id):
+            guard case .track(let trackID) = target else { return }
+            document.session = audioUnits.removeEffect(slotID: id, from: trackID, in: document.session, engine: audio.engine)
+        }
+    }
+
+    /// Another effect chosen from a filled slot's menu: it takes that slot's
+    /// place in the chain, switched on.
+    private func replaceSlot(_ slot: LYFXSlotRef, with kind: FXKind, target: FXTarget) {
+        guard case .effect(let old) = slot else {
+            clearSlot(slot, target: target)
+            toggleMembership(kind, target: target)
+            return
+        }
+        guard old != kind else { return }
+        let isMain = target == .main
+        var rack = LYFXBridge.rack(for: target, in: document.session)
+        var chain = rack.chain(isMain: isMain)
+        guard var position = chain.firstIndex(of: old) else { return }
+        chain.remove(at: position)
+        if let existing = chain.firstIndex(of: kind) {
+            chain.remove(at: existing)
+            if existing < position { position -= 1 }
+        }
+        chain.insert(kind, at: min(position, chain.count))
+        rack.order = chain
+        rack.engage(kind, isMain: isMain)
+        LYFXBridge.setRack(rack, for: target, in: &document.session)
+        LYFXBridge.pushRack(target: target, session: document.session, engine: audio.engine)
+        if fxRequest?.kind == old && fxRequest?.target == target { fxRequest = nil }
     }
 
     /// A library effect clicked: put it on the inspected channel and open it.
@@ -1591,8 +1662,15 @@ struct WorkspaceView: View {
     @ViewBuilder
     private var fxPickerOverlay: some View {
         if let target = fxPickerTarget {
-            let close = { withAnimation(LYLLTHTheme.snap) { fxPickerTarget = nil } }
-            let anchor = menuAnchors[target == .main ? "fxAdd.main" : "fxAdd.track"]
+            let close = {
+                withAnimation(LYLLTHTheme.snap) {
+                    fxPickerTarget = nil
+                    fxPickerSlot = nil
+                }
+            }
+            let slot = fxPickerSlot
+            let anchor = slot.flatMap { menuAnchors[$0.anchorID(isMain: target == .main)] }
+                ?? menuAnchors[target == .main ? "fxAdd.main" : "fxAdd.track"]
             let trackID: UUID? = { if case .track(let id) = target { return id } else { return nil } }()
             GeometryReader { geo in
                 let x = min((anchor?.maxX ?? geo.size.width / 3) + 8, max(8, geo.size.width - 240))
@@ -1607,13 +1685,23 @@ struct WorkspaceView: View {
                         chain: LYFXBridge.rack(for: target, in: document.session).chain(isMain: target == .main),
                         audioUnits: trackID == nil ? [] : plugins.effects,
                         add: { kind in
-                            toggleMembership(kind, target: target)
+                            if let slot {
+                                replaceSlot(slot, with: kind, target: target)
+                            } else {
+                                toggleMembership(kind, target: target)
+                            }
                             openFX(kind, target: target)
                         },
                         open: { openFX($0, target: target) },
                         remove: { toggleMembership($0, target: target) },
-                        addAudioUnit: { unit in if let trackID { installAudioUnit(unit, on: trackID) } },
-                        close: close
+                        addAudioUnit: { unit in
+                            guard let trackID else { return }
+                            if let slot { clearSlot(slot, target: target) }
+                            installAudioUnit(unit, on: trackID)
+                        },
+                        close: close,
+                        replacing: slot.map { slotTitle($0, target: target) },
+                        clearSlot: slot.map { slot in { clearSlot(slot, target: target) } }
                     )
                     .offset(x: x, y: y)
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))

@@ -291,6 +291,22 @@ final class LYAudioUnitHost: ObservableObject {
         return session
     }
 
+    /// Takes an Audio Unit effect off a track, as NO EFFECT in its slot does.
+    func removeEffect(slotID: UUID, from trackID: UUID, in source: LYLLTHSession, engine: NightshapeAudioEngine) -> LYLLTHSession {
+        var session = source
+        guard let trackIndex = session.tracks.firstIndex(where: { $0.id == trackID }),
+              let channel = LYChannelMap.channels(in: session).first(where: { $0.trackID == trackID })?.index else { return source }
+        session.tracks[trackIndex].inserts.removeAll { $0.id == slotID }
+        if let unit = units[slotID], let token = observers[slotID] {
+            unit.auAudioUnit.parameterTree?.removeParameterObserver(token)
+        }
+        observers[slotID] = nil
+        units[slotID] = nil
+        try? applyEffects(for: session.tracks[trackIndex], channel: channel, engine: engine)
+        applyDelayCompensation(session: session, engine: engine)
+        return session
+    }
+
     /// Restores every saved AU before transport starts. Missing or rejected
     /// components stay in the document with a validation error instead of
     /// silently disappearing from the mix.

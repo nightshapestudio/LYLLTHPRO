@@ -158,6 +158,8 @@ struct ChannelStripInspector: View {
     let openSynth: (UUID) -> Void
     let openDrums: (UUID) -> Void
     let close: () -> Void
+    /// A filled insert slot's ▾ (or right-click): NO EFFECT, or another effect in its place.
+    var openSlotMenu: (FXTarget, LYFXSlotRef) -> Void = { _, _ in }
     @EnvironmentObject private var audio: AudioEngineController
     @EnvironmentObject private var audioUnits: LYAudioUnitHost
 
@@ -366,6 +368,8 @@ struct ChannelStripInspector: View {
             openFX: { openFX($0, target) },
             toggleFX: { toggleFX($0, target) },
             openPicker: { openPicker(target) },
+            openSlotMenu: { openSlotMenu(target, $0) },
+            instrumentPluginID: track.instrumentPlugin?.id,
             reorder: { reorderInserts($0, target: target) }
         )
     }
@@ -399,6 +403,7 @@ struct ChannelStripInspector: View {
             openFX: { openFX($0, .main) },
             toggleFX: { toggleFX($0, .main) },
             openPicker: { openPicker(.main) },
+            openSlotMenu: { openSlotMenu(.main, $0) },
             reorder: { reorderInserts($0, target: .main) }
         )
     }
@@ -555,10 +560,15 @@ private struct LYChannelStrip: View {
     let openFX: (FXKind) -> Void
     let toggleFX: (FXKind) -> Void
     let openPicker: () -> Void
+    /// A filled slot's menu: empty it or put something else there.
+    var openSlotMenu: ((LYFXSlotRef) -> Void)? = nil
+    /// The track's Audio Unit instrument, listed with the inserts but not one.
+    var instrumentPluginID: UUID? = nil
     /// Applies a new insert order (the shown slots, top to bottom).
     var reorder: (([FXKind]) -> Void)? = nil
 
     @State private var draggingInsert: FXKind?
+    @State private var hoveredSlot: String?
     @State private var insertDragOffset: CGFloat = 0
     private let insertPitch: CGFloat = 20       // slot height plus spacing
 
@@ -612,6 +622,8 @@ private struct LYChannelStrip: View {
                             .gesture(insertDrag(kind, index: index, in: inserts))
                     }
                     ForEach(hostedPlugins) { plugin in
+                        let isEffect = plugin.id != instrumentPluginID
+                        let ref = LYFXSlotRef.audioUnit(plugin.id)
                         Button { openHostedPlugin(plugin) } label: {
                             slot(
                                 plugin.name.uppercased(),
@@ -622,6 +634,12 @@ private struct LYChannelStrip: View {
                         }
                         .buttonStyle(.plain)
                         .help(plugin.validationError ?? "Open Audio Unit")
+                        .overlay(alignment: .trailing) {
+                            if isEffect, openSlotMenu != nil { slotMenuButton(ref, key: plugin.id.uuidString, color: LYLLTHTheme.indigo) }
+                        }
+                        .background { if isEffect { slotRightClick(ref) } }
+                        .lyMenuAnchor(ref.anchorID(isMain: isMain))
+                        .onHover { inside in hoveredSlot = inside ? plugin.id.uuidString : (hoveredSlot == plugin.id.uuidString ? nil : hoveredSlot) }
                     }
                     Button(action: openPicker) {
                         Text("+")
@@ -827,11 +845,42 @@ private struct LYChannelStrip: View {
                 .frame(height: 18)
                 .contentShape(Rectangle())
                 .onTapGesture { openFX(kind) }
+            if openSlotMenu != nil {
+                slotMenuButton(.effect(kind), key: kind.rawValue, color: color)
+            }
         }
         .background(color.opacity(engaged ? 0.12 : 0.03))
         .overlay(Rectangle().stroke(engaged ? color.opacity(0.75) : LYLLTHTheme.lineStrong, lineWidth: 1))
         .shadow(color: draggingInsert == kind ? color.opacity(0.6) : .clear, radius: 6)
-        .help("\(kind.title). Click to open; drag up or down to reorder.")
+        .background { slotRightClick(.effect(kind)) }
+        .lyMenuAnchor(LYFXSlotRef.effect(kind).anchorID(isMain: isMain))
+        .onHover { inside in hoveredSlot = inside ? kind.rawValue : (hoveredSlot == kind.rawValue ? nil : hoveredSlot) }
+        .help("\(kind.title). Click to open, ▾ to remove or swap it, drag up or down to reorder.")
+    }
+
+    /// Logic's slot arrow: faint until you point at the slot.
+    private func slotMenuButton(_ ref: LYFXSlotRef, key: String, color: Color) -> some View {
+        Button { openSlotMenu?(ref) } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 6.5, weight: .bold))
+                .foregroundStyle(hoveredSlot == key ? color : LYLLTHTheme.dim.opacity(0.7))
+                .frame(width: 15, height: 18)
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(LYLLTHTheme.lineStrong.opacity(hoveredSlot == key ? 1 : 0.5)).frame(width: 1)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Remove or replace this effect")
+    }
+
+    /// Right-click a filled slot for the same menu.
+    private func slotRightClick(_ ref: LYFXSlotRef) -> some View {
+        LYRightClickArea { _ in
+            guard let openSlotMenu else { return false }
+            openSlotMenu(ref)
+            return true
+        }
     }
 
     private func busSendSlot(_ row: BusSendRow) -> some View {

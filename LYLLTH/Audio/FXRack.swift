@@ -99,6 +99,15 @@ struct LYFXRack: Codable, Equatable {
         }
     }
 
+    /// Switches an effect in the chain on. Adding an effect does this, the
+    /// way Logic inserts a plug-in already running. EQ has no bypass and a
+    /// track's reverb is a send level, so neither is touched.
+    mutating func engage(_ kind: FXKind, isMain: Bool) {
+        guard kind != .eq, kind != .reverb, !isEngaged(kind, isMain: isMain, reverb: .neutral) else { return }
+        var parked: Float?
+        toggleBypass(kind, parkedReverbSend: &parked)
+    }
+
     /// Flips an effect's bypass. EQ cannot be bypassed (flat is its off).
     mutating func toggleBypass(_ kind: FXKind, parkedReverbSend: inout Float?) {
         switch kind {
