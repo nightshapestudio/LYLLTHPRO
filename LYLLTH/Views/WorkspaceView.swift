@@ -2441,37 +2441,72 @@ private struct TransportBar: View {
 }
 
 /// LYLLTH's lockup, built the way DRUMKIT's is: the first half in the NIGHTSHAPE
-/// outline cut, the second half solid, both carrying the same tie-dye field,
-/// with the tracked purple byline underneath.
+/// outline cut in indigo, the second half solid in purple, with the muted
+/// byline spread across the full width of the wordmark and set close under it.
 private struct LYWordmarkLockup: View {
     private let size: CGFloat = 62
+    private static let outline = Color(hex: 0x786CF7)
+    private static let solid = Color(hex: 0x8853F6)
+    /// Muted, so it signs the wordmark instead of competing with it.
+    private static let byline = Color(hex: 0x7D7893)
+    private static let bylineSize: CGFloat = 11
+    /// Cap heights as a share of the point size (the fonts' own metrics).
+    private static let wordmarkCap: CGFloat = 696.0 / 1024.0
+    private static let bylineCap: CGFloat = 680.0 / 1000.0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        // Placed by the baselines, not by the text boxes: the NIGHTSHAPE face
+        // keeps room for descenders under the caps that LYLLTH never uses, and
+        // stacking the boxes left a gap wider than the byline is tall. The gap
+        // from the wordmark's baseline to the byline's cap top is a fifth of
+        // the wordmark's cap height.
+        let drop = LYLLTHTheme.wordmarkOpticalDrop(size)
+        let gap = size * Self.wordmarkCap * 0.2
+        let bylineCapHeight = Self.bylineSize * CGFloat(LYAppPreferences.textScale()) * Self.bylineCap
+        ZStack(alignment: Alignment(horizontal: .leading, vertical: .lockupSeam)) {
             letters
-                .hidden()
-                .overlay(LYWordmarkTieDye().mask(letters))
-                .offset(y: LYLLTHTheme.wordmarkOpticalDrop(size))
-                .shadow(color: LYLLTHTheme.teal.opacity(0.08), radius: 5)
+                .offset(y: drop)
+                .alignmentGuide(.lockupSeam) { d in d[.lastTextBaseline] + drop + gap }
                 .accessibilityLabel("LYLLTH")
-            // Sized from the fonts' own metrics to span 75% of the wordmark.
-            Text("BY NIGHTSHAPE")
-                .font(LYLLTHTheme.label(11))
-                .tracking(7.1)
-                .foregroundStyle(LYLLTHTheme.purple)
-                .padding(.leading, 2)
+            byline
+                .alignmentGuide(.lockupSeam) { d in d[.firstTextBaseline] - bylineCapHeight }
                 .accessibilityHidden(true)
         }
+        // The stack is as wide as the wordmark; the byline fills that width.
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var letters: some View {
         HStack(spacing: 0) {
-            Text("LYL").font(LYLLTHTheme.wordmarkOutline(size))
-            Text("LTH").font(LYLLTHTheme.wordmark(size))
+            Text("LYL").font(LYLLTHTheme.wordmarkOutline(size)).foregroundStyle(Self.outline)
+            Text("LTH").font(LYLLTHTheme.wordmark(size)).foregroundStyle(Self.solid)
         }
         .tracking(1.6)
         .fixedSize()
     }
+
+    /// Each character spaced evenly from the wordmark's first stroke to its last.
+    private var byline: some View {
+        HStack(spacing: 0) {
+            let characters = Array("BY NIGHTSHAPE")
+            ForEach(characters.indices, id: \.self) { index in
+                if index > 0 { Spacer(minLength: 0) }
+                Text(String(characters[index]))
+            }
+        }
+        .font(LYLLTHTheme.label(Self.bylineSize))
+        .foregroundStyle(Self.byline)
+        .padding(.horizontal, 2)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private extension VerticalAlignment {
+    /// Where the wordmark ends and the byline begins.
+    enum LockupSeam: AlignmentID {
+        static func defaultValue(in d: ViewDimensions) -> CGFloat { d[.bottom] }
+    }
+    static let lockupSeam = VerticalAlignment(LockupSeam.self)
 }
 
 private struct LYPlayButton: View {
@@ -4853,34 +4888,6 @@ private struct StatusBar: View {
 
 /// NIGHTSHAPE tie-dye, ported from DRUMKIT's `DrumkitWordmarkTieDye` so both
 /// wordmarks carry the identical treatment.
-private struct LYWordmarkTieDye: View {
-    private static let spots: [(CGFloat, CGFloat, Color)] = [
-        (0.06, 0.40, LYLLTHTheme.teal),
-        (0.28, 0.85, LYLLTHTheme.purple),
-        (0.48, 0.12, LYLLTHTheme.indigo),
-        (0.70, 0.68, LYLLTHTheme.teal),
-        (0.90, 0.28, LYLLTHTheme.purple),
-    ]
-
-    var body: some View {
-        GeometryReader { geo in
-            let r = max(geo.size.width, geo.size.height) * 0.6
-            ZStack {
-                LYLLTHTheme.indigo
-                ForEach(0..<Self.spots.count, id: \.self) { i in
-                    let s = Self.spots[i]
-                    RadialGradient(
-                        gradient: Gradient(colors: [s.2, s.2.opacity(0)]),
-                        center: UnitPoint(x: s.0, y: s.1),
-                        startRadius: 0,
-                        endRadius: r
-                    )
-                }
-            }
-            .drawingGroup()
-        }
-    }
-}
 
 
 /// MIDI IN light: lit while notes arrive, with how many devices are seen.

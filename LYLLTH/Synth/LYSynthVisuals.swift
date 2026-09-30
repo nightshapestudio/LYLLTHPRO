@@ -916,18 +916,27 @@ struct LYTableBrowser: View {
 struct LUNATKMark: View {
     var size: CGFloat = 26
 
+    /// The cut's diameter, as a share of the moon's.
+    private static let cutScale: CGFloat = 0.95
+    /// The cut's centre from the moon's, as a share of the moon's diameter:
+    /// 0.25 R (0.125 of the diameter) turned 15° clockwise.
+    private static let cutOffset = CGSize(width: 0.125 * cos(15 * .pi / 180), height: 0.125 * sin(15 * .pi / 180))
+
     private var moonlight: LinearGradient {
         LinearGradient(colors: [LYLLTHTheme.chrome, LYLLTHTheme.lavender, LYLLTHTheme.teal], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     var body: some View {
         HStack(spacing: size * 0.35) {
+            // The NIGHTSHAPES crescent (Design/Icon/app-icon-moon.svg in that
+            // game): a moon of radius R cut by a circle of 0.95 R whose centre
+            // sits 0.25 R away, turned 15° clockwise.
             ZStack {
                 Circle().fill(moonlight)
                 Circle()
                     .fill(Color.black)
-                    .frame(width: size * 0.86, height: size * 0.86)
-                    .offset(x: size * 0.26, y: -size * 0.12)
+                    .frame(width: size * Self.cutScale, height: size * Self.cutScale)
+                    .offset(x: size * Self.cutOffset.width, y: size * Self.cutOffset.height)
                     .blendMode(.destinationOut)
             }
             .compositingGroup()
