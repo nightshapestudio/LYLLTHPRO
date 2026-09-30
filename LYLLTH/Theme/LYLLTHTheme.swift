@@ -325,18 +325,17 @@ struct LYFloatingWindow<Content: View>: View {
                             }
                     )
                 content
+                    // This window glows; what it holds does not glow again.
+                    .environment(\.nightshapeWindowGlowSuppressed, true)
                     .frame(width: size.width, height: size.height)
                     .scaleEffect(scale)
                     .frame(width: width, height: size.height * scale)
             }
-            // One shadow from a plain rectangle. A shadow on the stack itself
-            // gives every control inside its own blurred shadow, redrawn on
-            // every frame of a drag.
-            .background {
-                Rectangle()
-                    .fill(Color.black)
-                    .shadow(color: Color.black.opacity(0.6), radius: 24, x: 0, y: 12)
-            }
+            // Shadows from plain rectangles behind the window. A shadow on the
+            // stack itself gives every control inside its own blurred shadow,
+            // redrawn on every frame of a drag. The purple halo keeps the
+            // window's edge from sinking into the black behind it.
+            .nightshapeWindowGlow()
             .position(x: geo.size.width / 2 + resting.width, y: geo.size.height / 2 + resting.height)
             .offset(x: live.width - resting.width, y: live.height - resting.height)
         }
