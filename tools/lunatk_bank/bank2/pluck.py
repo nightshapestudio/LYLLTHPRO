@@ -130,16 +130,15 @@ def presets():
     out.append(p)
 
     p = K("NERVE TICK", "BASIC", "BASIC")
-    # The note rings in the comb; the noise is only the click that strikes it
-    # (ENV 3, 12 ms). A band-pass here used to take the note out and leave
-    # white noise, so it read as faint hiss.
-    p.osc(0, level=0.8, wt=0.66)
-    p.noise(0.06, type="WHITE", color=0.3)
-    p.env(3, a=0.0, d=0.012, s=0.0, r=0.01)
-    p.mod("ENV3", "NOISE_LEVEL", 0.5)
+    p.osc(0, level=0.5, wt=0.33)
+    p.noise(0.3, type="WHITE", color=0.3)
     p.insert(1, "COMB", amount=0.85, freq=0.5, mix=0.7)
     pluck_env(p, decay=0.15, release=0.1)
-    p.filter("LP24", hz=1400, res=0.3, keytrack=0.8, env=0.8)
+    # 400 Hz is where the band starts: ENV 2, key tracking, velocity and the
+    # accents all open it, and from 2400 Hz they took a played note's band to
+    # about 18 kHz, so it played as air and hiss with the comb's pitch filtered
+    # out. From here a played note lands where the comb rings.
+    p.filter("BP", hz=400, res=0.2, keytrack=0.5, env=0.2)
     p.filter2("HP12", hz=300)
     poly(p)
     velocity(p, 0.75, 0.2)
@@ -305,20 +304,17 @@ def presets():
     # and the note itself is hard to hear.
     p.osc(0, level=0.6, wt=0.75)
     p.osc(1, level=0.3, wt=0.6, octave=1)
-    p.insert(1, "DECIMATE", after=True, amount=0.15, mix=0.3)
     pluck_env(p, decay=0.4, release=0.3)
-    p.filter("LP12", hz=1800, res=0.05, keytrack=0.4)
+    p.filter("LP12", hz=1800, res=0.05, keytrack=0.4, drive=0.3)
     p.filter2("HP12", hz=350)
     poly(p)
     velocity(p, 0.75, 0.15)
     p.tone("EQ_HIGH", 0.25)
     p.eq(high=-5.5, high_hz=7000)
-    p.lfo(1, "SINE", sync="1/4", mode="FREE")
-    p.set("macro2", 0.35)
-    # The shimmer is the octave above and the plate. A frequency shifter
-    # 7 Hz off the note, swept by this LFO, used to beat against the dry
-    # like a rubbery vibrato.
-    p.motion("LFO1", "INS1_AMOUNT", 0.25)
+    p.set("macro2", 0.0)
+    # Still glass: the shimmer is the octave above and the plate. A decimator
+    # swept by an LFO (sliding alias tones, a "laser") and a frequency
+    # shifter 7 Hz off the note (a rubbery vibrato) used to move it.
     echo(p, time="3/16", mix=0.14, feedback=0.35, amount=0.12, pingpong=True)
     plate(p, mix=0.14)
     p.context(shift=12)
