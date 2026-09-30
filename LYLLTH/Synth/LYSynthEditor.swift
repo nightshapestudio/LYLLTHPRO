@@ -70,6 +70,8 @@ struct LYSynthEditor: View {
     let instrument: LYSynthInstrument?
     /// Copies a custom wavetable into the song so it travels with it.
     var storeTableInProject: (String, [Float]) -> Void = { _, _ in }
+    /// Copies a sample an oscillator plays into the song.
+    var storeSampleInProject: (String, LYSynthSample) -> Void = { _, _ in }
     let close: () -> Void
     /// The page it opens on.
     var initialPage: Page = .osc
@@ -80,6 +82,7 @@ struct LYSynthEditor: View {
     // that show live values (displays, dots, meters) each watch it.
     @State private var live = LYSynthLive()
     @ObservedObject private var tableLibrary = LYWavetableLibrary.shared
+    @ObservedObject private var sampleLibrary = LYSampleLibrary.shared
     @ObservedObject private var presetStore = LYSynthPresetStore.shared
     @State private var chosenPage: Page?
     private var page: Page { chosenPage ?? initialPage }
@@ -443,6 +446,12 @@ struct LYSynthEditor: View {
                     }
                     .help("Show oscillator \(other == 2 ? "C" : "B") (lit while it plays)")
                 }
+                let modeID = LYSynthParameters.oscillatorMode(o, LY_OSX_MODE)
+                let mode = min(max(Int(c.value(modeID)), 0), LYSynthNames.oscillatorModes.count - 1)
+                LYSynthToggle(title: ["WT", "SMP", "GRN"][mode], isOn: mode > 0, accent: accent) {
+                    c.set(modeID, Float((mode + 1) % LYSynthNames.oscillatorModes.count))
+                }
+                .help("MODE: WAVETABLE, SAMPLE (plays a sample, or the table as one long sound) or GRANULAR. Click to change")
                 LYSynthStepper(label: "OCT", text: String(format: "%+d", Int(c.value(p(LY_OSC_OCTAVE)))), accent: accent) {
                     c.set(p(LY_OSC_OCTAVE), c.value(p(LY_OSC_OCTAVE)) + Float($0))
                 }
@@ -452,55 +461,140 @@ struct LYSynthEditor: View {
             }
         } content: {
             VStack(spacing: 7) {
-                Button { choosingTable = choosingTable == o ? nil : o } label: {
-                    LYWavetableView(table: table, customName: patch.customTable(o),
-                                    oscillator: o, basePosition: c.value(p(LY_OSC_WTPOS)),
-                                    accent: accent, live: live)
-                        .overlay(alignment: .topLeading) {
-                            HStack(spacing: 5) {
-                                Text(patch.tableName(o))
-                                    .font(LYLLTHTheme.label(8.5, weight: .bold)).tracking(1.2)
-                                Image(systemName: "chevron.down").font(.system(size: 6.5, weight: .bold))
-                            }
+                AnyView(oscillatorSource(o, table: table, accent: accent))
+                    .frame(height: 120)
+                AnyView(oscillatorChoices(o, warpNames: warpNames, accent: accent))
+                AnyView(oscillatorKnobs(o, d: d, d2: d2, accent: accent))
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private func oscillatorMode(_ o: Int) -> Int {
+        Int(context.value(LYSynthParameters.oscillatorMode(o, LY_OSX_MODE)).rounded())
+    }
+
+    /// The table, or in SAMPLE and GRANULAR the sample, with its menu.
+    @ViewBuilder
+    private func oscillatorSource(_ o: Int, table: Int, accent: Color) -> some View {
+        let c = context
+        let p = { (local: Int) in LYSynthParameters.oscillator(o, local) }
+        if oscillatorMode(o) == LY_OSCMODE_WAVETABLE {
+            Button { choosingTable = choosingTable == o ? nil : o } label: {
+                LYWavetableView(table: table, customName: patch.customTable(o),
+                                oscillator: o, basePosition: c.value(p(LY_OSC_WTPOS)),
+                                accent: accent, live: live)
+                    .overlay(alignment: .topLeading) {
+                        HStack(spacing: 5) {
+                            Text(patch.tableName(o))
+                                .font(LYLLTHTheme.label(8.5, weight: .bold)).tracking(1.2)
+                            Image(systemName: "chevron.down").font(.system(size: 6.5, weight: .bold))
+                        }
+                        .foregroundStyle(LYLLTHTheme.text)
+                        .padding(6)
+                    }
+            }
+            .buttonStyle(.plain)
+            .help("Choose, import or edit a wavetable")
+            .lyMenuAnchor("table\(o)", in: LYSynthContext.space)
+        } else {
+            let name = patch.sampleName(o)
+            Button { importSample(o) } label: {
+                LYSampleView(sample: name.flatMap { sampleLibrary.sample(named: $0) }, position: c.value(p(LY_OSC_WTPOS)),
+                             accent: accent)
+                    .overlay(alignment: .topLeading) {
+                        Text(name ?? "\(patch.tableName(o)) · LOAD A SAMPLE")
+                            .font(LYLLTHTheme.label(8.5, weight: .bold)).tracking(1.2)
                             .foregroundStyle(LYLLTHTheme.text)
                             .padding(6)
-                        }
-                }
-                .buttonStyle(.plain)
-                .help("Choose, import or edit a wavetable")
-                .lyMenuAnchor("table\(o)", in: LYSynthContext.space)
-                .frame(height: 120)
-
-                HStack(spacing: 4) {
-                    c.choice(p(LY_OSC_WARPMODE), label: "WARP", names: warpNames, order: LYSynthNames.warpOrder, accent: accent,
-                             columns: 2, width: 240, anchor: "warp\(o)")
-                    c.choice(p(LY_OSC_WARPMODE2), label: "WARP 2", names: warpNames, order: LYSynthNames.warpOrder, accent: accent,
-                             columns: 2, width: 240, anchor: "warp2\(o)")
-                    c.choice(p(LY_OSC_UNIMODE), label: "UNISON", names: LYSynthNames.unisonModes, accent: accent,
-                             columns: 2, width: 200, anchor: "uni\(o)")
-                    c.choice(p(LY_OSC_STACK), label: "STACK", names: LYSynthNames.stacks, accent: accent,
-                             columns: 1, width: 140, anchor: "stack\(o)")
-                }
-
-                Grid(horizontalSpacing: 0, verticalSpacing: 6) {
-                    GridRow {
-                        c.knob(p(LY_OSC_WTPOS), d(LY_DST_A_WTPOS), accent: accent, diameter: 32, label: "WT POS")
-                        c.knob(p(LY_OSC_WARPAMT), d(LY_DST_A_WARP), accent: accent, label: "WARP")
-                        c.knob(p(LY_OSC_WARPAMT2), d2(LY_DST_A_WARP2), accent: accent, label: "WARP 2")
-                        c.knob(p(LY_OSC_LEVEL), d(LY_DST_A_LEVEL), accent: accent)
-                        c.knob(p(LY_OSC_PAN), d(LY_DST_A_PAN), accent: accent, format: LYSynthContext.pan)
-                        c.knob(p(LY_OSC_FINE), d2(LY_DST_A_FINE), accent: accent, label: "FINE", format: { String(format: "%+.0f¢", $0) })
                     }
-                    GridRow {
-                        c.knob(p(LY_OSC_UNISON), accent: accent, label: "VOICES")
-                        c.knob(p(LY_OSC_DETUNE), d(LY_DST_A_DETUNE), accent: accent)
-                        c.knob(p(LY_OSC_BLEND), d(LY_DST_A_BLEND), accent: accent)
-                        c.knob(p(LY_OSC_WIDTH), d2(LY_DST_A_WIDTH), accent: accent)
+            }
+            .buttonStyle(.plain)
+            .help("Click to load a sample. With none, the wavetable plays as one long sound. Right-click for your samples")
+            .contextMenu {
+                ForEach(sampleLibrary.names, id: \.self) { sampleName in
+                    Button(sampleName) { chooseSample(o, sampleName) }
+                }
+                if name != nil {
+                    Divider()
+                    Button("PLAY THE WAVETABLE") { var next = patch; next.setSample(o, nil); patch = next }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func oscillatorChoices(_ o: Int, warpNames: [String], accent: Color) -> some View {
+        let c = context
+        let p = { (local: Int) in LYSynthParameters.oscillator(o, local) }
+        let x = { (field: Int) in LYSynthParameters.oscillatorMode(o, field) }
+        let mode = oscillatorMode(o)
+        HStack(spacing: 4) {
+            c.choice(p(LY_OSC_WARPMODE), label: "WARP", names: warpNames, order: LYSynthNames.warpOrder, accent: accent,
+                     columns: 2, width: 240, anchor: "warp\(o)")
+            c.choice(p(LY_OSC_WARPMODE2), label: "WARP 2", names: warpNames, order: LYSynthNames.warpOrder, accent: accent,
+                     columns: 2, width: 240, anchor: "warp2\(o)")
+            c.choice(p(LY_OSC_UNIMODE), label: "UNISON", names: LYSynthNames.unisonModes, accent: accent,
+                     columns: 2, width: 200, anchor: "uni\(o)")
+            if mode == LY_OSCMODE_WAVETABLE {
+                c.choice(p(LY_OSC_STACK), label: "STACK", names: LYSynthNames.stacks, accent: accent,
+                         columns: 1, width: 140, anchor: "stack\(o)")
+                c.choice(x(LY_OSX_SPECTRAL), label: "SPECTRAL", names: LYSynthNames.spectralWarps, accent: accent,
+                         columns: 2, width: 220, anchor: "spectral\(o)")
+            } else if mode == LY_OSCMODE_SAMPLE {
+                LYSynthToggle(title: "LOOP", isOn: c.isOn(x(LY_OSX_LOOP)), accent: accent) { c.toggle(x(LY_OSX_LOOP)) }
+                    .help("Loop from START to the end, or play once")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func oscillatorKnobs(_ o: Int, d: @escaping (Int) -> Int, d2: @escaping (Int) -> Int, accent: Color) -> some View {
+        let c = context
+        let p = { (local: Int) in LYSynthParameters.oscillator(o, local) }
+        let x = { (field: Int) in LYSynthParameters.oscillatorMode(o, field) }
+        let mode = oscillatorMode(o)
+        let spectralOn = mode == LY_OSCMODE_WAVETABLE && Int(c.value(x(LY_OSX_SPECTRAL)).rounded()) != LY_SPEC_OFF
+        let positionLabel = mode == LY_OSCMODE_SAMPLE ? "START" : mode == LY_OSCMODE_GRANULAR ? "POSITION" : "WT POS"
+        let note = { (value: Float) -> String in
+            let names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+            let n = Int(value.rounded())
+            return names[((n % 12) + 12) % 12] + String(n / 12 - 1)
+        }
+        Grid(horizontalSpacing: 0, verticalSpacing: 6) {
+            GridRow {
+                c.knob(p(LY_OSC_WTPOS), d(LY_DST_A_WTPOS), accent: accent, diameter: 32, label: positionLabel)
+                c.knob(p(LY_OSC_WARPAMT), d(LY_DST_A_WARP), accent: accent, label: "WARP")
+                c.knob(p(LY_OSC_WARPAMT2), d2(LY_DST_A_WARP2), accent: accent, label: "WARP 2")
+                c.knob(p(LY_OSC_LEVEL), d(LY_DST_A_LEVEL), accent: accent)
+                c.knob(p(LY_OSC_PAN), d(LY_DST_A_PAN), accent: accent, format: LYSynthContext.pan)
+                c.knob(p(LY_OSC_FINE), d2(LY_DST_A_FINE), accent: accent, label: "FINE", format: { String(format: "%+.0f¢", $0) })
+            }
+            GridRow {
+                c.knob(p(LY_OSC_UNISON), accent: accent, label: "VOICES")
+                c.knob(p(LY_OSC_DETUNE), d(LY_DST_A_DETUNE), accent: accent)
+                if mode == LY_OSCMODE_GRANULAR {
+                    c.knob(p(LY_OSC_WIDTH), d2(LY_DST_A_WIDTH), accent: accent)
+                    c.knob(x(LY_OSX_GRAIN_SIZE), LY_DST_A_GRAIN_SIZE + o, accent: accent, label: "SIZE",
+                           format: { String(format: "%.0f MS", 5 * pow(100, Double($0))) })
+                    c.knob(x(LY_OSX_GRAIN_DENSITY), accent: accent, label: "DENSITY",
+                           format: { String(format: "%.0f/S", 2 * pow(100, Double($0))) })
+                    c.knob(x(LY_OSX_GRAIN_SPRAY), LY_DST_A_GRAIN_SPRAY + o, accent: accent, label: "SPRAY")
+                    c.knob(x(LY_OSX_ROOT), accent: accent, label: "ROOT", format: note)
+                } else if mode == LY_OSCMODE_SAMPLE {
+                    c.knob(p(LY_OSC_BLEND), d(LY_DST_A_BLEND), accent: accent)
+                    c.knob(p(LY_OSC_WIDTH), d2(LY_DST_A_WIDTH), accent: accent)
+                    c.knob(x(LY_OSX_ROOT), accent: accent, label: "ROOT", format: note)
+                } else {
+                    c.knob(p(LY_OSC_BLEND), d(LY_DST_A_BLEND), accent: accent)
+                    c.knob(p(LY_OSC_WIDTH), d2(LY_DST_A_WIDTH), accent: accent)
+                    if spectralOn {
+                        c.knob(x(LY_OSX_SPECTRAL_AMT), LY_DST_A_SPECTRAL + o, accent: accent, label: "SPECTRAL")
+                    } else {
                         c.knob(p(LY_OSC_PHASE), accent: accent, label: "PHASE", format: { String(format: "%.0f°", $0 * 360) })
-                        c.knob(p(LY_OSC_RANDPHASE), accent: accent, label: "RAND")
                     }
+                    c.knob(p(LY_OSC_RANDPHASE), accent: accent, label: "RAND")
                 }
-                .frame(maxWidth: .infinity)
             }
         }
     }
@@ -913,6 +1007,29 @@ struct LYSynthEditor: View {
         var next = patch
         next.setCustomTable(oscillator, name)
         patch = next
+    }
+
+    private func chooseSample(_ oscillator: Int, _ name: String) {
+        if let sample = sampleLibrary.sample(named: name) { storeSampleInProject(name, sample) }
+        var next = patch
+        next.setSample(oscillator, name)
+        patch = next
+    }
+
+    private func importSample(_ oscillator: Int) {
+        let panel = NSOpenPanel()
+        panel.title = "LOAD SAMPLE"
+        panel.message = "Any audio file. It plays at its own pitch on ROOT (C4 unless you change it)."
+        panel.allowedContentTypes = [.audio, .wav, .aiff]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let sample = try LYSampleLibrary.importSample(from: url)
+            let name = sampleLibrary.store(sample, named: url.deletingPathExtension().lastPathComponent)
+            chooseSample(oscillator, name)
+        } catch {
+            NSSound.beep()
+        }
     }
 
     private func importTable(_ oscillator: Int) {

@@ -87,6 +87,17 @@ final class LYSynthInstrument {
                 lysynth_use_factory_table(core, Int32(oscillator), Int32(factory))
             }
         }
+        for oscillator in 0..<Int(LY_OSC_COUNT) {
+            let name = next.sampleName(oscillator)
+            guard previous == nil || name != previous?.sampleName(oscillator) else { continue }
+            if let name, let sample = LYSampleLibrary.shared.sample(named: name) {
+                sample.samples.withUnsafeBufferPointer {
+                    lysynth_set_sample(core, Int32(oscillator), $0.baseAddress, Int32($0.count), sample.rate)
+                }
+            } else {
+                lysynth_set_sample(core, Int32(oscillator), nil, 0, 0)
+            }
+        }
         for parameter in LYSynthParameters.all {
             let value = next.value(parameter.id)
             if previous == nil || previous?.value(parameter.id) != value {

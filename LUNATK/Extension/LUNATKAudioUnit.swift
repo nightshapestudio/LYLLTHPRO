@@ -396,23 +396,14 @@ final class LUNATKAudioUnit: AUAudioUnit {
         get {
             var state = super.fullState ?? [:]
             let current = Thread.isMainThread ? patchFromCore() : patch
-            var file = LYSynthPresetFile(patch: current)
-            file.wavetables = Self.onMain {
-                var tables: [String: Data] = [:]
-                for custom in [current.customTableA, current.customTableB, current.customTableC].compactMap({ $0 }) {
-                    if let frames = LYWavetableLibrary.shared.frames(named: custom) {
-                        tables[custom] = LYWavetableLibrary.floatData(frames)
-                    }
-                }
-                return tables
-            }
+            let file = Self.onMain { LYSynthPresetFile.carrying(current) }
             if let data = try? JSONEncoder().encode(file) { state[Self.stateKey] = data }
             return state
         }
         set {
             guard let state = newValue else { return }
             if let data = state[Self.stateKey] as? Data, let file = try? JSONDecoder().decode(LYSynthPresetFile.self, from: data) {
-                Self.onMain { LYWavetableLibrary.shared.register(projectTables: file.wavetables) }
+                Self.onMain { file.registerContents() }
                 loadPatch(file.patch)
             }
         }

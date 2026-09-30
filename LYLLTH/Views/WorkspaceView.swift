@@ -518,6 +518,7 @@ struct WorkspaceView: View {
                 }
                 // Project wavetables first, so synth tracks find them when they load.
                 LYWavetableLibrary.shared.register(projectTables: document.wavetables)
+                LYSampleLibrary.shared.register(projectSamples: document.synthSamples)
                 Task { @MainActor in
                     document.session = await audioUnits.restore(document.session, engine: audio.engine)
                 }
@@ -1576,6 +1577,9 @@ struct WorkspaceView: View {
                         instrument: audio.synthInstrument(for: trackID),
                         storeTableInProject: { name, frames in
                             document.wavetables[name] = LYWavetableLibrary.floatData(frames)
+                        },
+                        storeSampleInProject: { name, sample in
+                            document.synthSamples[name] = LYSampleLibrary.data(sample)
                         },
                         close: close
                     )

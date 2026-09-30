@@ -27,6 +27,11 @@ enum LYSynthParameters {
         (index == 0 ? LY_OSCA_BASE : index == 1 ? LY_OSCB_BASE : LY_OSCC_BASE) + local
     }
 
+    /// Oscillator 0, 1 or 2's mode block (LY_OSX_* fields).
+    static func oscillatorMode(_ index: Int, _ field: Int) -> Int {
+        LY_OSXA_BASE + index * Int(LY_OSX_STRIDE) + field
+    }
+
     static func lfo(_ index: Int, _ field: Int) -> Int {
         LY_LFO1_SHAPE + index * Int(LY_LFO_STRIDE) + (field - LY_LFO1_SHAPE)
     }
@@ -305,6 +310,17 @@ enum LYSynthParameters {
             add(decimatorStep(i, LY_DEC_STEP_Y_BASE), "decim.step\(i).y", "STEP \(i + 1) CRUSH", 0...1)
         }
         add(LY_OVERSAMPLE, "quality", "QUALITY", 0...Float(LY_OS_COUNT - 1), stepped: true)
+        for (o, name) in ["a", "b", "c"].enumerated() {
+            let x = oscillatorMode(o, 0)
+            add(x + LY_OSX_MODE, "\(name).mode", "MODE", 0...Float(LY_OSCMODE_COUNT - 1), stepped: true)
+            add(x + LY_OSX_SPECTRAL, "\(name).spectral", "SPECTRAL", 0...Float(LY_SPEC_COUNT - 1), stepped: true)
+            add(x + LY_OSX_SPECTRAL_AMT, "\(name).spectral.amount", "SPECTRAL", 0...1)
+            add(x + LY_OSX_LOOP, "\(name).loop", "LOOP", 0...1, stepped: true)
+            add(x + LY_OSX_ROOT, "\(name).root", "ROOT", 0...127, stepped: true)
+            add(x + LY_OSX_GRAIN_SIZE, "\(name).grain.size", "SIZE", 0...1)
+            add(x + LY_OSX_GRAIN_DENSITY, "\(name).grain.density", "DENSITY", 0...1)
+            add(x + LY_OSX_GRAIN_SPRAY, "\(name).grain.spray", "SPRAY", 0...1)
+        }
         return list
     }()
 
@@ -342,6 +358,9 @@ enum LYSynthNames {
     static let filters = ["LP 12", "LP 24", "HP 12", "HP 24", "BAND", "NOTCH", "LADDER", "COMB +", "COMB −", "FORMANT", "PHASER", "BAND 24", "MORPH"]
     static let priorities = ["LAST", "LOW", "HIGH"]
     static let qualities = ["1×", "2×", "4×"]
+    static let oscillatorModes = ["WAVETABLE", "SAMPLE", "GRANULAR"]
+    static let spectralWarps = ["OFF", "LOW PASS", "HIGH PASS", "FORMANT +", "FORMANT −", "SHIFT +", "SHIFT −",
+                                "SMEAR", "RANDOM", "DISPERSE", "ODD", "COMB"]
     static let filterOrder = [LY_FILTER_LP12, LY_FILTER_LP24, LY_FILTER_LADDER, LY_FILTER_HP12, LY_FILTER_HP24, LY_FILTER_BP,
                               LY_FILTER_BP24, LY_FILTER_NOTCH, LY_FILTER_MORPH, LY_FILTER_COMB_POS, LY_FILTER_COMB_NEG, LY_FILTER_FORMANT,
                               LY_FILTER_PHASER].map { Int($0) }
@@ -395,6 +414,10 @@ enum LYSynthNames {
         ("OSC C", [(LY_DST_C_LEVEL, "C LEVEL"), (LY_DST_C_PAN, "C PAN"), (LY_DST_C_PITCH, "C PITCH"), (LY_DST_C_FINE, "C FINE"),
                    (LY_DST_C_WTPOS, "C WT POS"), (LY_DST_C_WARP, "C WARP"), (LY_DST_C_WARP2, "C WARP 2"),
                    (LY_DST_C_DETUNE, "C DETUNE"), (LY_DST_C_BLEND, "C BLEND"), (LY_DST_C_WIDTH, "C WIDTH")].map { (Int($0.0), $0.1) }),
+        ("OSC MODES", [(LY_DST_A_SPECTRAL, "A SPECTRAL"), (LY_DST_B_SPECTRAL, "B SPECTRAL"), (LY_DST_C_SPECTRAL, "C SPECTRAL"),
+                       (LY_DST_A_GRAIN_SIZE, "A GRAIN SIZE"), (LY_DST_B_GRAIN_SIZE, "B GRAIN SIZE"), (LY_DST_C_GRAIN_SIZE, "C GRAIN SIZE"),
+                       (LY_DST_A_GRAIN_SPRAY, "A GRAIN SPRAY"), (LY_DST_B_GRAIN_SPRAY, "B GRAIN SPRAY"),
+                       (LY_DST_C_GRAIN_SPRAY, "C GRAIN SPRAY")].map { (Int($0.0), $0.1) }),
         ("SUB + NOISE", [(LY_DST_SUB_LEVEL, "SUB LEVEL"), (LY_DST_SUB_PAN, "SUB PAN"), (LY_DST_NOISE_LEVEL, "NOISE LEVEL"),
                          (LY_DST_NOISE_COLOR, "NOISE COLOR"), (LY_DST_NOISE_PITCH, "NOISE PITCH"), (LY_DST_NOISE_PAN, "NOISE PAN")].map { (Int($0.0), $0.1) }),
         ("FILTERS", [(LY_DST_CUTOFF, "CUTOFF"), (LY_DST_RES, "RESONANCE"), (LY_DST_DRIVE, "DRIVE"), (LY_DST_FILTER_MIX, "FILTER MIX"),
@@ -440,6 +463,11 @@ struct LYSynthPatch: Codable, Equatable {
     /// Oscillator C's table. Optional so patches saved before C still load.
     var tableC: Int? = nil
     var customTableC: String? = nil
+    /// The samples SAMPLE and GRANULAR play, by LYSampleLibrary name. With
+    /// none they play the oscillator's wavetable.
+    var sampleA: String? = nil
+    var sampleB: String? = nil
+    var sampleC: String? = nil
     /// Factory bank metadata: which category it lives in and how to use it.
     var category: String? = nil
     var info: LYSynthPresetInfo? = nil
@@ -456,6 +484,18 @@ struct LYSynthPatch: Codable, Equatable {
 
     func customTable(_ oscillator: Int) -> String? {
         oscillator == 0 ? customTableA : oscillator == 1 ? customTableB : customTableC
+    }
+
+    func sampleName(_ oscillator: Int) -> String? {
+        oscillator == 0 ? sampleA : oscillator == 1 ? sampleB : sampleC
+    }
+
+    mutating func setSample(_ oscillator: Int, _ name: String?) {
+        switch oscillator {
+        case 0: sampleA = name
+        case 1: sampleB = name
+        default: sampleC = name
+        }
     }
 
     /// Picks a factory table, dropping any custom one.

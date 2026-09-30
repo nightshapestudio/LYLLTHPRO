@@ -124,20 +124,14 @@ final class LUNATKVSTBox {
     func stateData() -> Data? {
         Self.onMain {
             let current = patchFromCore()
-            var file = LYSynthPresetFile(patch: current)
-            for custom in [current.customTableA, current.customTableB, current.customTableC].compactMap({ $0 }) {
-                if let frames = LYWavetableLibrary.shared.frames(named: custom) {
-                    file.wavetables[custom] = LYWavetableLibrary.floatData(frames)
-                }
-            }
-            return try? JSONEncoder().encode(file)
+            return try? JSONEncoder().encode(LYSynthPresetFile.carrying(current))
         }
     }
 
     func load(_ data: Data) -> Bool {
         guard let file = try? JSONDecoder().decode(LYSynthPresetFile.self, from: data) else { return false }
         Self.onMain {
-            LYWavetableLibrary.shared.register(projectTables: file.wavetables)
+            file.registerContents()
             patch = file.patch
             instrument.forgetTables()
             instrument.apply(file.patch, bpm: bpm)

@@ -228,6 +228,8 @@ struct LYLLTHSessionDocument: FileDocument {
     /// Custom LUNATK wavetables the song uses, raw Float32 frames by
     /// name, so a song opens with its sounds on any Mac.
     var wavetables: [String: Data] = [:]
+    /// Samples LUNATK's oscillators play (LYSampleLibrary.data), by name.
+    var synthSamples: [String: Data] = [:]
     /// Problems are non-fatal: the song opens with silent placeholders so the
     /// user can relink media instead of losing access to the entire project.
     private(set) var mediaIntegrityIssues: [LYMediaIntegrityIssue] = []
@@ -311,6 +313,10 @@ struct LYLLTHSessionDocument: FileDocument {
             guard let data = entry.value.regularFileContents else { return }
             result[(entry.key as NSString).deletingPathExtension] = data
         } ?? [:]
+        synthSamples = children["Samples"]?.fileWrappers?.reduce(into: [:]) { result, entry in
+            guard let data = entry.value.regularFileContents else { return }
+            result[(entry.key as NSString).deletingPathExtension] = data
+        } ?? [:]
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
@@ -348,6 +354,9 @@ struct LYLLTHSessionDocument: FileDocument {
             "Audio": FileWrapper(directoryWithFileWrappers: audioWrappers),
             "Wavetables": FileWrapper(directoryWithFileWrappers: wavetables.reduce(into: [String: FileWrapper]()) { result, entry in
                 result[entry.key + ".f32"] = FileWrapper(regularFileWithContents: entry.value)
+            }),
+            "Samples": FileWrapper(directoryWithFileWrappers: synthSamples.reduce(into: [String: FileWrapper]()) { result, entry in
+                result[entry.key + ".lysample"] = FileWrapper(regularFileWithContents: entry.value)
             }),
             "Presets": FileWrapper(directoryWithFileWrappers: [:]),
             "PluginStates": FileWrapper(directoryWithFileWrappers: [:]),

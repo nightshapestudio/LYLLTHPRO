@@ -70,6 +70,30 @@ optional DC blocker and reverb low cut. (The voice inserts now have their own DC
   editor it shares the second slot with B: the B / C button switches them and
   is lit while the hidden one plays. It draws its random numbers after
   everything else and only while on, so patches without it are unchanged.
+- **Oscillator modes** (the WT / SMP / GRN button on each oscillator):
+  - **SAMPLE** plays a loaded sample (any audio file, mono, at its own rate,
+    up to a minute) at its own pitch on ROOT, from START (the WT POS knob and
+    its routes), once or LOOPed from START to the end. Unison, detune, blend,
+    width and the sample-type warps (RM, AM, QUANTIZE, FLIP, FOLD) work;
+    phase warps don't apply. With no sample loaded it plays the wavetable,
+    frame after frame, as one long sound, in tune.
+  - **GRANULAR**: Hann-windowed grains (SIZE 5–500 ms, DENSITY 2–200 a
+    second, up to 32 at once) from around POSITION, strayed by SPRAY. Each
+    grain takes one unison voice's tuning and place in the stereo field.
+    Level is kept near the wavetable's as grains overlap.
+  - **SPECTRAL** (wavetable mode): each voice rebuilds its cycle from the
+    table's spectrum every 64 samples and crossfades from the last: LOW PASS,
+    HIGH PASS, FORMANT + / − (the spectrum's shape slides, the pitch stays),
+    SHIFT + / − (harmonics move along the series), SMEAR, RANDOM, DISPERSE,
+    ODD, COMB. The cycle is cut at the note's top harmonic, so it can't alias.
+  - Samples travel in presets, the song (a Samples folder in the package) and
+    the AU / VST3 state, like custom wavetables. Matrix: A/B/C SPECTRAL,
+    GRAIN SIZE, GRAIN SPRAY. Every mode value is appended; all 425 factory
+    presets render bit-for-bit as before.
+  - Cost on the Linux harness, 8 notes: wavetable 6%, SAMPLE with 4 unison
+    11%, GRANULAR 8% (22% at 200 overlapping grains). SPECTRAL measured 45–54%
+    there, but that is the harness's allocating stand-in FFT; on the Mac it
+    runs on vDSP.
 - **QUALITY (HQ 1× / 2× / 4×)**, in the VOICE panel: the voices run at 2× or
   4× the sample rate and come back down through halfband filters (79 taps,
   104 dB down; for 4×, a 19-tap stage first). Oscillators, warps, FM, filter
