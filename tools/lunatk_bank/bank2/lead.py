@@ -378,19 +378,23 @@ def presets():
     # A warm square with a bell struck into its attack: the ring modulator
     # sits 3.5x the note (inharmonic, like a bell's partials) and only ENV 3
     # opens it, so each note chimes and then settles into the square. The
-    # second square an octave up, a few cents off, is the brightness and the
-    # analog width; the sine an octave down holds it up as a lead.
+    # second square an octave and a fifth up (the 3rd harmonic: odd, so it
+    # stays a square; an octave up adds the even harmonics and reads as a
+    # saw) is the brightness; the sine an octave down
+    # holds it up as a lead. The pitch stays put: no VINTAGE drift, no detune
+    # (both made it warble). The warmth is the driven filter.
     p.osc(0, level=0.7, wt=1.0)
-    p.osc(1, level=0.32, wt=0.9, octave=1, fine=7)
+    p.osc(1, level=0.25, wt=1.0, octave=1, semi=7)
     p.sub(0.28, "SINE", octave=1)
     p.insert(1, "RING", amount=0.0, freq=0.726, mix=0.6)
     p.env(3, a=0.0, d=0.35, s=0.0, r=0.3)
     p.mod("ENV3", "INS1_AMOUNT", 0.75)
-    p.filter("LP24", hz=2600, res=0.18, keytrack=0.5, env=0.3, drive=0.35)
+    # Key tracking, ENV 2 and velocity open this well above 1800 Hz on a
+    # played note; from here the very top is just rounded off.
+    p.filter("LP24", hz=1800, res=0.18, keytrack=0.5, env=0.3, drive=0.35)
     p.filter2("HP12", hz=90)
     p.env(1, a=0.003, d=1.1, s=0.6, r=1.1)
     p.env(2, a=0.002, d=0.7, s=0.35, r=1.0)
-    p.set("vintage", 0.35)
     p.voice(voices=6, glide=0.0, vel=0.5, bend=2)
     velocity(p, 0.55, 0.15)
     p.mod("VELOCITY", "INS1_AMOUNT", 0.15)
@@ -398,10 +402,9 @@ def presets():
     p.tone("CUTOFF", 0.2)
     p.lfo(1, "TRIANGLE", sync="2 BAR", mode="FREE")
     p.set("macro2", 0.35)
-    # Slow, like an old poly: the upper square leans a little toward a pulse
-    # and the filter breathes, over two bars.
-    p.motion("LFO1", "B_WTPOS", 0.1)
-    p.motion("LFO1", "CUTOFF", 0.07)
+    # Slow, like an old poly: the filter breathes over two bars. Nothing moves
+    # the pitch or the wave shape.
+    p.motion("LFO1", "CUTOFF", 0.1)
     echo(p, time="3/16", mix=0.08, feedback=0.25, amount=0.1)
     space(p, 0.16, mode="PLATE", decay=0.35)
     grit(p, mode="TUBE", drive=0.35, tone=0.5, amount=0.35, base=0.0)
