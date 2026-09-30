@@ -837,6 +837,11 @@ struct LYSynthEditor: View {
                         }
                         .help("Which held key the mono voice plays: the last pressed, the lowest or the highest. Click to change")
                     }
+                    let quality = min(max(Int(c.value(LY_OVERSAMPLE)), 0), LYSynthNames.qualities.count - 1)
+                    LYSynthToggle(title: "HQ \(LYSynthNames.qualities[quality])", isOn: quality > 0, accent: accent) {
+                        c.set(LY_OVERSAMPLE, Float((quality + 1) % LYSynthNames.qualities.count))
+                    }
+                    .help("QUALITY: runs the voices at 2× or 4× the sample rate, so warps, FM, drive and saturation alias far less. Costs about 1.7× or 2.7× the CPU. Click to change")
                 }
                 HStack(spacing: 0) {
                     c.knob(LY_VINTAGE, accent: LYLLTHTheme.lavender, diameter: 26, label: "VINTAGE", format: { String(format: "%.0f%%", $0 * 100) })

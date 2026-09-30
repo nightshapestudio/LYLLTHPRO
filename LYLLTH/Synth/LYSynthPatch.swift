@@ -303,6 +303,7 @@ enum LYSynthParameters {
             add(decimatorStep(i, LY_DEC_STEP_X_BASE), "decim.step\(i).x", "STEP \(i + 1) DESTROY", 0...1)
             add(decimatorStep(i, LY_DEC_STEP_Y_BASE), "decim.step\(i).y", "STEP \(i + 1) CRUSH", 0...1)
         }
+        add(LY_OVERSAMPLE, "quality", "QUALITY", 0...Float(LY_OS_COUNT - 1), stepped: true)
         return list
     }()
 
@@ -335,6 +336,7 @@ enum LYSynthNames {
     static let stacks = ["OFF", "+12", "±12", "+7 +12", "+7"]
     static let filters = ["LP 12", "LP 24", "HP 12", "HP 24", "BAND", "NOTCH", "LADDER", "COMB +", "COMB −", "FORMANT", "PHASER", "BAND 24", "MORPH"]
     static let priorities = ["LAST", "LOW", "HIGH"]
+    static let qualities = ["1×", "2×", "4×"]
     static let filterOrder = [LY_FILTER_LP12, LY_FILTER_LP24, LY_FILTER_LADDER, LY_FILTER_HP12, LY_FILTER_HP24, LY_FILTER_BP,
                               LY_FILTER_BP24, LY_FILTER_NOTCH, LY_FILTER_MORPH, LY_FILTER_COMB_POS, LY_FILTER_COMB_NEG, LY_FILTER_FORMANT,
                               LY_FILTER_PHASER].map { Int($0) }

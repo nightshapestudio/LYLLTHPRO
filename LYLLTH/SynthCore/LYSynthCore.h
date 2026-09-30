@@ -287,8 +287,14 @@ enum {
     LY_DEC_STEP_ON_BASE,
     LY_DEC_STEP_X_BASE = LY_DEC_STEP_ON_BASE + 16,
     LY_DEC_STEP_Y_BASE = LY_DEC_STEP_X_BASE + 16,
-    LY_PARAM_COUNT = LY_DEC_STEP_Y_BASE + 16
+
+    // QUALITY: the voices run at 2× or 4× the sample rate and are filtered
+    // back down, so the oscillators' warps, FM, the filter drive, saturation
+    // and the voice inserts fold far less back into the audio band.
+    LY_OVERSAMPLE = LY_DEC_STEP_Y_BASE + 16, // LY_OS_*
+    LY_PARAM_COUNT
 };
+enum { LY_OS_OFF = 0, LY_OS_2X, LY_OS_4X, LY_OS_COUNT };
 enum { LY_DEC_STEPS = 16 };
 enum { LY_DECOFF_DRY = 0, LY_DECOFF_HOLD, LY_DECOFF_COUNT };
 enum { LY_PRIORITY_LAST = 0, LY_PRIORITY_LOW, LY_PRIORITY_HIGH, LY_PRIORITY_COUNT };

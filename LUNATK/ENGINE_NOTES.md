@@ -56,6 +56,20 @@ optional DC blocker and reverb low cut. (The voice inserts now have their own DC
   ladder gives up as resonance rises), shared by both filters.
 - **Mono key priority**: LAST, LOW or HIGH, and letting go of the playing key
   returns to one still held (legato if LEGATO is on).
+- **QUALITY (HQ 1× / 2× / 4×)**, in the VOICE panel: the voices run at 2× or
+  4× the sample rate and come back down through halfband filters (79 taps,
+  104 dB down; for 4×, a 19-tap stage first). Oscillators, warps, FM, filter
+  drive, the saturation between the filters, feedback and the voice inserts
+  are all covered. The wavetables keep the harmonics they have at 1×, so the
+  extra room is only for what those stages add. Noise is still made at the
+  sample rate, and the RATE saturation and DECIMATE insert hold for the same
+  time, so they sound the same. The combs get longer lines, so they reach the
+  same low pitches. Measured at 48 kHz: hard saturation's aliasing goes from
+  −23 to −45 dB (2×) and −53 dB (4×), FOLD from −32 to −47 and −59 dB, and
+  the loudest SYNC alias from −5 to −16 and −23 dB. Costs about 1.7× (2×) and
+  2.7× (4×) the voice CPU. Off by default: every factory preset renders
+  bit-for-bit as before. The effects rack and the master clipper still run
+  at the sample rate.
 
 Every new parameter sits after the drawn LFO points, so the plug-ins' host
 parameter ids for older parameters did not move. All 176 factory presets render

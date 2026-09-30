@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -27,9 +28,12 @@ constexpr int kDisplayDecimator = 40 + LY_DST_COUNT + 12 + LY_VOC_MAX_BANDS;
 constexpr int kQueue = 1024;
 constexpr int kPending = 1024;
 constexpr int kScope = 2048;
-constexpr int kCombSize = 4096;      // voice comb filter: down to ~11 Hz at 44.1 kHz
+constexpr int kMaxOversample = 4;    // QUALITY: the voices at up to 4× the sample rate
+constexpr int kCombBase = 4096;      // voice comb filter: down to ~11 Hz at 44.1 kHz
+constexpr int kCombSize = kCombBase * kMaxOversample;
 constexpr int kHeldNotes = 32;
-constexpr int kInsertComb = 2048;   // voice insert comb: down to ~22 Hz at 44.1 kHz
+constexpr int kInsertCombBase = 2048; // voice insert comb: down to ~22 Hz at 44.1 kHz
+constexpr int kInsertComb = kInsertCombBase * kMaxOversample;
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 
 // MARK: - Small helpers
@@ -246,7 +250,7 @@ inline void svfCoefficients(double hz, double sampleRate, float k, float &a1, fl
 }
 
 FilterSetup makeFilter(int type, double hz, float res, float drive, float mix, double sampleRate,
-                       float morph = 0.f, bool twoPole = false, float bassLoss = 0.f) {
+                       float morph = 0.f, bool twoPole = false, float bassLoss = 0.f, int oversample = 1) {
     FilterSetup f;
     f.type = type; f.res = res; f.drive = drive; f.mix = mix;
     f.preGain = 1.f + drive * 9.f;
@@ -262,7 +266,7 @@ FilterSetup makeFilter(int type, double hz, float res, float drive, float mix, d
         f.ladderMakeup = 1.f + res * (twoPole ? 0.5f : 0.8f) * (1.f - clamp01(bassLoss));
         break;
     case LY_FILTER_COMB_POS: case LY_FILTER_COMB_NEG:
-        f.combDelay = (float)std::min(sampleRate / hz, (double)kCombSize - 4);
+        f.combDelay = (float)std::min(sampleRate / hz, (double)kCombBase * oversample - 4);
         f.combFeedback = (type == LY_FILTER_COMB_POS ? 1.f : -1.f) * res * 0.96f;
         break;
     case LY_FILTER_FORMANT: {
@@ -324,14 +328,23 @@ struct FilterChannel {
     float phaserFeedback = 0;
     float comb[kCombSize] = {};
     int combWrite = 0;
+    int combLength = kCombBase;          // the base length times the oversampling
+    bool combUsed = false;               // the comb is cleared only after it has run
     void reset() {
         svf[0].reset(); svf[1].reset();
         for (auto &f : formant) f.reset();
         std::memset(ladder, 0, sizeof(ladder));
         std::memset(allpass, 0, sizeof(allpass));
         phaserFeedback = 0;
-        std::memset(comb, 0, sizeof(comb));
+        if (combUsed) std::memset(comb, 0, sizeof(float) * combLength);
+        combUsed = false;
         combWrite = 0;
+    }
+    void setOversample(int oversample) {
+        std::memset(comb, 0, sizeof(float) * std::max(combLength, kCombBase * oversample));
+        combLength = kCombBase * oversample;
+        combWrite = 0;
+        combUsed = false;
     }
     inline float process(const FilterSetup &f, float input) {
         const float x = f.drive > 0.001f ? fastTanh(input * f.preGain) * f.postGain * 1.4f : input;
@@ -354,14 +367,15 @@ struct FilterChannel {
             break;
         }
         case LY_FILTER_COMB_POS: case LY_FILTER_COMB_NEG: {
+            combUsed = true;
             float position = (float)combWrite - f.combDelay;
-            if (position < 0) position += kCombSize;
+            if (position < 0) position += combLength;
             const int i = (int)position;
             const float frac = position - i;
-            const float delayed = comb[i % kCombSize] + (comb[(i + 1) % kCombSize] - comb[i % kCombSize]) * frac;
+            const float delayed = comb[i % combLength] + (comb[(i + 1) % combLength] - comb[i % combLength]) * frac;
             const float out = x + delayed * f.combFeedback;
             comb[combWrite] = flushf(fastTanh(out));
-            combWrite = (combWrite + 1) % kCombSize;
+            combWrite = (combWrite + 1) % combLength;
             y = out * (1.f - std::fabs(f.combFeedback) * 0.5f);
             break;
         }
@@ -487,7 +501,22 @@ struct InsertState {
     float hilbertDelay[2];
     float comb[2][kInsertComb];
     int combWrite;
-    void reset() { std::memset(this, 0, sizeof(*this)); holdPhase = 1; }
+    int combLength;                      // the base length times the oversampling
+    bool combUsed;                       // the comb is cleared only after it has run
+    void reset() {
+        const int length = combLength > 0 ? combLength : kInsertCombBase;
+        const bool used = combUsed;
+        std::memset(this, 0, offsetof(InsertState, comb));
+        if (used) for (auto &c : comb) std::memset(c, 0, sizeof(float) * length);
+        combWrite = 0; combLength = length; combUsed = false;
+        holdPhase = 1;
+    }
+    void setOversample(int oversample) {
+        for (auto &c : comb) std::memset(c, 0, sizeof(float) * std::max(combLength, kInsertCombBase * oversample));
+        combLength = kInsertCombBase * oversample;
+        combWrite = 0;
+        combUsed = false;
+    }
 };
 
 // Two 4-stage allpass chains 90° apart across the audio band (Olli Niemitalo's
@@ -509,7 +538,7 @@ inline float hilbertChain(float (*stages)[4], const float *coefficients, float x
 
 /// One insert over a chunk, in place. `noteHz` is the voice's pitch.
 void processInsert(InsertState &st, int type, float *L, float *R, int n, float amount, float freq, float mix,
-                   double noteHz, double sampleRate) {
+                   double noteHz, double sampleRate, int oversample) {
     if (type <= LY_INS_OFF || type >= LY_INS_COUNT || mix <= 0.0005f) return;
     float *ch[2] = { L, R };
     switch (type) {
@@ -522,7 +551,8 @@ void processInsert(InsertState &st, int type, float *L, float *R, int n, float a
         break;
     }
     case LY_INS_DECIMATE: {
-        const float step = 1.f / (1.f + amount * amount * 63.f);
+        // Held for the same time at any QUALITY.
+        const float step = 1.f / (1.f + amount * amount * 63.f) / oversample;
         for (int i = 0; i < n; ++i) {
             st.holdPhase += step;
             if (st.holdPhase >= 1.f) { st.holdPhase -= std::floor(st.holdPhase); st.hold[0] = L[i]; st.hold[1] = R[i]; }
@@ -592,15 +622,17 @@ void processInsert(InsertState &st, int type, float *L, float *R, int n, float a
     }
     case LY_INS_COMB: {
         const double hz = std::max(25.0, noteHz * std::pow(2.0, (freq - 0.5) * 4.0));
-        const float delay = (float)std::min((double)kInsertComb - 2, std::max(2.0, sampleRate / hz));
+        const int length = st.combLength > 0 ? st.combLength : kInsertCombBase;
+        const float delay = (float)std::min((double)length - 2, std::max(2.0, sampleRate / hz));
         const float feedback = amount * 0.95f;
         const float gain = std::sqrt(1.f - feedback * feedback);
+        st.combUsed = true;
         for (int i = 0; i < n; ++i) {
             float read = (float)st.combWrite - delay;
-            if (read < 0) read += kInsertComb;
+            if (read < 0) read += length;
             const int r0 = (int)read;
             const float t = read - r0;
-            const int r1 = (r0 + 1) % kInsertComb;
+            const int r1 = (r0 + 1) % length;
             for (int c = 0; c < 2; ++c) {
                 const float delayed = st.comb[c][r0] + (st.comb[c][r1] - st.comb[c][r0]) * t;
                 const float x = ch[c][i];
@@ -608,7 +640,7 @@ void processInsert(InsertState &st, int type, float *L, float *R, int n, float a
                 st.comb[c][st.combWrite] = flushf(fastTanh(y));
                 ch[c][i] = x + (y * gain - x) * mix;
             }
-            st.combWrite = (st.combWrite + 1) % kInsertComb;
+            st.combWrite = (st.combWrite + 1) % length;
         }
         break;
     }
@@ -664,6 +696,7 @@ struct Voice {
     double subPhase = 0;
     float lastA[kChunk] = {};            // oscillator A's last chunk, B's FM source
     float noiseColor = 0;
+    int noiseCount = 0;                  // oversampled: where in the held base-rate noise sample
     NoiseState noise;
     float random = 0;
     float stepCutoff = 1, stepResonance = 0;
@@ -712,12 +745,45 @@ double hostTicksPerSecond() {
     return 1e9 * (double)info.denom / (double)info.numer;
 }
 
+// Halfband low-passes for coming back down from oversampled voices. Every
+// other tap is zero and the middle one is ½, so only the rest are kept: the
+// taps 1, 3, 5… from the middle.
+// 79 taps: flat to 0.21 of the rate, 104 dB down from 0.29 (2× to 1×).
+const float kHalfband2[20] = {
+    3.173955095e-01f, -1.033884160e-01f, 5.922984632e-02f, -3.945633506e-02f, 2.794163766e-02f,
+    -2.030764245e-02f, 1.487843304e-02f, -1.087035518e-02f, 7.860958270e-03f, -5.593783084e-03f,
+    3.896830794e-03f, -2.644216800e-03f, 1.738331268e-03f, -1.100119679e-03f, 6.649709550e-04f,
+    -3.797156114e-04f, 2.016891471e-04f, -9.708471847e-05f, 4.043417588e-05f, -1.360747532e-05f
+};
+// 19 taps: flat to 0.12 of the rate, 92 dB down from 0.38 (4× to 2×, where
+// only what would fold into the audio band has to go).
+const float kHalfband4[5] = { 3.073924582e-01f, -7.709985448e-02f, 2.538772024e-02f, -6.667608381e-03f, 9.988628678e-04f };
+
+/// Two samples in, one out, low-passed at half the incoming band.
+template <int K> struct Halfband {
+    static constexpr int kTaps = 4 * K - 1;
+    float history[2 * kTaps] = {};       // written twice, so the window is always contiguous
+    int write = 0;
+    void reset() { std::memset(history, 0, sizeof(history)); write = 0; }
+    inline void push(float x) { history[write] = history[write + kTaps] = x; write = write + 1 == kTaps ? 0 : write + 1; }
+    inline float process(const float *h, float a, float b) {
+        push(a); push(b);
+        const float *x = history + write;   // oldest to newest
+        float y = 0.5f * x[2 * K - 1];
+        for (int k = 0; k < K; ++k) y += h[k] * (x[2 * K - 2 - 2 * k] + x[2 * K + 2 * k]);
+        return y;
+    }
+};
+
 } // namespace
 
 // MARK: - Synth
 
 struct LYSynth {
     double sampleRate;
+    // QUALITY: the voices' rate, and how many times the sample rate it is.
+    int oversample = 1;
+    double voiceRate = 44100;
     double ticksPerSecond = hostTicksPerSecond();
     std::array<std::atomic<float>, LY_PARAM_COUNT> parameters;
     float smoothed[LY_PARAM_COUNT];
@@ -828,6 +894,10 @@ struct LYSynth {
     float mixL[kChunk], mixR[kChunk];
     float busL[kChunk], busR[kChunk];
     float oscL[2][kChunk], oscR[2][kChunk], oscMono[2][kChunk];
+    // The voices summed at the oversampled rate, and the way back down.
+    float overL[kChunk * kMaxOversample], overR[kChunk * kMaxOversample];
+    Halfband<20> down2[2];
+    Halfband<5> down4[2];
 };
 
 namespace {
@@ -1063,7 +1133,7 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
         + m[LY_DST_A_PITCH + dOffset] * 24.f + m[LY_DST_PITCH] * 24.f + v.bendSemis
         + clamp01(s->raw[LY_VINTAGE]) * (v.vintagePitch[o] * 0.06f + v.drift() * 0.04f);
     const double frequency = v.frequency * std::pow(2.0, semis / 12.0);
-    const double baseIncrement = frequency / s->sampleRate;
+    const double baseIncrement = frequency / s->voiceRate;
     if (baseIncrement >= 0.5) return;
 
     const double framePosition = position * (table->frames - 1);
@@ -1088,7 +1158,9 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
         const float cents = spread * detune * detune * 100.f + stackSemis * 100.f;
         increment[j] = baseIncrement * std::pow(2.0, cents / 1200.0);
         if (increment[j] >= 0.5) increment[j] = 0;
-        int level = (int)std::ceil(std::log2(std::max(1.0, increment[j] * kSize)));
+        // Oversampled, the table keeps the harmonics it has at the sample
+        // rate: the room above is for what the warps add.
+        int level = (int)std::ceil(std::log2(std::max(1.0, increment[j] * kSize * s->oversample)));
         level = std::max(0, std::min(kLevels - 1, level));
         t0[j] = table->frame(level, f0);
         t1[j] = table->frame(level, f1);
@@ -1270,14 +1342,23 @@ double lfoIncrement(const LYSynth *s, int l, const float *m, int n) {
     return hz * n / s->sampleRate;
 }
 
-void renderVoice(LYSynth *s, Voice &v, int n) {
+/// One voice over `n` samples at the voice rate. Oversampled, a chunk comes
+/// in `pieces` calls: the modulation is worked out on the first
+/// (`fresh`), and the amplifier ramps across all of them.
+void renderVoice(LYSynth *s, Voice &v, int n, int piecesLeft = 1, bool fresh = true) {
     const float *p = s->smoothed;
     const float *r = s->raw;
+    const double sampleRate = s->voiceRate;
+    const int oversample = s->oversample;
 
     // Modulation for this chunk, from where every source is now.
     float m[LY_DST_COUNT];
-    evaluateMatrix(s, v, m);
-    std::memcpy(v.modulation, m, sizeof(m));
+    if (fresh) {
+        evaluateMatrix(s, v, m);
+        std::memcpy(v.modulation, m, sizeof(m));
+    } else {
+        std::memcpy(m, v.modulation, sizeof(m));
+    }
     const bool mpe = r[LY_MPE] > 0.5f;
     v.bendSemis = s->masterBend * r[LY_BEND_RANGE] + (mpe && v.channel != 0 ? s->channelBend[v.channel & 15] * 48.f : 0.f);
     if (mpe) v.pressure = s->channelPressure[v.channel & 15];
@@ -1285,7 +1366,7 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
     // Glide.
     const float glide = r[LY_GLIDE];
     if (glide > 0.001f) {
-        const double k = std::exp(-(double)n / (glide * s->sampleRate * 0.25));
+        const double k = std::exp(-(double)n / (glide * sampleRate * 0.25));
         v.frequency = v.targetFrequency + (v.frequency - v.targetFrequency) * k;
     } else {
         v.frequency = v.targetFrequency;
@@ -1331,7 +1412,7 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         const float level = clamp01(p[LY_SUB_LEVEL] + m[LY_DST_SUB_LEVEL]);
         float gl, gr; panGains(p[LY_SUB_PAN] + m[LY_DST_SUB_PAN], gl, gr);
         const double increment = v.frequency * std::pow(2.0, (v.bendSemis + p[LY_TUNE] / 100.0 + m[LY_DST_PITCH] * 24.0) / 12.0)
-            / std::exp2(std::max(1.f, std::round(r[LY_SUB_OCTAVE]))) / s->sampleRate;
+            / std::exp2(std::max(1.f, std::round(r[LY_SUB_OCTAVE]))) / sampleRate;
         const int shape = (int)std::lround(r[LY_SUB_SHAPE]);
         const float dt = (float)increment;
         auto blep = [dt](float t) {
@@ -1366,12 +1447,17 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         const double keyHz = r[LY_NOISE_KEYTRACK] > 0.5f ? v.frequency : 261.6;
         const double rateHz = keyHz * std::pow(2.0, (clamp01(p[LY_NOISE_PITCH] + m[LY_DST_NOISE_PITCH]) - 0.5) * 8.0)
             * (type == LY_NOISE_CRACKLE ? 4.0 : type == LY_NOISE_DIGITAL ? 16.0 : type == LY_NOISE_METAL ? 12.0 : 1.0);
+        // Noise is made at the sample rate and held when oversampled: the
+        // same colour and level at any QUALITY.
         float ba1 = 0, ba2 = 0, ba3 = 0;
         if (type == LY_NOISE_BREATH) svfCoefficients(std::min(rateHz * 2.0, s->sampleRate * 0.4), s->sampleRate, 0.35f, ba1, ba2, ba3);
         const float k = 1.f - color * 0.97f;
         for (int i = 0; i < n; ++i) {
-            const float raw = v.noise.next(type, s->random, rateHz, s->sampleRate, ba1, ba2, ba3);
-            v.noiseColor = flushf(v.noiseColor + (raw - v.noiseColor) * k);
+            if (v.noiseCount == 0) {
+                const float raw = v.noise.next(type, s->random, rateHz, s->sampleRate, ba1, ba2, ba3);
+                v.noiseColor = flushf(v.noiseColor + (raw - v.noiseColor) * k);
+            }
+            if (oversample > 1) v.noiseCount = (v.noiseCount + 1) % oversample;
             const float value = v.noiseColor * level * (0.6f + color * 0.8f);
             extraL[i] = value * gl;
             extraR[i] = value * gr;
@@ -1390,7 +1476,7 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
             processInsert(v.insert[k], type, L, R, n,
                           clamp01(p[b + (LY_INS1_AMOUNT - LY_INS1_TYPE)] + m[d]),
                           clamp01(p[b + (LY_INS1_FREQ - LY_INS1_TYPE)] + m[d + 1]),
-                          clamp01(p[b + (LY_INS1_MIX - LY_INS1_TYPE)]), v.frequency, s->sampleRate);
+                          clamp01(p[b + (LY_INS1_MIX - LY_INS1_TYPE)]), v.frequency, sampleRate, oversample);
         }
     };
     auto anyInsertAt = [&](int position) {
@@ -1419,18 +1505,18 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         if (f1On) {
             const double hz = cutoffHz(p[LY_FILTER_CUTOFF], p[LY_FILTER_KEYTRACK], p[LY_FILTER_ENVAMT], v.envelope[1].value,
                                        m[LY_DST_CUTOFF] + vintageCutoff);
-            v.cutoffHz = (float)std::min(hz, s->sampleRate * 0.45);
+            v.cutoffHz = (float)std::min(hz, sampleRate * 0.45);
             one = makeFilter((int)std::lround(r[LY_FILTER_TYPE]), hz, clamp01(p[LY_FILTER_RES] + m[LY_DST_RES]),
-                             clamp01(p[LY_FILTER_DRIVE] + m[LY_DST_DRIVE]), clamp01(p[LY_FILTER_MIX] + m[LY_DST_FILTER_MIX]), s->sampleRate,
-                             clamp01(p[LY_FILTER_MORPH_POS] + m[LY_DST_MORPH]), r[LY_LADDER_POLES] > 0.5f, p[LY_LADDER_BASS]);
+                             clamp01(p[LY_FILTER_DRIVE] + m[LY_DST_DRIVE]), clamp01(p[LY_FILTER_MIX] + m[LY_DST_FILTER_MIX]), sampleRate,
+                             clamp01(p[LY_FILTER_MORPH_POS] + m[LY_DST_MORPH]), r[LY_LADDER_POLES] > 0.5f, p[LY_LADDER_BASS], oversample);
         }
         if (f2On) {
             const double hz = cutoffHz(p[LY_F2_CUTOFF], p[LY_F2_KEYTRACK], p[LY_F2_ENVAMT], v.envelope[2].value,
                                        m[LY_DST_F2_CUTOFF] + vintageCutoff);
-            v.cutoff2Hz = (float)std::min(hz, s->sampleRate * 0.45);
+            v.cutoff2Hz = (float)std::min(hz, sampleRate * 0.45);
             two = makeFilter((int)std::lround(r[LY_F2_TYPE]), hz, clamp01(p[LY_F2_RES] + m[LY_DST_F2_RES]),
-                             clamp01(p[LY_F2_DRIVE] + m[LY_DST_F2_DRIVE]), clamp01(p[LY_F2_MIX] + m[LY_DST_F2_MIX]), s->sampleRate,
-                             clamp01(p[LY_F2_MORPH] + m[LY_DST_F2_MORPH]), r[LY_LADDER_POLES] > 0.5f, p[LY_LADDER_BASS]);
+                             clamp01(p[LY_F2_DRIVE] + m[LY_DST_F2_DRIVE]), clamp01(p[LY_F2_MIX] + m[LY_DST_F2_MIX]), sampleRate,
+                             clamp01(p[LY_F2_MORPH] + m[LY_DST_F2_MORPH]), r[LY_LADDER_POLES] > 0.5f, p[LY_LADDER_BASS], oversample);
         }
         const bool parallel = routing == LY_ROUTING_PARALLEL && f1On && f2On;
         // SATURATION between the filters: after filter 1 (and before filter 2
@@ -1441,8 +1527,8 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         const float satDrive = clamp01(p[LY_FSAT_DRIVE] + m[LY_DST_FSAT_DRIVE]);
         const float satGain = 1.f + satDrive * 15.f;
         const float satSteps = std::exp2(12.f - satDrive * 10.f);
-        const float satStep = 1.f / (1.f + satDrive * satDrive * 40.f);
-        const float satDC = 1.f - (float)(kTwoPi * 5.0 / s->sampleRate);
+        const float satStep = 1.f / (1.f + satDrive * satDrive * 40.f) / oversample;
+        const float satDC = 1.f - (float)(kTwoPi * 5.0 / sampleRate);
         float gl = 1, gr = 1;
         const float fpan = clampf(p[LY_FILTER_PAN] + m[LY_DST_FILTER_PAN], -1, 1);
         if (std::fabs(fpan) > 0.001f) { gl = fpan > 0 ? 1.f - fpan : 1.f; gr = fpan < 0 ? 1.f + fpan : 1.f; }
@@ -1453,7 +1539,7 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         const float fbGain = fbAmount * 1.25f;
         const float fbDrive = 1.f + p[LY_FB_DRIVE] * 7.f;
         const float fbHz = 150.f * std::pow(100.f, clamp01(p[LY_FB_TONE] + m[LY_DST_FB_TONE]));
-        const float fbCoef = 1.f - std::exp(-(float)kTwoPi * std::min(fbHz, (float)s->sampleRate * 0.45f) / (float)s->sampleRate);
+        const float fbCoef = 1.f - std::exp(-(float)kTwoPi * std::min(fbHz, (float)sampleRate * 0.45f) / (float)sampleRate);
         for (int i = 0; i < n; ++i) {
             float in[2] = { wetL[i], wetR[i] };
             const float in2[2] = { splitL[i], splitR[i] };
@@ -1515,14 +1601,48 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
     // PUNCH: a short lift on each attack, gone after about 30 ms.
     const float punch = clamp01(p[LY_PUNCH]);
     if (punch > 0.0005f) ampTarget *= 1.f + punch * 1.5f * std::exp(-(float)v.elapsed / 0.012f);
-    const float step = (ampTarget - v.amp) / n;
+    const float step = (ampTarget - v.amp) / (n * piecesLeft);
     float amp = v.amp;
     for (int i = 0; i < n; ++i) {
         amp += step;
         wetL[i] = (wetL[i] + dryL[i]) * amp;
         wetR[i] = (wetR[i] + dryR[i]) * amp;
     }
-    v.amp = ampTarget;
+    v.amp = piecesLeft > 1 ? amp : ampTarget;
+}
+
+/// QUALITY: a new voice rate. The comb delays take the longer lines it needs
+/// and start empty; the way down starts silent.
+void setOversample(LYSynth *s, int quality) {
+    const int oversample = quality >= LY_OS_4X ? 4 : quality == LY_OS_2X ? 2 : 1;
+    if (oversample == s->oversample) return;
+    s->oversample = oversample;
+    s->voiceRate = s->sampleRate * oversample;
+    for (Voice *v = s->voices; v != s->voices + kMaxVoices + 1; ++v) {
+        Voice &voice = v == s->voices + kMaxVoices ? s->idle : *v;
+        for (auto &filter : voice.filter) for (auto &channel : filter) channel.setOversample(oversample);
+        for (auto &insert : voice.insert) insert.setOversample(oversample);
+        voice.noiseCount = 0;
+    }
+    for (int c = 0; c < 2; ++c) { s->down2[c].reset(); s->down4[c].reset(); }
+}
+
+/// The voices, summed at the voice rate, back down to the sample rate and
+/// into `outL` / `outR`.
+void comeDown(LYSynth *s, float *outL, float *outR, int n) {
+    for (int c = 0; c < 2; ++c) {
+        const float *x = c == 0 ? s->overL : s->overR;
+        float *out = c == 0 ? outL : outR;
+        if (s->oversample == 4) {
+            for (int i = 0; i < n; ++i) {
+                const float a = s->down4[c].process(kHalfband4, x[4 * i], x[4 * i + 1]);
+                const float b = s->down4[c].process(kHalfband4, x[4 * i + 2], x[4 * i + 3]);
+                out[i] += s->down2[c].process(kHalfband2, a, b);
+            }
+        } else {
+            for (int i = 0; i < n; ++i) out[i] += s->down2[c].process(kHalfband2, x[2 * i], x[2 * i + 1]);
+        }
+    }
 }
 
 bool anyGateHeld(const LYSynth *s) {
@@ -2091,6 +2211,7 @@ extern "C" {
 LYSynth *lysynth_create(double sampleRate) {
     auto *s = new LYSynth();
     s->sampleRate = sampleRate > 0 ? sampleRate : 44100;
+    s->voiceRate = s->sampleRate;
     setDefaults(s);
     buildSmoothing(s);
     for (int i = 0; i < LY_PARAM_COUNT; ++i) {
@@ -2163,6 +2284,7 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
         s->raw[i] = target;
         s->smoothed[i] = s->smooths[i] ? s->smoothed[i] + (target - s->smoothed[i]) * 0.35f : target;
     }
+    setOversample(s, (int)std::lround(s->raw[LY_OVERSAMPLE]));
 
     // Move newly queued events into the time-ordered pending list.
     const uint32_t w = s->writeIndex.load(std::memory_order_acquire);
@@ -2251,6 +2373,11 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
         }
 
         float *outL = left + position, *outR = right + position;
+        const int oversample = s->oversample;
+        if (oversample > 1) {
+            std::memset(s->overL, 0, sizeof(float) * n * oversample);
+            std::memset(s->overR, 0, sizeof(float) * n * oversample);
+        }
         for (auto &v : s->voices) {
             if (!v.active) continue;
             const float *mod = v.modulation;
@@ -2277,10 +2404,20 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
                                  mode == LY_LFOMODE_ENV, 0.f);
             }
             v.elapsed += (double)n / s->sampleRate;
-            renderVoice(s, v, n);
-            for (int i = 0; i < n; ++i) { outL[i] += s->mixL[i]; outR[i] += s->mixR[i]; }
+            if (oversample == 1) {
+                renderVoice(s, v, n);
+                for (int i = 0; i < n; ++i) { outL[i] += s->mixL[i]; outR[i] += s->mixR[i]; }
+            } else {
+                // The chunk at the voice rate, a chunk's length at a time.
+                for (int k = 0; k < oversample; ++k) {
+                    renderVoice(s, v, n, oversample - k, k == 0);
+                    float *l = s->overL + k * n, *rr = s->overR + k * n;
+                    for (int i = 0; i < n; ++i) { l[i] += s->mixL[i]; rr[i] += s->mixR[i]; }
+                }
+            }
             if (v.envelope[0].stage == 0 && v.amp < 1e-5f) v.active = false;
         }
+        if (oversample > 1) comeDown(s, outL, outR, n);
 
         // Effects follow the newest voice's modulation, or the global
         // sources alone when nothing is playing.
