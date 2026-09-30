@@ -832,9 +832,9 @@
   "trim": 0.2484
  },
  "ICICLE": {
-  "grit": 0.0,
-  "master": 1.0,
-  "trim": 0.8189
+  "grit": -0.0097,
+  "master": 0.85,
+  "trim": 0.6542
  },
  "IMPACT BLOOM": {
   "grit": -0.1316,
@@ -1056,9 +1056,8 @@
   "master": 0.4287
  },
  "NERVE TICK": {
-  "grit": 0.0,
-  "master": 0.9855,
-  "trim": 0.869
+  "grit": -0.1897,
+  "master": 0.7859
  },
  "NIGHT BLOOM": {
   "grit": -0.056,
