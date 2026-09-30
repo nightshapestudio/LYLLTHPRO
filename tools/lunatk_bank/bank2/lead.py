@@ -375,42 +375,28 @@ def presets():
     out.append(p)
 
     p = L("SQUARE HALO", "BASIC", "BASIC")
-    # A warm square with a bell struck into its attack: the ring modulator
-    # sits 3.5x the note (inharmonic, like a bell's partials) and only ENV 3
-    # opens it, so each note chimes and then settles into the square. The
-    # second square an octave and a fifth up (the 3rd harmonic: odd, so it
-    # stays a square; an octave up adds the even harmonics and reads as a
-    # saw) is the brightness; the sine an octave down
-    # holds it up as a lead. The pitch stays put: no VINTAGE drift, no detune
-    # (both made it warble). The warmth is the driven filter.
-    p.osc(0, level=0.7, wt=1.0)
-    p.osc(1, level=0.25, wt=1.0, octave=1, semi=7)
-    p.sub(0.28, "SINE", octave=1)
-    p.insert(1, "RING", amount=0.0, freq=0.726, mix=0.6)
-    p.env(3, a=0.0, d=0.35, s=0.0, r=0.3)
-    p.mod("ENV3", "INS1_AMOUNT", 0.75)
-    # Key tracking, ENV 2 and velocity open this well above 1800 Hz on a
-    # played note; from here the very top is just rounded off.
-    p.filter("LP24", hz=1800, res=0.18, keytrack=0.5, env=0.3, drive=0.35)
-    p.filter2("HP12", hz=90)
-    p.env(1, a=0.003, d=1.1, s=0.6, r=1.1)
-    p.env(2, a=0.002, d=0.7, s=0.35, r=1.0)
-    p.voice(voices=6, glide=0.0, vel=0.5, bend=2)
-    velocity(p, 0.55, 0.15)
-    p.mod("VELOCITY", "INS1_AMOUNT", 0.15)
+    # A plain analog square stack across two octaves: the square at the note,
+    # a second square an octave up a few cents sharp, and a square sub an
+    # octave down. No attack, a short release, a static low-pass with a
+    # little drive, a touch of plate. Nothing moves.
+    p.osc(0, level=0.62, wt=1.0)
+    p.osc(1, level=0.34, wt=1.0, octave=1, fine=6)
+    p.sub(0.4, "SQUARE", octave=1, filtered=True)
+    p.filter("LP24", hz=7000, res=0.1, keytrack=0.3, env=0.0, drive=0.3)
+    p.filter2("HP12", hz=60)
+    p.env(1, a=0.0, d=0.1, s=1.0, r=0.25)
+    p.voice(voices=6, glide=0.0, vel=0.4, bend=2)
+    velocity(p, 0.65, 0.08)
     vibrato(p)
     p.tone("CUTOFF", 0.2)
-    p.lfo(1, "TRIANGLE", sync="2 BAR", mode="FREE")
-    p.set("macro2", 0.35)
-    # Slow, like an old poly: the filter breathes over two bars. Nothing moves
-    # the pitch or the wave shape.
-    p.motion("LFO1", "CUTOFF", 0.1)
-    echo(p, time="3/16", mix=0.08, feedback=0.25, amount=0.1)
-    space(p, 0.16, mode="PLATE", decay=0.35)
+    p.set("macro2", 0.0)
+    space(p, 0.1, mode="PLATE", decay=0.25)
     grit(p, mode="TUBE", drive=0.35, tone=0.5, amount=0.35, base=0.0)
-    p.doc("A bright analog square with a bell struck into every note, a sine sub under it and a long release",
-          "C3–C6", "Synth-pop, dark pop, synthwave, film", "Lead melodies; an octave up it is a bell accent between vocal lines",
-          "FOREGROUND", "The chime is the first 300 ms; velocity strikes it harder. Play it an octave up for a verse accent")
+    # A plain square on purpose: clean (one source of character) and still.
+    p.context(still=True, clean=True)
+    p.doc("A plain analog square stacked across two octaves: square, a detuned square an octave up and a square sub",
+          "C3–C6", "Synth-pop, dark pop, synthwave, darkwave", "Lead melodies; an octave up for accents between vocal lines",
+          "FOREGROUND", "No attack and a short release: it speaks on the beat. SPACE up for more room")
     out.append(p)
 
     return out
