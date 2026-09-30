@@ -18,7 +18,10 @@ SR = 48000
 TARGET_LUFS = {"BASS": -16, "LEAD": -16, "PAD": -18, "KEYS": -17, "PLUCK": -17, "ARP": -17, "MOTION": -17, "DRONE": -20, "PERC": -15, "FX": -18}
 TAIL_LIMIT = {"BASS": 1.2, "LEAD": 3.0, "PAD": 6.5, "KEYS": 3.5, "PLUCK": 3.0, "ARP": 3.5, "MOTION": 4.5, "DRONE": 8.0, "PERC": 1.5, "FX": 8.0}
 WIDTH_LIMIT = {"BASS": -10, "LEAD": -5, "PERC": -8}
-LOW_LIMIT = {"PAD": -15, "KEYS": -15, "LEAD": -15, "PLUCK": -15, "ARP": -14, "MOTION": -14, "FX": -8}
+# Energy below 80 Hz, dB of the total. Only a boom guard: melodic sounds keep
+# their fundamentals (the first bank capped these at -14/-15 and every sound
+# was high-passed to meet it).
+LOW_LIMIT = {"PAD": -6, "KEYS": -6, "LEAD": -6, "PLUCK": -6, "ARP": -6, "MOTION": -6, "FX": -6}
 # Hits are normalized like drum samples: by peak, not loudness.
 PEAK_NORMALIZED = {"PERC"}
 VELOCITY_CATEGORIES = {"BASS", "LEAD", "KEYS", "PLUCK", "ARP", "PERC"}

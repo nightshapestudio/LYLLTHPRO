@@ -50,8 +50,8 @@ extension View {
                 .frame(height: 2)
             }
             .clipShape(Rectangle())
-            .shadow(color: Color.black.opacity(0.78), radius: 34, x: 0, y: 18)
-            .shadow(color: accent.opacity(0.14), radius: 26, x: 0, y: 0)
+            // Behind the window, not on its contents: see nightshapeWindowGlow.
+            .nightshapeWindowGlow()
     }
 }
 

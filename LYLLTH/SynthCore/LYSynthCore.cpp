@@ -22,6 +22,8 @@ constexpr int kLevels = 11;          // octave mipmaps: 1023 harmonics down to 1
 constexpr int kMaxVoices = 16;
 constexpr int kMaxUnison = 16;
 constexpr int kChunk = 16;           // modulation is recomputed every 16 samples at most
+// Display slots: the DECIMATOR's level, MOTION step and position follow the vocoder bands.
+constexpr int kDisplayDecimator = 40 + LY_DST_COUNT + 12 + LY_VOC_MAX_BANDS;
 constexpr int kQueue = 1024;
 constexpr int kPending = 1024;
 constexpr int kScope = 2048;
@@ -804,6 +806,7 @@ struct LYSynth {
     lyfx::EQ eq;
     lyfx::FXFilter fxFilter;
     lyfx::Reverb reverb;
+    lyfx::Decimator decimator;
     lyfx::Vocoder vocoder;
     bool vocoderInput = false;
     bool vocoderWasOn = false;
@@ -811,9 +814,16 @@ struct LYSynth {
     bool fxWasOn[LY_FX_COUNT] = {};
     float fxMod[LY_DST_COUNT] = {};
 
+    // DECIMATOR MOTION: where it has glided to, and the step it is on.
+    float decimatorPosition[2] = {};
+    bool decimatorMotionPrimed = false;
+    int decimatorStep = -1;
+    double decimatorStart = 0;        // with no transport, the beat MOTION counts its steps from
+    float decimatorShown[2] = {};     // DESTROY and CRUSH as played, for the editor
+
     float scope[kScope] = {};
     std::atomic<uint32_t> scopeWrite { 0 };
-    std::atomic<float> display[40 + LY_DST_COUNT + 12 + LY_VOC_MAX_BANDS];
+    std::atomic<float> display[kDisplayDecimator + 4];
 
     float mixL[kChunk], mixR[kChunk];
     float busL[kChunk], busR[kChunk];
@@ -824,8 +834,15 @@ namespace {
 
 const int kDefaultFXOrder[LY_FX_COUNT] = {
     LY_FX_HYPER, LY_FX_DIST, LY_FX_FLANGER, LY_FX_PHASER, LY_FX_CHORUS,
-    LY_FX_DELAY, LY_FX_COMP, LY_FX_REVERB, LY_FX_EQ, LY_FX_FILTER
+    LY_FX_DELAY, LY_FX_COMP, LY_FX_REVERB, LY_FX_EQ, LY_FX_FILTER, LY_FX_DECIM
 };
+
+/// The parameter holding the rack's `place`-th effect.
+inline int fxOrderParam(int place) { return place < 10 ? LY_FX_ORDER + place : LY_FX_ORDER_LAST; }
+
+/// The display slot carrying an effect's output level. The first ten sit
+/// at 20…29; the DECIMATOR's is after the vocoder bands.
+inline int fxLevelSlot(int fx) { return fx < 10 ? 20 + fx : kDisplayDecimator; }
 
 void setDefaults(LYSynth *s) {
     auto set = [s](int id, float v) { s->parameters[id].store(v, std::memory_order_relaxed); };
@@ -895,7 +912,7 @@ void setDefaults(LYSynth *s) {
     for (int t = 0; t < 2; ++t)
         for (int i = 0; i < LY_TRACK_POINTS; ++i) set(LY_TRACK_POINTS_BASE + t * LY_TRACK_POINTS + i, -1.f + 2.f * i / (float)(LY_TRACK_POINTS - 1));
 
-    for (int i = 0; i < LY_FX_COUNT; ++i) set(LY_FX_ORDER + i, kDefaultFXOrder[i]);
+    for (int i = 0; i < LY_FX_COUNT; ++i) set(fxOrderParam(i), kDefaultFXOrder[i]);
     set(LY_HYPER_RATE, 0.4f); set(LY_HYPER_DETUNE, 0.25f); set(LY_HYPER_VOICES, 0.5f); set(LY_HYPER_MIX, 0.5f);
     set(LY_HYPER_DIM_SIZE, 0.5f);
     set(LY_DIST_DRIVE, 0.25f); set(LY_DIST_TONE, 1); set(LY_DIST_MIX, 1);
@@ -909,6 +926,8 @@ void setDefaults(LYSynth *s) {
     set(LY_FXF_CUTOFF, 0.7f); set(LY_FXF_RES, 0.2f); set(LY_FXF_MIX, 1);
     set(LY_REVERB_SIZE, 0.5f); set(LY_REVERB_DECAY, 0.4f); set(LY_REVERB_DAMP, 0.4f); set(LY_REVERB_WIDTH, 1);
     set(LY_REVERB_PREDELAY, 0.1f); set(LY_REVERB_MIX, 0.3f);
+    set(LY_DEC_DESTROY, 0.35f); set(LY_DEC_CRUSH, 0.2f); set(LY_DEC_MIX, 1);
+    set(LY_DEC_MOTION_RATE, 8.f / 14.f); set(LY_DEC_MOTION_LENGTH, 8);
 }
 
 /// Which parameters glide between blocks: the continuous ones. Switches,
@@ -1630,7 +1649,10 @@ void arpNoteOn(LYSynth *s, int note, int velocity) {
     if (s->heldCount >= kHeldNotes) return;
     const bool wasEmpty = s->heldCount == 0;
     s->held[s->heldCount++] = HeldNote { note, velocity, s->heldOrder++ };
-    if (wasEmpty) { s->arpCountdown = 0; s->arpIndex = 0; s->arpDirection = 1; s->arpStep = 0; s->arpFresh = true; s->arpPatternPos = 0; }
+    if (wasEmpty) {
+        s->arpCountdown = 0; s->arpIndex = 0; s->arpDirection = 1; s->arpStep = 0; s->arpFresh = true; s->arpPatternPos = 0;
+        s->decimatorStart = s->beat;   // MOTION starts with the arp
+    }
 }
 
 void arpNoteOff(LYSynth *s, int note) {
@@ -1796,6 +1818,8 @@ void monoForget(LYSynth *s, int note) {
 void noteOnInput(LYSynth *s, const Event &e) {
     if (isSwitchKey(s, e.note)) { s->perfOverride = e.note - (int)std::lround(s->raw[LY_PERF_KEYROOT]); return; }
     if (arpOn(s)) { arpNoteOn(s, e.note, e.velocity & 0xFF); return; }
+    // A played key restarts DECIMATOR MOTION, as it restarts a TRIG LFO.
+    s->decimatorStart = s->beat;
     if (isMono(s)) {
         // Remember every key; play it only if it wins the key priority.
         monoForget(s, e.note);
@@ -1889,7 +1913,7 @@ void prepareEffects(LYSynth *s) {
     const float sr = (float)s->sampleRate;
     s->hyper.prepare(sr); s->distortion.prepare(sr); s->flanger.prepare(sr); s->phaser.prepare(sr);
     s->chorus.prepare(sr); s->junoChorus.prepare(sr); s->delay.prepare(sr); s->compressor.prepare(sr); s->eq.prepare(sr);
-    s->fxFilter.prepare(sr); s->reverb.prepare(sr); s->vocoder.prepare(sr);
+    s->fxFilter.prepare(sr); s->reverb.prepare(sr); s->decimator.prepare(sr); s->vocoder.prepare(sr);
 }
 
 void clearEffect(LYSynth *s, int fx) {
@@ -1903,13 +1927,14 @@ void clearEffect(LYSynth *s, int fx) {
     case LY_FX_COMP: s->compressor.clear(); break;
     case LY_FX_EQ: s->eq.clear(); break;
     case LY_FX_FILTER: s->fxFilter.clear(); break;
+    case LY_FX_DECIM: s->decimator.clear(); s->decimatorMotionPrimed = false; s->decimatorStep = -1; break;
     default: s->reverb.clear(); break;
     }
 }
 
 bool effectOn(const LYSynth *s, int fx) {
     static const int onIDs[LY_FX_COUNT] = { LY_HYPER_ON, LY_DIST_ON, LY_FLANGER_ON, LY_PHASER_ON, LY_CHORUS_ON,
-                                            LY_DELAY_ON, LY_COMP_ON, LY_EQ_ON, LY_FXF_ON, LY_REVERB_ON };
+                                            LY_DELAY_ON, LY_COMP_ON, LY_EQ_ON, LY_FXF_ON, LY_REVERB_ON, LY_DEC_ON };
     return s->raw[onIDs[fx]] > 0.5f;
 }
 
@@ -1919,13 +1944,65 @@ void effectOrder(const LYSynth *s, int *order) {
     bool seen[LY_FX_COUNT] = {};
     bool valid = true;
     for (int i = 0; i < LY_FX_COUNT; ++i) {
-        const int fx = (int)std::lround(s->raw[LY_FX_ORDER + i]);
+        const int fx = (int)std::lround(s->raw[fxOrderParam(i)]);
         if (fx < 0 || fx >= LY_FX_COUNT || seen[fx]) { valid = false; break; }
         seen[fx] = true;
         order[i] = fx;
     }
     if (!valid) std::copy(kDefaultFXOrder, kDefaultFXOrder + LY_FX_COUNT, order);
 }
+
+/// DECIMATOR MOTION for this chunk: the step it is on, and the point DESTROY
+/// and CRUSH glide toward. An OFF step falls back to the clean corner (DRY)
+/// or the last ON step (HOLD). False when MOTION is off.
+///
+/// With a transport running the steps sit on the bar. Without one they count
+/// from the last key played (or the arp's first note), so MOTION starts with
+/// the player the way the arp and TRIG LFOs do.
+bool decimatorMotion(LYSynth *s, int n, float *x, float *y) {
+    if (s->raw[LY_DEC_MOTION_ON] <= 0.5f) { s->decimatorMotionPrimed = false; s->decimatorStep = -1; return false; }
+    const int length = std::max(2, std::min((int)LY_DEC_STEPS, (int)std::lround(s->raw[LY_DEC_MOTION_LENGTH])));
+    const double beat = s->songLocked ? s->beat : s->beat - s->decimatorStart;
+    // A hair of slack so a step boundary the arp lands on is not lost to rounding.
+    const long segment = (long)std::floor(beat / syncBeats(s->raw[LY_DEC_MOTION_RATE]) + 1e-9);
+    const int index = (int)(((segment % length) + length) % length);
+    auto on = [s](int k) { return s->raw[LY_DEC_STEP_ON_BASE + k] > 0.5f; };
+    int source = on(index) ? index : -1;
+    if (source < 0 && (int)std::lround(s->raw[LY_DEC_MOTION_OFFMODE]) == LY_DECOFF_HOLD) {
+        for (int back = 1; back <= length && source < 0; ++back) {
+            const int k = ((index - back) % length + length) % length;
+            if (on(k)) source = k;
+        }
+    }
+    const float tx = source < 0 ? 0.f : clamp01(s->raw[LY_DEC_STEP_X_BASE + source]);
+    const float ty = source < 0 ? 0.f : clamp01(s->raw[LY_DEC_STEP_Y_BASE + source]);
+    const float tau = clamp01(s->raw[LY_DEC_MOTION_GLIDE]) * 0.25f;
+    if (!s->decimatorMotionPrimed || tau < 0.0001f) {
+        s->decimatorPosition[0] = tx; s->decimatorPosition[1] = ty;
+    } else {
+        const float decay = std::exp(-(float)n / ((float)s->sampleRate * tau));
+        s->decimatorPosition[0] = tx + (s->decimatorPosition[0] - tx) * decay;
+        s->decimatorPosition[1] = ty + (s->decimatorPosition[1] - ty) * decay;
+    }
+    s->decimatorMotionPrimed = true;
+    s->decimatorStep = index;
+    *x = s->decimatorPosition[0];
+    *y = s->decimatorPosition[1];
+    return true;
+}
+
+/// The DECIMATOR over a chunk: MOTION, then modulation, then the DSP.
+void runDecimator(LYSynth *s, float *L, float *R, int n) {
+    const float *m = s->fxMod;
+    float x = s->raw[LY_DEC_DESTROY], y = s->raw[LY_DEC_CRUSH];
+    decimatorMotion(s, n, &x, &y);
+    x = clamp01(x + m[LY_DST_DEC_DESTROY]);
+    y = clamp01(y + m[LY_DST_DEC_CRUSH]);
+    s->decimatorShown[0] = x; s->decimatorShown[1] = y;
+    s->decimator.process(L, R, n, x, y, clamp01(s->smoothed[LY_DEC_MIX] + m[LY_DST_DEC_MIX]));
+}
+
+bool decimatorAfterMaster(const LYSynth *s) { return s->raw[LY_DEC_POST] > 0.5f; }
 
 void processEffects(LYSynth *s, float *L, float *R, int n) {
     const float *p = s->smoothed;
@@ -1943,6 +2020,7 @@ void processEffects(LYSynth *s, float *L, float *R, int n) {
             continue;
         }
         s->fxWasOn[fx] = true;
+        if (fx == LY_FX_DECIM && decimatorAfterMaster(s)) continue;   // runs after MASTER instead
         switch (fx) {
         case LY_FX_HYPER:
             s->hyper.process(L, R, n, P(LY_HYPER_RATE), P(LY_HYPER_DETUNE, LY_DST_HYPER_DETUNE), P(LY_HYPER_VOICES),
@@ -1990,6 +2068,9 @@ void processEffects(LYSynth *s, float *L, float *R, int n) {
         case LY_FX_FILTER:
             s->fxFilter.process(L, R, n, (int)std::lround(s->raw[LY_FXF_TYPE]), P(LY_FXF_CUTOFF, LY_DST_FXF_CUTOFF),
                                 P(LY_FXF_RES, LY_DST_FXF_RES), P(LY_FXF_DRIVE), P(LY_FXF_MIX, LY_DST_FXF_MIX));
+            break;
+        case LY_FX_DECIM:
+            runDecimator(s, L, R, n);
             break;
         default:
             s->reverb.process(L, R, n, (int)std::lround(s->raw[LY_REVERB_MODE]), P(LY_REVERB_SIZE, LY_DST_REVERB_SIZE),
@@ -2231,6 +2312,11 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
             rr = fastTanh(rr * 0.9f) / 0.9f;
             outL[i] = l; outR[i] = rr;
         }
+        // DECIMATOR after MASTER: where a track's decimator would sit.
+        if (s->fxWasOn[LY_FX_DECIM] && decimatorAfterMaster(s)) {
+            runDecimator(s, outL, outR, n);
+            s->meters[LY_FX_DECIM].chunk(outL, outR, n);
+        }
         position += n;
         s->beat += n * beatsPerSecond / s->sampleRate;
     }
@@ -2260,7 +2346,7 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
     s->display[15].store(v.cutoffHz, std::memory_order_relaxed);
     s->display[16].store(v.cutoff2Hz, std::memory_order_relaxed);
     for (int b = 0; b < 3; ++b) s->display[17 + b].store(s->compressor.gainDb[b], std::memory_order_relaxed);
-    for (int f = 0; f < LY_FX_COUNT; ++f) s->display[20 + f].store(s->meters[f].peak, std::memory_order_relaxed);
+    for (int f = 0; f < LY_FX_COUNT; ++f) s->display[fxLevelSlot(f)].store(s->meters[f].peak, std::memory_order_relaxed);
     s->display[30].store((float)(s->heldCount > 0 && arpOn(s) ? s->arpStep : -1), std::memory_order_relaxed);
     for (int d = 0; d < LY_DST_COUNT; ++d) s->display[40 + d].store(v.active ? v.modulation[d] : s->fxMod[d], std::memory_order_relaxed);
     const int extra = 40 + LY_DST_COUNT;
@@ -2277,6 +2363,10 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
     s->display[extra + 10].store(s->vocoderInput && s->raw[LY_VOC_ON] > 0.5f ? 1.f : 0.f, std::memory_order_relaxed);
     for (int b = 0; b < LY_VOC_MAX_BANDS; ++b)
         s->display[extra + 12 + b].store(s->vocoderWasOn ? std::min(1.f, s->vocoder.level[b] * 8.f) : 0.f, std::memory_order_relaxed);
+    const bool decimatorOn = s->fxWasOn[LY_FX_DECIM];
+    s->display[kDisplayDecimator + 1].store(decimatorOn ? (float)s->decimatorStep : -1.f, std::memory_order_relaxed);
+    s->display[kDisplayDecimator + 2].store(decimatorOn ? s->decimatorShown[0] : s->raw[LY_DEC_DESTROY], std::memory_order_relaxed);
+    s->display[kDisplayDecimator + 3].store(decimatorOn ? s->decimatorShown[1] : s->raw[LY_DEC_CRUSH], std::memory_order_relaxed);
 }
 
 void lysynth_set_song_position(LYSynth *s, double beat, int playing) {
@@ -2340,7 +2430,7 @@ void lysynth_get_display(const LYSynth *s, LYSynthDisplay *out) {
     out->cutoffHz = s->display[15].load(std::memory_order_relaxed);
     out->cutoff2Hz = s->display[16].load(std::memory_order_relaxed);
     for (int b = 0; b < 3; ++b) out->compGain[b] = s->display[17 + b].load(std::memory_order_relaxed);
-    for (int f = 0; f < LY_FX_COUNT; ++f) out->fxLevel[f] = s->display[20 + f].load(std::memory_order_relaxed);
+    for (int f = 0; f < LY_FX_COUNT; ++f) out->fxLevel[f] = s->display[fxLevelSlot(f)].load(std::memory_order_relaxed);
     out->arpStep = (int)s->display[30].load(std::memory_order_relaxed);
     for (int d = 0; d < LY_DST_COUNT; ++d) out->modulation[d] = s->display[40 + d].load(std::memory_order_relaxed);
     const int extra = 40 + LY_DST_COUNT;
@@ -2354,6 +2444,9 @@ void lysynth_get_display(const LYSynth *s, LYSynthDisplay *out) {
     out->songLocked = (int)s->display[extra + 9].load(std::memory_order_relaxed);
     out->vocoderInput = (int)s->display[extra + 10].load(std::memory_order_relaxed);
     for (int b = 0; b < LY_VOC_MAX_BANDS; ++b) out->vocoderBands[b] = s->display[extra + 12 + b].load(std::memory_order_relaxed);
+    out->decimatorStep = (int)s->display[kDisplayDecimator + 1].load(std::memory_order_relaxed);
+    out->decimatorPosition[0] = s->display[kDisplayDecimator + 2].load(std::memory_order_relaxed);
+    out->decimatorPosition[1] = s->display[kDisplayDecimator + 3].load(std::memory_order_relaxed);
 }
 
 void lysynth_get_scope(const LYSynth *s, float *out, int count) {

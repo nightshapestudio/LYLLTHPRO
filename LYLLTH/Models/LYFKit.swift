@@ -322,7 +322,7 @@ enum LYFKit {
     private static func rack(from row: RowEffectsSnapshot) -> LYFXRack {
         LYFXRack(
             order: row.chainOrder, eqBands: row.eqBands, eqCut: row.eqCut, compressor: row.compressor,
-            tape: row.tape, flanger: row.flanger, chorus: row.chorus, voidGate: row.voidGate,
+            tape: row.tape, flanger: row.flanger, phaser: row.phaser, chorus: row.chorus, voidGate: row.voidGate,
             tempoDelay: row.tempoDelay, filter: row.filter, fracture: row.fracture, deadlock: row.deadlock,
             strike: row.strike, steelBody: row.steelBody, undertow: row.undertow, splitField: row.splitField,
             shear: row.shear, cabinet: row.cabinet, pump: row.pump, finale: row.elasticLimiter,
@@ -333,7 +333,7 @@ enum LYFKit {
     private static func mainRack(from effects: EffectsSnapshot) -> LYFXRack {
         LYFXRack(
             order: effects.mainChainOrder, eqBands: effects.mainEQBands, eqCut: effects.mainEQCut,
-            compressor: effects.mainCompressor, tape: effects.mainTape, flanger: effects.mainFlanger,
+            compressor: effects.mainCompressor, tape: effects.mainTape, flanger: effects.mainFlanger, phaser: effects.mainPhaser,
             chorus: effects.mainChorus, voidGate: effects.mainVoidGate, tempoDelay: effects.mainTempoDelay,
             filter: effects.mainFilter, fracture: effects.mainFracture, deadlock: effects.mainDeadlock,
             strike: effects.mainStrike, steelBody: effects.mainSteelBody, undertow: nil,
@@ -467,6 +467,7 @@ enum LYFKit {
             effects.compressor = fx.compressor
             effects.tape = fx.tape
             effects.flanger = fx.flanger
+            effects.phaser = fx.phaser
             effects.tempoDelay = fx.tempoDelay
             effects.filter = fx.filter
             effects.fracture = fx.fracture
@@ -495,6 +496,7 @@ enum LYFKit {
         effects.mainCompressor = main.compressor
         effects.mainTape = main.tape
         effects.mainFlanger = main.flanger
+        effects.mainPhaser = main.phaser
         effects.mainTempoDelay = main.tempoDelay
         effects.mainFilter = main.filter
         effects.mainFracture = main.fracture

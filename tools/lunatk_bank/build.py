@@ -30,6 +30,7 @@ sys.path.insert(0, HERE)
 import lunatk as L  # noqa: E402
 import phrases  # noqa: E402
 import analyze as A  # noqa: E402
+import voicing  # noqa: E402
 import soundfile_shim as sf  # noqa: E402
 
 ROOT = L.ROOT
@@ -78,7 +79,7 @@ def load_bank():
         module = importlib.import_module(f"{BANK}." + name)
         for p in module.presets():
             p.module = name
-            presets.append(p)
+            presets.append(voicing.revoice(p))
     names = [p.name for p in presets]
     # The app lists the bank beside its original presets; names must not clash.
     swift = open(os.path.join(ROOT, "LYLLTH", "Synth", "LYSynthPatch.swift")).read()

@@ -894,6 +894,33 @@ final class TubeAndExciterRackTests: XCTestCase {
     }
 }
 
+final class PhaserRackTests: XCTestCase {
+    func testPhaserSurvivesTheProjectFile() throws {
+        var rack = LYFXRack()
+        rack.phaser = PhaserState.factoryPresets[4].state
+        rack.order = [.eq, .phaser]
+        let back = try JSONDecoder().decode(LYFXRack.self, from: JSONEncoder().encode(rack))
+        XCTAssertEqual(back.phaser, rack.phaser)
+        XCTAssertEqual(back.phaser?.timingMode, .sync)
+        XCTAssertTrue(back.isEngaged(.phaser, isMain: false, reverb: .neutral))
+        XCTAssertEqual(back.chain(isMain: false).prefix(2), [.eq, .phaser])
+    }
+
+    func testAnOlderPhaserFileFillsInDefaults() throws {
+        let state = try JSONDecoder().decode(PhaserState.self, from: Data(#"{"stages":12,"isBypassed":false}"#.utf8))
+        XCTAssertEqual(state.stages, 12)
+        XCTAssertEqual(state.centerHz, PhaserState().centerHz)
+        XCTAssertFalse(state.isBypassed)
+    }
+
+    func testItIsFiledUnderMotion() {
+        let offered = FXKind.controlDeckCases.filter { $0.isAvailable(for: .main) }
+        XCTAssertTrue(offered.contains(.phaser))
+        XCTAssertEqual(FXKind.phaser.category, .motion)
+        XCTAssertEqual(FXKind.phaser.title, "PHASER")
+    }
+}
+
 final class AddingAnEffectSwitchesItOnTests: XCTestCase {
     /// Logic inserts a plug-in running. Every effect that can be bypassed
     /// must be on once it is added.

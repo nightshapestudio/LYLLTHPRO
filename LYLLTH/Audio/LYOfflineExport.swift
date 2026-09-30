@@ -206,6 +206,7 @@ struct LYOfflineExport {
         snapshot.mainNoiseGate = (main.noiseGate ?? .neutral).parameters
         snapshot.mainTube = (main.tube ?? .neutral).parameters
         snapshot.mainExciter = (main.exciter ?? .neutral).parameters
+        snapshot.mainPhaser = (main.phaser ?? .neutral).parameters(atBPM: session.bpm)
         if !shear.isBypassed { snapshot.mainEffectMotion[.shear] = shear.motion?.holdingConfiguration }
         let cabinet = main.cabinet ?? .neutral
         snapshot.mainCabinet = cabinet.parameters
@@ -317,6 +318,7 @@ struct LYOfflineExport {
         offline.noiseGate = (rack.noiseGate ?? .neutral).parameters
         offline.tube = (rack.tube ?? .neutral).parameters
         offline.exciter = (rack.exciter ?? .neutral).parameters
+        offline.phaser = (rack.phaser ?? .neutral).parameters(atBPM: session.bpm)
         if !shear.isBypassed { offline.effectMotion[.shear] = shear.motion?.holdingConfiguration }
         let cabinet = rack.cabinet ?? .neutral
         offline.cabinet = cabinet.parameters

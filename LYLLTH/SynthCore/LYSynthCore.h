@@ -265,8 +265,32 @@ enum {
 
     // Arp pattern: each step's transpose, -24…24 semitones.
     LY_ARP_TRANSPOSE_BASE,
-    LY_PARAM_COUNT = LY_ARP_TRANSPOSE_BASE + 16
+
+    // The rack's eleventh place, for the DECIMATOR. The first ten sit at
+    // LY_FX_ORDER and cannot grow without moving every id after them.
+    LY_FX_ORDER_LAST = LY_ARP_TRANSPOSE_BASE + 16,
+
+    // SONIC DECIMATOR: the NIGHTSHAPE decimator. DESTROY is the fuzz path,
+    // CRUSH the digital one (bit depth and sample rate).
+    LY_DEC_ON,
+    LY_DEC_DESTROY,     // 0…1
+    LY_DEC_CRUSH,       // 0…1
+    LY_DEC_MIX,         // 0…1
+    LY_DEC_POST,        // 0 in the rack's order, 1 after MASTER: the last thing out, as on a track
+    // MOTION: a tempo-locked XY step sequencer that moves DESTROY and CRUSH.
+    LY_DEC_MOTION_ON,
+    LY_DEC_MOTION_RATE,    // one step, as a sync division index (like the LFOs)
+    LY_DEC_MOTION_LENGTH,  // 2…16
+    LY_DEC_MOTION_GLIDE,   // 0…1: 0 jumps, 1 is a 250 ms slew
+    LY_DEC_MOTION_OFFMODE, // LY_DECOFF_*: what an OFF step does
+    // Each step: on (0/1), then DESTROY, then CRUSH, LY_DEC_STEPS apiece.
+    LY_DEC_STEP_ON_BASE,
+    LY_DEC_STEP_X_BASE = LY_DEC_STEP_ON_BASE + 16,
+    LY_DEC_STEP_Y_BASE = LY_DEC_STEP_X_BASE + 16,
+    LY_PARAM_COUNT = LY_DEC_STEP_Y_BASE + 16
 };
+enum { LY_DEC_STEPS = 16 };
+enum { LY_DECOFF_DRY = 0, LY_DECOFF_HOLD, LY_DECOFF_COUNT };
 enum { LY_PRIORITY_LAST = 0, LY_PRIORITY_LOW, LY_PRIORITY_HIGH, LY_PRIORITY_COUNT };
 enum { LY_ARP_PATTERN_STEPS = 16 };
 enum {
@@ -322,7 +346,7 @@ enum { LY_ARP_UP = 0, LY_ARP_DOWN, LY_ARP_UPDOWN, LY_ARP_PLAYED, LY_ARP_RANDOM, 
 
 enum {
     LY_FX_HYPER = 0, LY_FX_DIST, LY_FX_FLANGER, LY_FX_PHASER, LY_FX_CHORUS,
-    LY_FX_DELAY, LY_FX_COMP, LY_FX_EQ, LY_FX_FILTER, LY_FX_REVERB, LY_FX_COUNT
+    LY_FX_DELAY, LY_FX_COMP, LY_FX_EQ, LY_FX_FILTER, LY_FX_REVERB, LY_FX_DECIM, LY_FX_COUNT
 };
 
 enum {
@@ -377,6 +401,7 @@ enum {
     LY_DST_INS1_AMOUNT, LY_DST_INS1_FREQ, LY_DST_INS2_AMOUNT, LY_DST_INS2_FREQ,
     LY_DST_FSAT_DRIVE, LY_DST_VOC_MIX, LY_DST_VOC_SHIFT,
     LY_DST_MORPH, LY_DST_F2_MORPH,
+    LY_DST_DEC_DESTROY, LY_DST_DEC_CRUSH, LY_DST_DEC_MIX,
     LY_DST_COUNT
 };
 
@@ -411,6 +436,8 @@ typedef struct {
     int songLocked;               // 1 while a host transport is driving it
     int vocoderInput;             // 1 while a sidechain input is arriving
     float vocoderBands[LY_VOC_MAX_BANDS]; // each band's level from the input, 0…1
+    int decimatorStep;            // the MOTION step playing, -1 when MOTION is off
+    float decimatorPosition[2];   // where DESTROY (x) and CRUSH (y) are now, MOTION and modulation included
 } LYSynthDisplay;
 
 LYSynth *lysynth_create(double sampleRate);

@@ -11,6 +11,8 @@ struct LYFXRack: Codable, Equatable {
     var compressor: CompressorState? = nil
     var tape: TapeSaturationState? = nil
     var flanger: FlangerState? = nil
+    /// The PHASER.
+    var phaser: PhaserState? = nil
     var chorus: ChorusState? = nil
     var voidGate: VoidGateState? = nil
     var tempoDelay: TempoDelayState? = nil
@@ -75,6 +77,7 @@ struct LYFXRack: Codable, Equatable {
         case .comp: return !(compressor ?? .neutral).isBypassed
         case .tape: return !(tape ?? .neutral).isBypassed
         case .flanger: return !(flanger ?? .neutral).isBypassed
+        case .phaser: return !(phaser ?? .neutral).isBypassed
         case .decim: return !(decimator ?? .neutral).isBypassed
         case .chorus: return !(chorus ?? .neutral).isBypassed
         case .voidGate: return !(voidGate ?? .neutral).isBypassed
@@ -115,6 +118,7 @@ struct LYFXRack: Codable, Equatable {
         case .comp: var s = compressor ?? .neutral; s.isBypassed.toggle(); compressor = s
         case .tape: var s = tape ?? .neutral; s.isBypassed.toggle(); tape = s
         case .flanger: var s = flanger ?? .neutral; s.isBypassed.toggle(); flanger = s
+        case .phaser: var s = phaser ?? .neutral; s.isBypassed.toggle(); phaser = s
         case .decim: var s = decimator ?? .neutral; s.isBypassed.toggle(); decimator = s
         case .chorus: var s = chorus ?? .neutral; s.isBypassed.toggle(); chorus = s
         case .voidGate: var s = voidGate ?? .neutral; s.isBypassed.toggle(); voidGate = s
@@ -261,6 +265,9 @@ enum LYFXBridge {
         case .flanger:
             let value = (rack.flanger ?? .neutral).normalized()
             if let index { engine.setFlanger(trackIndex: index, parameters: value.parameters(atBPM: bpm)) } else { engine.setMainFlanger(parameters: value.parameters(atBPM: bpm)) }
+        case .phaser:
+            let parameters = (rack.phaser ?? .neutral).parameters(atBPM: bpm)
+            if let index { engine.setPhaser(trackIndex: index, parameters: parameters) } else { engine.setMainPhaser(parameters: parameters) }
         case .decim:
             let state = rack.decimator ?? .neutral
             if let index {
