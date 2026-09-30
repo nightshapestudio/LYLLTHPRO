@@ -941,3 +941,37 @@ final class AddingAnEffectSwitchesItOnTests: XCTestCase {
         }
     }
 }
+
+final class DrumFolderTests: XCTestCase {
+    func testANewSongHasItsDrumsInOneClosedFolder() {
+        let session = LYLLTHSession.starter()
+        let drums = session.tracks.filter { $0.kind == .drumkit }.map(\.id)
+        let folder = session.drumFolderIndex.flatMap { session.trackFolders?[$0] }
+        XCTAssertEqual(folder?.trackIDs, drums)
+        XCTAssertEqual(folder?.isCollapsed, true)
+        XCTAssertEqual(session.drumsNested, true)
+    }
+
+    func testAnOlderSongIsNestedOnceAndNeverRegrouped() {
+        var older = LYLLTHSession.starter()
+        older.trackFolders = nil
+        older.drumsNested = nil
+        let opened = older.migratedToCurrentSchema()
+        XCTAssertNotNil(opened.drumFolderIndex)
+
+        var unnested = opened
+        unnested.trackFolders = nil
+        XCTAssertNil(unnested.migratedToCurrentSchema().drumFolderIndex, "drums taken out of the folder stay out")
+    }
+
+    func testDrumsInAnotherFolderStayThere() {
+        var older = LYLLTHSession.starter()
+        older.trackFolders = nil
+        older.drumsNested = nil
+        let kick = older.tracks.first { $0.kind == .drumkit }!.id
+        _ = older.createFolder(name: "MINE", trackIDs: [kick])
+        let opened = older.migratedToCurrentSchema()
+        XCTAssertEqual(opened.folder(containing: kick)?.name, "MINE")
+        XCTAssertFalse(opened.drumFolderIndex.map { opened.trackFolders![$0].trackIDs.contains(kick) } ?? false)
+    }
+}

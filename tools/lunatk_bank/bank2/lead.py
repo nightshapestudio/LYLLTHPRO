@@ -1,6 +1,9 @@
 """LEAD: voices that cut, tear and sing. Every one is mono or narrow, sits in
 tune, and has its damage in the default sound."""
 
+import json
+import os
+
 from lunatk import Preset
 from bank2._common import accents, echo, grit, seq, space, velocity, vibrato
 
@@ -397,6 +400,13 @@ def presets():
     space(p, 0.1, mode="PLATE", decay=0.25)
     grit(p, mode="TUBE", drive=0.35, tone=0.5, amount=0.35, base=0.0)
     # A plain square on purpose: clean (one source of character) and still.
+    # The user's own edit, taken exactly: every value in
+    # tools/lunatk_bank/user/SQUARE HALO EDIT.lyllthsynth except MASTER, which
+    # the bank sets for loudness.
+    edit = json.load(open(os.path.join(os.path.dirname(__file__), "..", "user", "SQUARE HALO EDIT.lyllthsynth")))["patch"]
+    for key, value in edit["values"].items():
+        if key != "master":
+            p.set(key, value)
     p.context(still=True, clean=True)
     p.doc("A plain analog square stacked across two octaves: square, a faint detuned square an octave up and a sine sub",
           "C3–C6", "Synth-pop, dark pop, synthwave, darkwave", "Lead melodies; an octave up for accents between vocal lines",

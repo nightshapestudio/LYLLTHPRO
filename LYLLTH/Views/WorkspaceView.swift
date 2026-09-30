@@ -2186,6 +2186,11 @@ struct WorkspaceView: View {
         }
         document.session.tracks.append(track)
         document.session.assignEngineChannel(toTrackAt: document.session.tracks.count - 1)
+        // A new drum joins the kit's DRUMS folder, shown so it can be seen.
+        if kind == .drumkit, let folder = document.session.drumFolderIndex {
+            document.session.trackFolders?[folder].trackIDs.append(track.id)
+            document.session.trackFolders?[folder].isCollapsed = false
+        }
         selectedTrackID = track.id
         audio.syncSequencer(document.session)
     }
