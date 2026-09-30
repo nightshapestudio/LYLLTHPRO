@@ -25,6 +25,7 @@ constexpr int kMaxUnison = 16;
 constexpr int kChunk = 16;           // modulation is recomputed every 16 samples at most
 // Display slots: the DECIMATOR's level, MOTION step and position follow the vocoder bands.
 constexpr int kDisplayDecimator = 40 + LY_DST_COUNT + 12 + LY_VOC_MAX_BANDS;
+constexpr int kDisplayWavetableC = kDisplayDecimator + 4;
 constexpr int kQueue = 1024;
 constexpr int kPending = 1024;
 constexpr int kScope = 2048;
@@ -37,6 +38,9 @@ constexpr int kInsertComb = kInsertCombBase * kMaxOversample;
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 
 // MARK: - Small helpers
+
+/// Where oscillator `o`'s parameters start.
+inline int oscBase(int o) { return o == 0 ? (int)LY_OSCA_BASE : o == 1 ? (int)LY_OSCB_BASE : (int)LY_OSCC_BASE; }
 
 inline float clamp01(float v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -691,8 +695,8 @@ struct Voice {
     uint64_t age = 0;
     double frequency = 261.6;
     double targetFrequency = 261.6;
-    double phase[2][kMaxUnison] = {};
-    float uniRandom[2][kMaxUnison] = {};
+    double phase[LY_OSC_COUNT][kMaxUnison] = {};
+    float uniRandom[LY_OSC_COUNT][kMaxUnison] = {};
     double subPhase = 0;
     float lastA[kChunk] = {};            // oscillator A's last chunk, B's FM source
     float noiseColor = 0;
@@ -711,14 +715,14 @@ struct Voice {
     LFOState lfo[4];
     FilterChannel filter[2][2];          // [filter][channel]
     float modulation[LY_DST_COUNT] = {};
-    float wavetablePosition[2] = {0, 0};
+    float wavetablePosition[LY_OSC_COUNT] = {};
     float cutoffHz = 1000, cutoff2Hz = 1000;
     InsertState insert[2];
     float feedback[2] = {}, feedbackLow[2] = {}, feedbackDCX[2] = {}, feedbackDCY[2] = {};
     // Saturation between the filters.
     float satHold[2] = {}, satPhase = 1, satDCX[2] = {}, satDCY[2] = {};
     // VINTAGE: this note's own offsets (-1…1, scaled by VINTAGE), and a slow drift.
-    float vintagePitch[2] = {}, vintageCutoff = 0, vintageTime[3] = {};
+    float vintagePitch[LY_OSC_COUNT] = {}, vintageCutoff = 0, vintageTime[3] = {};
     double driftPhase = 0;
     float driftFrom = 0, driftTo = 0, driftRate = 0.3f;
     inline float drift() const {
@@ -791,8 +795,8 @@ struct LYSynth {
     bool smooths[LY_PARAM_COUNT];
 
     // Wavetables: the audio thread reads `live`; `owned` keeps them alive.
-    std::atomic<const Wavetable *> live[2] = { {nullptr}, {nullptr} };
-    std::shared_ptr<Wavetable> owned[2];
+    std::atomic<const Wavetable *> live[LY_OSC_COUNT] = { {nullptr}, {nullptr}, {nullptr} };
+    std::shared_ptr<Wavetable> owned[LY_OSC_COUNT];
     std::vector<std::shared_ptr<Wavetable>> retired;
     std::mutex tableMutex;
 
@@ -889,11 +893,11 @@ struct LYSynth {
 
     float scope[kScope] = {};
     std::atomic<uint32_t> scopeWrite { 0 };
-    std::atomic<float> display[kDisplayDecimator + 4];
+    std::atomic<float> display[kDisplayWavetableC + 1];
 
     float mixL[kChunk], mixR[kChunk];
     float busL[kChunk], busR[kChunk];
-    float oscL[2][kChunk], oscR[2][kChunk], oscMono[2][kChunk];
+    float oscL[LY_OSC_COUNT][kChunk], oscR[LY_OSC_COUNT][kChunk], oscMono[LY_OSC_COUNT][kChunk];
     // The voices summed at the oversampled rate, and the way back down.
     float overL[kChunk * kMaxOversample], overR[kChunk * kMaxOversample];
     Halfband<20> down2[2];
@@ -917,8 +921,8 @@ inline int fxLevelSlot(int fx) { return fx < 10 ? 20 + fx : kDisplayDecimator; }
 void setDefaults(LYSynth *s) {
     auto set = [s](int id, float v) { s->parameters[id].store(v, std::memory_order_relaxed); };
     for (int i = 0; i < LY_PARAM_COUNT; ++i) set(i, 0);
-    for (int o = 0; o < 2; ++o) {
-        const int b = o == 0 ? LY_OSCA_BASE : LY_OSCB_BASE;
+    for (int o = 0; o < LY_OSC_COUNT; ++o) {
+        const int b = oscBase(o);
         set(b + LY_OSC_ON, o == 0 ? 1 : 0);
         set(b + LY_OSC_LEVEL, 0.75f);
         set(b + LY_OSC_UNISON, 1);
@@ -931,7 +935,7 @@ void setDefaults(LYSynth *s) {
     set(LY_NOISE_LEVEL, 0.3f); set(LY_NOISE_PITCH, 0.5f); set(LY_NOISE_KEYTRACK, 1);
     set(LY_FILTER_ON, 1); set(LY_FILTER_TYPE, LY_FILTER_LP24);
     set(LY_FILTER_CUTOFF, 0.8f); set(LY_FILTER_RES, 0.15f); set(LY_FILTER_MIX, 1);
-    set(LY_FILTER_ROUTE_A, 1); set(LY_FILTER_ROUTE_B, 1); set(LY_FILTER_ROUTE_SUB, 1); set(LY_FILTER_ROUTE_NOISE, 1);
+    set(LY_FILTER_ROUTE_A, 1); set(LY_FILTER_ROUTE_B, 1); set(LY_FILTER_ROUTE_C, 1); set(LY_FILTER_ROUTE_SUB, 1); set(LY_FILTER_ROUTE_NOISE, 1);
     set(LY_F2_TYPE, LY_FILTER_HP12); set(LY_F2_CUTOFF, 0.15f); set(LY_F2_RES, 0.1f); set(LY_F2_MIX, 1);
     const float env[4][4] = { {0.05f, 0.4f, 0.8f, 0.35f}, {0.02f, 0.42f, 0.3f, 0.4f}, {0.02f, 0.42f, 0.3f, 0.4f}, {0.02f, 0.42f, 0.3f, 0.4f} };
     for (int e = 0; e < 4; ++e) for (int k = 0; k < 4; ++k) set(LY_ENV1_A + e * 4 + k, env[e][k]);
@@ -1005,8 +1009,8 @@ void setDefaults(LYSynth *s) {
 void buildSmoothing(LYSynth *s) {
     for (int i = 0; i < LY_PARAM_COUNT; ++i) s->smooths[i] = false;
     auto on = [s](int id) { s->smooths[id] = true; };
-    for (int o = 0; o < 2; ++o) {
-        const int b = o == 0 ? LY_OSCA_BASE : LY_OSCB_BASE;
+    for (int o = 0; o < LY_OSC_COUNT; ++o) {
+        const int b = oscBase(o);
         for (int local : { LY_OSC_LEVEL, LY_OSC_PAN, LY_OSC_FINE, LY_OSC_WTPOS, LY_OSC_DETUNE, LY_OSC_BLEND,
                            LY_OSC_WIDTH, LY_OSC_WARPAMT, LY_OSC_WARPAMT2 }) on(b + local);
     }
@@ -1131,12 +1135,14 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
     std::memset(outL, 0, sizeof(float) * n);
     std::memset(outR, 0, sizeof(float) * n);
     std::memset(mono, 0, sizeof(float) * n);
-    const int b = o == 0 ? LY_OSCA_BASE : LY_OSCB_BASE;
+    const int b = oscBase(o);
     const float *p = s->smoothed;
     if (s->raw[b + LY_OSC_ON] < 0.5f || table == nullptr) return;
 
-    const int dOffset = o == 0 ? 0 : (LY_DST_B_LEVEL - LY_DST_A_LEVEL);
-    const int d2 = o == 0 ? 0 : (LY_DST_B_WARP2 - LY_DST_A_WARP2);
+    // Each oscillator's destinations sit at the same offsets from its first
+    // two blocks' starts as A's do.
+    const int dOffset = o == 0 ? 0 : o == 1 ? (LY_DST_B_LEVEL - LY_DST_A_LEVEL) : (LY_DST_C_LEVEL - LY_DST_A_LEVEL);
+    const int d2 = o == 0 ? 0 : o == 1 ? (LY_DST_B_WARP2 - LY_DST_A_WARP2) : (LY_DST_C_WARP2 - LY_DST_A_WARP2);
     const float level = clamp01(p[b + LY_OSC_LEVEL] + m[LY_DST_A_LEVEL + dOffset]);
     if (level <= 0.0001f) return;
     const float pan = clampf(p[b + LY_OSC_PAN] + m[LY_DST_A_PAN + dOffset] + m[LY_DST_PAN], -1, 1);
@@ -1412,6 +1418,9 @@ void renderVoice(LYSynth *s, Voice &v, int n, int piecesLeft = 1, bool fresh = t
     // previous chunk, one chunk late, which FM cannot hear.
     renderOscillator(s, v, 1, n, m, v.lastA);
     renderOscillator(s, v, 0, n, m, s->oscMono[1]);
+    // C after A, with A (this chunk) as its FM / ring / AM source.
+    const bool cOn = r[LY_OSCC_BASE + LY_OSC_ON] > 0.5f;
+    if (cOn) renderOscillator(s, v, 2, n, m, s->oscMono[0]);
     std::memcpy(v.lastA, s->oscMono[0], sizeof(float) * n);
     for (int i = n; i < kChunk; ++i) v.lastA[i] = 0;
 
@@ -1432,6 +1441,7 @@ void renderVoice(LYSynth *s, Voice &v, int n, int piecesLeft = 1, bool fresh = t
         for (int i = 0; i < n; ++i) { dl[i] += l[i]; dr[i] += rr[i]; }
     };
     route(s->oscL[0], s->oscR[0], r[LY_FILTER_ROUTE_A] > 0.5f);
+    if (cOn) route(s->oscL[2], s->oscR[2], r[LY_FILTER_ROUTE_C] > 0.5f);
     if (split && r[LY_FILTER_ROUTE_B] > 0.5f) {
         for (int i = 0; i < n; ++i) { splitL[i] += s->oscL[1][i]; splitR[i] += s->oscR[1][i]; }
     } else {
@@ -1731,19 +1741,19 @@ void startVoice(LYSynth *s, const Event &e, bool fromArp = false) {
     v.random = s->random.bipolar();
     v.elapsed = 0;
     if (s->raw[LY_VINTAGE] > 0.0005f) {
-        for (auto &o : v.vintagePitch) o = s->random.bipolar();
+        for (int o = 0; o < 2; ++o) v.vintagePitch[o] = s->random.bipolar();
         v.vintageCutoff = s->random.bipolar();
         for (auto &t : v.vintageTime) t = (float)(std::log(1.0 + 0.25 * s->random.bipolar()) / std::log(20000.0));
         v.driftFrom = s->random.bipolar(); v.driftTo = s->random.bipolar();
         v.driftPhase = s->random.unit();
         v.driftRate = 0.15f + 0.3f * s->random.unit();
     } else {
-        v.vintagePitch[0] = v.vintagePitch[1] = v.vintageCutoff = 0;
+        v.vintagePitch[0] = v.vintagePitch[1] = v.vintagePitch[2] = v.vintageCutoff = 0;
         v.vintageTime[0] = v.vintageTime[1] = v.vintageTime[2] = 0;
         v.driftFrom = v.driftTo = 0;
     }
     for (int o = 0; o < 2; ++o) {
-        const int b = o == 0 ? LY_OSCA_BASE : LY_OSCB_BASE;
+        const int b = oscBase(o);
         const float start = s->raw[b + LY_OSC_PHASE];
         const float spread = s->raw[b + LY_OSC_RANDPHASE];
         for (int j = 0; j < kMaxUnison; ++j) {
@@ -1755,6 +1765,18 @@ void startVoice(LYSynth *s, const Event &e, bool fromArp = false) {
     v.subPhase = 0;
     for (int k = 0; k < 4; ++k) v.envelope[k].gateOn();
     for (int l = 0; l < 4; ++l) v.lfo[l].retrigger(s->random, s->raw[lfoBase(l) + (LY_LFO1_PHASE - LY_LFO1_SHAPE)]);
+    // Oscillator C draws its numbers last, and only when it plays, so a
+    // patch without it hears the same random numbers it always did.
+    if (s->raw[LY_OSCC_BASE + LY_OSC_ON] > 0.5f) {
+        const float start = s->raw[LY_OSCC_BASE + LY_OSC_PHASE];
+        const float spread = s->raw[LY_OSCC_BASE + LY_OSC_RANDPHASE];
+        for (int j = 0; j < kMaxUnison; ++j) {
+            double ph = start + spread * s->random.unit();
+            v.phase[2][j] = ph - std::floor(ph);
+            v.uniRandom[2][j] = s->random.bipolar();
+        }
+        v.vintagePitch[2] = s->raw[LY_VINTAGE] > 0.0005f ? s->random.bipolar() : 0.f;
+    }
     if (!wasActive) {
         for (auto &filter : v.filter) for (auto &channel : filter) channel.reset();
         for (auto &insert : v.insert) insert.reset();
@@ -2261,6 +2283,7 @@ LYSynth *lysynth_create(double sampleRate) {
     for (auto &lfo : s->globalLFO) lfo.retrigger(s->random, 0);
     lysynth_use_factory_table(s, 0, LY_TABLE_BASIC);
     lysynth_use_factory_table(s, 1, LY_TABLE_BASIC);
+    lysynth_use_factory_table(s, 2, LY_TABLE_BASIC);
     return s;
 }
 
@@ -2506,6 +2529,7 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
     const Voice &v = hasVoice ? s->voices[s->newestVoice] : s->idle;
     s->display[1].store(v.wavetablePosition[0], std::memory_order_relaxed);
     s->display[2].store(v.wavetablePosition[1], std::memory_order_relaxed);
+    s->display[kDisplayWavetableC].store(v.wavetablePosition[2], std::memory_order_relaxed);
     for (int k = 0; k < 4; ++k) s->display[3 + k].store(v.envelope[k].value, std::memory_order_relaxed);
     for (int l = 0; l < 4; ++l) {
         const int mode = (int)std::lround(s->raw[lfoBase(l) + (LY_LFO1_RETRIG - LY_LFO1_SHAPE)]);
@@ -2559,7 +2583,7 @@ void lysynth_set_transport(LYSynth *s, int playing, uint64_t hostTime, double be
 }
 
 void lysynth_set_wavetable(LYSynth *s, int oscillator, const float *frames, int frameCount) {
-    if (oscillator < 0 || oscillator > 1 || frames == nullptr || frameCount < 1) return;
+    if (oscillator < 0 || oscillator >= LY_OSC_COUNT || frames == nullptr || frameCount < 1) return;
     auto table = buildWavetable(frames, frameCount);
     std::lock_guard<std::mutex> guard(s->tableMutex);
     // The audio thread may still be reading the old table for this block, so
@@ -2571,7 +2595,7 @@ void lysynth_set_wavetable(LYSynth *s, int oscillator, const float *frames, int 
 }
 
 void lysynth_use_factory_table(LYSynth *s, int oscillator, int tableID) {
-    if (oscillator < 0 || oscillator > 1 || tableID < 0 || tableID >= LY_TABLE_FACTORY_COUNT) return;
+    if (oscillator < 0 || oscillator >= LY_OSC_COUNT || tableID < 0 || tableID >= LY_TABLE_FACTORY_COUNT) return;
     static std::mutex cacheMutex;
     static std::shared_ptr<Wavetable> cache[LY_TABLE_FACTORY_COUNT];
     std::shared_ptr<Wavetable> table;
@@ -2595,6 +2619,7 @@ void lysynth_get_display(const LYSynth *s, LYSynthDisplay *out) {
     out->activeVoices = (int)s->display[0].load(std::memory_order_relaxed);
     out->wavetablePosition[0] = s->display[1].load(std::memory_order_relaxed);
     out->wavetablePosition[1] = s->display[2].load(std::memory_order_relaxed);
+    out->wavetablePositionC = s->display[kDisplayWavetableC].load(std::memory_order_relaxed);
     for (int k = 0; k < 4; ++k) out->envelope[k] = s->display[3 + k].load(std::memory_order_relaxed);
     for (int l = 0; l < 4; ++l) {
         out->lfo[l] = s->display[7 + l].load(std::memory_order_relaxed);

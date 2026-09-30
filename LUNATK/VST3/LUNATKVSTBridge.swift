@@ -125,7 +125,7 @@ final class LUNATKVSTBox {
         Self.onMain {
             let current = patchFromCore()
             var file = LYSynthPresetFile(patch: current)
-            for custom in [current.customTableA, current.customTableB].compactMap({ $0 }) {
+            for custom in [current.customTableA, current.customTableB, current.customTableC].compactMap({ $0 }) {
                 if let frames = LYWavetableLibrary.shared.frames(named: custom) {
                     file.wavetables[custom] = LYWavetableLibrary.floatData(frames)
                 }

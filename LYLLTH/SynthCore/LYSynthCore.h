@@ -292,6 +292,11 @@ enum {
     // back down, so the oscillators' warps, FM, the filter drive, saturation
     // and the voice inserts fold far less back into the audio band.
     LY_OVERSAMPLE = LY_DEC_STEP_Y_BASE + 16, // LY_OS_*
+
+    // Oscillator C: the same fields as A and B from LY_OSCC_BASE. Its FM,
+    // RM and AM read A. It joins filter 1 (and, in SPLIT, A's path).
+    LY_OSCC_BASE,
+    LY_FILTER_ROUTE_C = LY_OSCC_BASE + LY_OSC_PARAM_COUNT,
     LY_PARAM_COUNT
 };
 enum { LY_OS_OFF = 0, LY_OS_2X, LY_OS_4X, LY_OS_COUNT };
@@ -412,6 +417,8 @@ enum {
     LY_DST_FSAT_DRIVE, LY_DST_VOC_MIX, LY_DST_VOC_SHIFT,
     LY_DST_MORPH, LY_DST_F2_MORPH,
     LY_DST_DEC_DESTROY, LY_DST_DEC_CRUSH, LY_DST_DEC_MIX,
+    LY_DST_C_LEVEL, LY_DST_C_PAN, LY_DST_C_PITCH, LY_DST_C_WTPOS, LY_DST_C_DETUNE, LY_DST_C_BLEND, LY_DST_C_WARP,
+    LY_DST_C_WARP2, LY_DST_C_WIDTH, LY_DST_C_FINE,
     LY_DST_COUNT
 };
 
@@ -448,6 +455,7 @@ typedef struct {
     float vocoderBands[LY_VOC_MAX_BANDS]; // each band's level from the input, 0…1
     int decimatorStep;            // the MOTION step playing, -1 when MOTION is off
     float decimatorPosition[2];   // where DESTROY (x) and CRUSH (y) are now, MOTION and modulation included
+    float wavetablePositionC;     // oscillator C's, modulated, of the newest voice
 } LYSynthDisplay;
 
 LYSynth *lysynth_create(double sampleRate);
@@ -481,6 +489,8 @@ void lysynth_render(LYSynth *synth, float *left, float *right, int frames, uint6
 /// `inLeft` for mono). Null inputs are no input: the vocoder passes the synth.
 void lysynth_render_input(LYSynth *synth, float *left, float *right, const float *inLeft, const float *inRight,
                           int frames, uint64_t blockHostTime);
+
+enum { LY_OSC_COUNT = 3 };   // oscillators A, B and C: 0, 1, 2 below
 
 /// Not the audio thread. frameCount × LY_WT_SIZE samples, frame after frame.
 void lysynth_set_wavetable(LYSynth *synth, int oscillator, const float *frames, int frameCount);

@@ -111,7 +111,8 @@ struct LYWavetableView: View {
             guard !frames.isEmpty else { return }
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.5)))
             let livePosition: Float = {
-                let modulated = oscillator == 0 ? live.display.wavetablePosition.0 : live.display.wavetablePosition.1
+                let modulated = oscillator == 0 ? live.display.wavetablePosition.0
+                    : oscillator == 1 ? live.display.wavetablePosition.1 : live.display.wavetablePositionC
                 return live.display.activeVoices > 0 ? modulated : basePosition
             }()
             let layers = min(frames.count, 28)

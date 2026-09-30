@@ -24,7 +24,7 @@ struct LYSynthParameter: Hashable {
 
 enum LYSynthParameters {
     static func oscillator(_ index: Int, _ local: Int) -> Int {
-        (index == 0 ? LY_OSCA_BASE : LY_OSCB_BASE) + local
+        (index == 0 ? LY_OSCA_BASE : index == 1 ? LY_OSCB_BASE : LY_OSCC_BASE) + local
     }
 
     static func lfo(_ index: Int, _ field: Int) -> Int {
@@ -70,8 +70,8 @@ enum LYSynthParameters {
         func add(_ id: Int, _ key: String, _ label: String, _ range: ClosedRange<Float>, stepped: Bool = false) {
             list.append(LYSynthParameter(id: id, key: key, label: label, range: range, isStepped: stepped))
         }
-        for (o, name) in ["a", "b"].enumerated() {
-            let b = o == 0 ? LY_OSCA_BASE : LY_OSCB_BASE
+        for (o, name) in ["a", "b", "c"].enumerated() {
+            let b = oscillator(o, 0)
             add(b + LY_OSC_ON, "\(name).on", "ON", 0...1, stepped: true)
             add(b + LY_OSC_LEVEL, "\(name).level", "LEVEL", 0...1)
             add(b + LY_OSC_PAN, "\(name).pan", "PAN", -1...1)
@@ -114,6 +114,7 @@ enum LYSynthParameters {
         add(LY_FILTER_MIX, "filter.mix", "MIX", 0...1)
         add(LY_FILTER_ROUTE_A, "filter.routeA", "A", 0...1, stepped: true)
         add(LY_FILTER_ROUTE_B, "filter.routeB", "B", 0...1, stepped: true)
+        add(LY_FILTER_ROUTE_C, "filter.routeC", "C", 0...1, stepped: true)
         add(LY_FILTER_ROUTE_SUB, "filter.routeSub", "SUB", 0...1, stepped: true)
         add(LY_FILTER_ROUTE_NOISE, "filter.routeNoise", "NOISE", 0...1, stepped: true)
         add(LY_FILTER_PAN, "filter.pan", "PAN", -1...1)
@@ -328,6 +329,8 @@ enum LYSynthNames {
     static let warps = ["OFF", "SYNC", "BEND +", "BEND −", "MIRROR", "PWM", "FM ← B", "RM ← B", "QUANTIZE",
                         "ASYM +", "ASYM −", "FLIP", "AM ← B", "FOLD",
                         "PD SQUARE", "PD RESO SAW", "PD RESO TRI"]
+    /// C's FM, RM and AM read A, as B's do.
+    static var warpsC: [String] { warpsB }
     static let warpsB = ["OFF", "SYNC", "BEND +", "BEND −", "MIRROR", "PWM", "FM ← A", "RM ← A", "QUANTIZE",
                          "ASYM +", "ASYM −", "FLIP", "AM ← A", "FOLD",
                          "PD SQUARE", "PD RESO SAW", "PD RESO TRI"]
@@ -389,6 +392,9 @@ enum LYSynthNames {
         ("OSC B", [(LY_DST_B_LEVEL, "B LEVEL"), (LY_DST_B_PAN, "B PAN"), (LY_DST_B_PITCH, "B PITCH"), (LY_DST_B_FINE, "B FINE"),
                    (LY_DST_B_WTPOS, "B WT POS"), (LY_DST_B_WARP, "B WARP"), (LY_DST_B_WARP2, "B WARP 2"),
                    (LY_DST_B_DETUNE, "B DETUNE"), (LY_DST_B_BLEND, "B BLEND"), (LY_DST_B_WIDTH, "B WIDTH")].map { (Int($0.0), $0.1) }),
+        ("OSC C", [(LY_DST_C_LEVEL, "C LEVEL"), (LY_DST_C_PAN, "C PAN"), (LY_DST_C_PITCH, "C PITCH"), (LY_DST_C_FINE, "C FINE"),
+                   (LY_DST_C_WTPOS, "C WT POS"), (LY_DST_C_WARP, "C WARP"), (LY_DST_C_WARP2, "C WARP 2"),
+                   (LY_DST_C_DETUNE, "C DETUNE"), (LY_DST_C_BLEND, "C BLEND"), (LY_DST_C_WIDTH, "C WIDTH")].map { (Int($0.0), $0.1) }),
         ("SUB + NOISE", [(LY_DST_SUB_LEVEL, "SUB LEVEL"), (LY_DST_SUB_PAN, "SUB PAN"), (LY_DST_NOISE_LEVEL, "NOISE LEVEL"),
                          (LY_DST_NOISE_COLOR, "NOISE COLOR"), (LY_DST_NOISE_PITCH, "NOISE PITCH"), (LY_DST_NOISE_PAN, "NOISE PAN")].map { (Int($0.0), $0.1) }),
         ("FILTERS", [(LY_DST_CUTOFF, "CUTOFF"), (LY_DST_RES, "RESONANCE"), (LY_DST_DRIVE, "DRIVE"), (LY_DST_FILTER_MIX, "FILTER MIX"),
@@ -431,15 +437,42 @@ struct LYSynthPatch: Codable, Equatable {
     /// A user or imported wavetable by name; overrides the factory table.
     var customTableA: String? = nil
     var customTableB: String? = nil
+    /// Oscillator C's table. Optional so patches saved before C still load.
+    var tableC: Int? = nil
+    var customTableC: String? = nil
     /// Factory bank metadata: which category it lives in and how to use it.
     var category: String? = nil
     var info: LYSynthPresetInfo? = nil
 
     func tableName(_ oscillator: Int) -> String {
-        let custom = oscillator == 0 ? customTableA : customTableB
-        if let custom { return custom }
-        let index = oscillator == 0 ? tableA : tableB
-        return LYSynthNames.tables[min(max(index, 0), LYSynthNames.tables.count - 1)]
+        if let custom = customTable(oscillator) { return custom }
+        return LYSynthNames.tables[min(max(factoryTable(oscillator), 0), LYSynthNames.tables.count - 1)]
+    }
+
+    /// Oscillator 0, 1 or 2's factory table (A, B, C).
+    func factoryTable(_ oscillator: Int) -> Int {
+        oscillator == 0 ? tableA : oscillator == 1 ? tableB : (tableC ?? LY_TABLE_BASIC)
+    }
+
+    func customTable(_ oscillator: Int) -> String? {
+        oscillator == 0 ? customTableA : oscillator == 1 ? customTableB : customTableC
+    }
+
+    /// Picks a factory table, dropping any custom one.
+    mutating func setFactoryTable(_ oscillator: Int, _ index: Int) {
+        switch oscillator {
+        case 0: tableA = index; customTableA = nil
+        case 1: tableB = index; customTableB = nil
+        default: tableC = index; customTableC = nil
+        }
+    }
+
+    mutating func setCustomTable(_ oscillator: Int, _ name: String?) {
+        switch oscillator {
+        case 0: customTableA = name
+        case 1: customTableB = name
+        default: customTableC = name
+        }
     }
 
     func value(_ id: Int) -> Float {

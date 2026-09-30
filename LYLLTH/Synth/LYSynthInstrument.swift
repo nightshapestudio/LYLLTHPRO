@@ -73,11 +73,11 @@ final class LYSynthInstrument {
     @MainActor
     func apply(_ next: LYSynthPatch, bpm: Double) {
         let previous = patch
-        for oscillator in 0..<2 {
-            let custom = oscillator == 0 ? next.customTableA : next.customTableB
-            let previousCustom = oscillator == 0 ? previous?.customTableA : previous?.customTableB
-            let factory = oscillator == 0 ? next.tableA : next.tableB
-            let previousFactory = oscillator == 0 ? previous?.tableA : previous?.tableB
+        for oscillator in 0..<Int(LY_OSC_COUNT) {
+            let custom = next.customTable(oscillator)
+            let previousCustom = previous?.customTable(oscillator)
+            let factory = next.factoryTable(oscillator)
+            let previousFactory = previous?.factoryTable(oscillator)
             guard previous == nil || custom != previousCustom || factory != previousFactory else { continue }
             if let custom, let frames = LYWavetableLibrary.shared.frames(named: custom) {
                 frames.withUnsafeBufferPointer {

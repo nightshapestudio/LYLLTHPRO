@@ -63,6 +63,13 @@ optional DC blocker and reverb low cut. (The voice inserts now have their own DC
   peak sweeps up the harmonics like a resonant filter without a click. At
   AMOUNT 0 each is the plain table. The resonant ones pick a smaller mipmap
   for the faster carrier.
+- **Oscillator C**: a third wavetable oscillator with every field A and B
+  have (two warps, unison modes, stacks, its own table, custom tables too).
+  Its FM, RM and AM read A. It goes through filter 1 (A's path in SPLIT) unless
+  its C route is off. Ten matrix destinations (C LEVEL … C WIDTH). In the
+  editor it shares the second slot with B: the B / C button switches them and
+  is lit while the hidden one plays. It draws its random numbers after
+  everything else and only while on, so patches without it are unchanged.
 - **QUALITY (HQ 1× / 2× / 4×)**, in the VOICE panel: the voices run at 2× or
   4× the sample rate and come back down through halfband filters (79 taps,
   104 dB down; for 4×, a 19-tap stage first). Oscillators, warps, FM, filter
