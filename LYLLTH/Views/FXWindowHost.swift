@@ -39,6 +39,7 @@ struct LYFXWindowHost: View {
                     accent: request.kind.accent,
                     size: size.content,
                     scale: size.scale,
+                    layer: "fx",
                     close: close
                 ) {
                     window(request)

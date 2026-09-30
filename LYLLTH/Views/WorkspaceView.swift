@@ -252,6 +252,8 @@ struct WorkspaceView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @StateObject private var history = LYDocumentHistory()
+    /// Which floating window is in front.
+    @StateObject private var windowStack = LYWindowStack()
 
     @State private var selectedTrackID: UUID?
     @State private var selectedBrowserGroup = "NIGHTSHAPE"
@@ -441,23 +443,27 @@ struct WorkspaceView: View {
                 }
                 .background(LYLLTHTheme.background)
 
+                // Menus and the effect picker open above every window; the
+                // windows themselves stack in the order they were last used.
                 workspaceMenuOverlay
-                    .zIndex(120)
+                    .zIndex(LYWindowStack.menus)
 
                 fxPickerOverlay
+                    .zIndex(LYWindowStack.menus)
 
                 pianoRollOverlay
+                    .zIndex(windowStack.zIndex("pianoroll"))
                 sirenOverlay
-                    .zIndex(179)
+                    .zIndex(windowStack.zIndex("siren"))
 
                 musicalTypingOverlay
-                    .zIndex(182)
+                    .zIndex(windowStack.zIndex("typing"))
 
                 synthEditorOverlay
-                    .zIndex(180)
+                    .zIndex(windowStack.zIndex("synth"))
 
                 drumBrowserOverlay
-                    .zIndex(181)
+                    .zIndex(windowStack.zIndex("drumsynth"))
 
                 LYBounceOverlay(bounce: bounce, cancel: { bounce.cancel(audio: audio) })
                     .zIndex(250)
@@ -466,7 +472,7 @@ struct WorkspaceView: View {
                     .zIndex(300)
 
                 audioUnitEditorOverlay
-                    .zIndex(290)
+                    .zIndex(windowStack.zIndex("audio-unit"))
 
                 LYFXWindowHost(
                     session: $document.session,
@@ -476,9 +482,10 @@ struct WorkspaceView: View {
                     isPlaying: audio.isPlaying,
                     onTransportTap: { audio.togglePlayback() }
                 )
-                .zIndex(200)
+                .zIndex(windowStack.zIndex("fx"))
             }
         }
+        .environment(\.lyWindowStack, windowStack)
         .coordinateSpace(name: LYDropdownOverlay<EmptyView>.space)
         .onPreferenceChange(LYMenuAnchorKey.self) { menuAnchors = $0 }
         .frame(minWidth: 960, minHeight: 640)
@@ -1372,6 +1379,7 @@ struct WorkspaceView: View {
                     title: "AUDIO UNIT  ·  " + editor.title.uppercased(),
                     accent: LYLLTHTheme.indigo,
                     size: CGSize(width: min(geometry.size.width - 48, 900), height: min(geometry.size.height - 72, 650)),
+                    layer: "audio-unit",
                     close: {
                         document.session = audioUnits.captureStates(in: document.session, engine: audio.engine)
                         audioUnits.editor = nil
@@ -1708,7 +1716,6 @@ struct WorkspaceView: View {
                 }
             }
             .preferredColorScheme(.dark)
-            .zIndex(150)
         }
     }
 
@@ -2120,7 +2127,6 @@ struct WorkspaceView: View {
                     )
                 }
             }
-            .zIndex(100)
         }
     }
 

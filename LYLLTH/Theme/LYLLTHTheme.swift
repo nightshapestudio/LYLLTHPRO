@@ -273,6 +273,42 @@ extension View {
     }
 }
 
+/// Which floating window is in front. Opening a window or clicking anywhere
+/// in one raises it, the way macOS windows behave; the workspace gives each
+/// window's layer the z-index this hands out. Every window sits between
+/// `base` and `menus`, so a menu or picker always opens above all of them.
+@MainActor
+final class LYWindowStack: ObservableObject {
+    /// Back to front.
+    @Published private(set) var order: [String] = []
+
+    static let base: Double = 170
+    /// Where menus, pickers and dropdowns sit: above every window.
+    static let menus: Double = 240
+
+    func raise(_ layer: String) {
+        guard order.last != layer else { return }
+        order.removeAll { $0 == layer }
+        order.append(layer)
+    }
+
+    func zIndex(_ layer: String) -> Double {
+        guard let index = order.firstIndex(of: layer) else { return Self.base }
+        return Self.base + 1 + Double(index)
+    }
+}
+
+private struct LYWindowStackKey: EnvironmentKey {
+    static let defaultValue: LYWindowStack? = nil
+}
+
+extension EnvironmentValues {
+    var lyWindowStack: LYWindowStack? {
+        get { self[LYWindowStackKey.self] }
+        set { self[LYWindowStackKey.self] = newValue }
+    }
+}
+
 /// A window that floats over the workspace and can be dragged by its title
 /// bar, like a Logic plug-in window. It remembers where it was left, per
 /// kind of window, and never lets its bar go fully off screen.
@@ -281,14 +317,18 @@ struct LYFloatingWindow<Content: View>: View {
     let accent: Color
     let size: CGSize
     var scale: CGFloat = 1
+    /// Its layer in the workspace's LYWindowStack.
+    let layer: String
     let close: () -> Void
     let content: Content
+    @Environment(\.lyWindowStack) private var stack
     @AppStorage private var storedX: Double
     @AppStorage private var storedY: Double
     @State private var drag: CGSize = .zero
 
-    init(id: String, title: String, accent: Color, size: CGSize, scale: CGFloat = 1,
+    init(id: String, title: String, accent: Color, size: CGSize, scale: CGFloat = 1, layer: String? = nil,
          close: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+        self.layer = layer ?? id
         self.title = title
         self.accent = accent
         self.size = size
@@ -336,9 +376,15 @@ struct LYFloatingWindow<Content: View>: View {
             // redrawn on every frame of a drag. The purple halo keeps the
             // window's edge from sinking into the black behind it.
             .nightshapeWindowGlow()
+            // Any press in the window brings it to the front, without taking
+            // the press from the control under it.
+            .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in stack?.raise(layer) })
             .position(x: geo.size.width / 2 + resting.width, y: geo.size.height / 2 + resting.height)
             .offset(x: live.width - resting.width, y: live.height - resting.height)
         }
+        // A window opens in front, and so does one reopened with new contents.
+        .onAppear { stack?.raise(layer) }
+        .onChange(of: title) { _, _ in stack?.raise(layer) }
     }
 
     private var titleBar: some View {
