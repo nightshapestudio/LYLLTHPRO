@@ -1326,6 +1326,9 @@ struct LYLLTHSession: Codable, Equatable {
     /// reordering tracks never breaks membership.
     var trackFolders: [LYTrackFolder]? = nil
     var mixGroups: [LYMixGroup]? = nil
+    /// Set once the drum tracks have been put in their DRUMS folder, so a song
+    /// whose drums were taken out of it is never regrouped.
+    var drumsNested: Bool? = nil
 
     var isLoopActive: Bool { (isLoopEnabled ?? true) && loopRange != nil }
 
@@ -1454,6 +1457,7 @@ struct LYLLTHSession: Codable, Equatable {
             tracks: tracks
         )
         session.normalizeEngineChannelIndices()
+        session.nestDrumTracksIfNeeded()
         return session
     }
 
@@ -1575,6 +1579,7 @@ struct LYLLTHSession: Codable, Equatable {
             return cleaned.trackIDs.isEmpty ? nil : cleaned
         }
 
+        migrated.nestDrumTracksIfNeeded()
         migrated.schemaVersion = Self.currentSchemaVersion
         return migrated
     }
@@ -1627,6 +1632,27 @@ extension LYLLTHSession {
 
     func groups(containing trackID: UUID) -> [LYMixGroup] {
         (mixGroups ?? []).filter { $0.trackIDs.contains(trackID) }
+    }
+
+    /// Drum tracks start nested in one collapsed DRUMS folder, so a kit takes
+    /// one row in ARRANGE instead of one per sound. Only drum tracks in no
+    /// other folder join it, and it happens once per song.
+    mutating func nestDrumTracksIfNeeded() {
+        guard drumsNested != true else { return }
+        drumsNested = true
+        let foldered = Set((trackFolders ?? []).flatMap(\.trackIDs))
+        let drums = tracks.filter { $0.kind == .drumkit && !foldered.contains($0.id) }.map(\.id)
+        guard drums.count > 1 else { return }
+        var folders = trackFolders ?? []
+        folders.append(LYTrackFolder(name: "DRUMS", trackIDs: drums, isCollapsed: true, accent: .teal))
+        trackFolders = folders
+    }
+
+    /// The DRUMS folder, if the song has one.
+    var drumFolderIndex: Int? {
+        trackFolders?.firstIndex { folder in
+            folder.name == "DRUMS" && folder.trackIDs.allSatisfy { id in tracks.first { $0.id == id }?.kind == .drumkit }
+        }
     }
 
     mutating func createFolder(name: String, trackIDs: [UUID]) -> UUID? {

@@ -117,9 +117,16 @@ struct ArrangementView: View {
                             headerOffset: horizontalScrollOffset,
                             openEditor: openSongFXMenu
                         )
-                        ForEach(visibleTrackIndices, id: \.self) { index in
-                            trackLane(index: index)
-                            AnyView(automationRows(index: index))
+                        ForEach(arrangementRows, id: \.self) { row in
+                            switch row {
+                            case .folder(let id):
+                                if let folder = session.trackFolders?.first(where: { $0.id == id }) {
+                                    folderLane(folder)
+                                }
+                            case .track(let index):
+                                trackLane(index: index)
+                                AnyView(automationRows(index: index))
+                            }
                         }
                         addTrackLane
                         } header: {
@@ -232,9 +239,135 @@ struct ArrangementView: View {
         }
     }
 
-    private var visibleTrackIndices: [Int] {
-        let hidden = Set((session.trackFolders ?? []).filter(\.isCollapsed).flatMap(\.trackIDs))
-        return session.tracks.indices.filter { !hidden.contains(session.tracks[$0].id) }
+    private enum ArrangementRow: Hashable {
+        case folder(UUID)
+        case track(Int)
+    }
+
+    /// Tracks in song order, each folder as one row where its first track
+    /// would be. An open folder lists its tracks under it; a closed one is
+    /// that row alone.
+    private var arrangementRows: [ArrangementRow] {
+        let folders = session.trackFolders ?? []
+        var shown = Set<UUID>()
+        var rows: [ArrangementRow] = []
+        for index in session.tracks.indices {
+            let id = session.tracks[index].id
+            guard let folder = folders.first(where: { $0.trackIDs.contains(id) }) else {
+                rows.append(.track(index))
+                continue
+            }
+            guard shown.insert(folder.id).inserted else { continue }
+            rows.append(.folder(folder.id))
+            if !folder.isCollapsed {
+                for member in session.tracks.indices where folder.trackIDs.contains(session.tracks[member].id) {
+                    rows.append(.track(member))
+                }
+            }
+        }
+        return rows
+    }
+
+    private func toggleFolder(_ id: UUID) {
+        guard let index = session.trackFolders?.firstIndex(where: { $0.id == id }) else { return }
+        withAnimation(LYLLTHTheme.snap) { session.trackFolders?[index].isCollapsed.toggle() }
+    }
+
+    /// One row for a folder: its name, how many tracks, mute and solo for all
+    /// of them, and a lane showing where they play in the song. Click the
+    /// header to open or close it.
+    private func folderLane(_ folder: LYTrackFolder) -> some View {
+        let members = session.tracks.indices.filter { folder.trackIDs.contains(session.tracks[$0].id) }
+        let accent = LYLLTHTheme.accent(folder.accent)
+        let height = folder.isCollapsed ? laneHeight : 26
+        let allMuted = !members.isEmpty && members.allSatisfy { session.tracks[$0].isMuted }
+        let anySolo = members.contains { session.tracks[$0].isSolo }
+        // Where any member has a region in the song, merged.
+        let spans: [(start: Double, end: Double)] = {
+            let raw = members.flatMap { session.tracks[$0].clips }
+                .filter(\.isInSong)
+                .map { (start: $0.startBeat, end: $0.startBeat + $0.lengthBeats) }
+                .sorted { $0.start < $1.start }
+            var merged: [(start: Double, end: Double)] = []
+            for span in raw {
+                if let last = merged.last, span.start <= last.end + 0.000_1 {
+                    merged[merged.count - 1].end = max(last.end, span.end)
+                } else {
+                    merged.append(span)
+                }
+            }
+            return merged
+        }()
+
+        return HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: folder.isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(LYLLTHTheme.dim)
+                    .frame(width: 12)
+                Rectangle().fill(accent).frame(width: 3, height: max(12, height - 16))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(folder.name)
+                        .font(LYLLTHTheme.label(10, weight: .bold))
+                        .tracking(1.6)
+                        .foregroundStyle(LYLLTHTheme.text)
+                        .lineLimit(1)
+                    if folder.isCollapsed {
+                        Text("\(members.count) TRACKS")
+                            .font(LYLLTHTheme.label(7.5, weight: .bold))
+                            .tracking(1.4)
+                            .foregroundStyle(LYLLTHTheme.dim)
+                    }
+                }
+                Spacer(minLength: 4)
+                Button {
+                    let mute = !allMuted
+                    for member in members { session.tracks[member].isMuted = mute }
+                } label: { Text("M").frame(width: 22, height: 20) }
+                    .buttonStyle(LYChromeButtonStyle(active: allMuted, tint: LYLLTHTheme.purple, compact: true))
+                    .help(allMuted ? "Unmute every track in \(folder.name)" : "Mute every track in \(folder.name)")
+                Button {
+                    let solo = !anySolo
+                    for member in members { session.tracks[member].isSolo = solo }
+                } label: { Text("S").frame(width: 22, height: 20) }
+                    .buttonStyle(LYChromeButtonStyle(active: anySolo, tint: LYLLTHTheme.teal, compact: true))
+                    .help(anySolo ? "Unsolo \(folder.name)" : "Solo every track in \(folder.name)")
+            }
+            .padding(.horizontal, 12)
+            .frame(width: headerWidth, height: height)
+            .background(LYLLTHTheme.panel)
+            .overlay(alignment: .trailing) { Rectangle().fill(LYLLTHTheme.line).frame(width: 1) }
+            .contentShape(Rectangle())
+            .onTapGesture { toggleFolder(folder.id) }
+            .help(folder.isCollapsed ? "Show the \(members.count) tracks in \(folder.name)" : "Close \(folder.name) into one row")
+            .offset(x: horizontalScrollOffset)
+            .zIndex(10)
+
+            ZStack(alignment: .topLeading) {
+                BeatGrid(
+                    beats: beats,
+                    beatWidth: beatWidth,
+                    height: height,
+                    beatsPerBar: beatsPerBar,
+                    subdivisionBeats: displayGridBeats,
+                    showsGrid: editor.showsGrid && folder.isCollapsed
+                )
+                if folder.isCollapsed {
+                    ForEach(Array(spans.enumerated()), id: \.offset) { _, span in
+                        Rectangle()
+                            .fill(accent.opacity(0.18))
+                            .overlay { Rectangle().stroke(accent.opacity(0.7), lineWidth: 1) }
+                            .frame(width: max(beatWidth * (span.end - span.start) - 2, 6), height: max(20, height - 16))
+                            .offset(x: beatWidth * span.start + 1, y: 8)
+                    }
+                }
+            }
+            .frame(width: CGFloat(beats) * beatWidth, height: height, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { toggleFolder(folder.id) }
+        }
+        .frame(height: height)
+        .overlay(alignment: .bottom) { LYHairline() }
     }
 
     private var arrangementSummary: String {
