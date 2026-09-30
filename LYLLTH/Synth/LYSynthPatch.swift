@@ -55,6 +55,15 @@ enum LYSynthParameters {
         LY_TRACK_POINTS_BASE + index * Int(LY_TRACK_POINTS) + point
     }
 
+    /// The parameter holding the rack's `place`-th effect: ten at
+    /// LY_FX_ORDER, the eleventh (added with the DECIMATOR) after them all.
+    static func effectOrder(_ place: Int) -> Int {
+        place < 10 ? LY_FX_ORDER + place : LY_FX_ORDER_LAST
+    }
+
+    /// A DECIMATOR MOTION step's on switch, DESTROY (x) or CRUSH (y).
+    static func decimatorStep(_ step: Int, _ base: Int) -> Int { base + step }
+
     // Keys are what a saved patch stores. Never rename one.
     static let all: [LYSynthParameter] = {
         var list: [LYSynthParameter] = []
@@ -160,7 +169,7 @@ enum LYSynthParameters {
         add(LY_ARP_SWING, "arp.swing", "SWING", 0...1)
         add(LY_ARP_LATCH, "arp.latch", "LATCH", 0...1, stepped: true)
         for i in 0..<Int(LY_FX_COUNT) {
-            add(LY_FX_ORDER + i, "fx.order\(i)", "ORDER", 0...Float(LY_FX_COUNT - 1), stepped: true)
+            add(effectOrder(i), "fx.order\(i)", "ORDER", 0...Float(LY_FX_COUNT - 1), stepped: true)
         }
         let fx: [(Int, String, String, ClosedRange<Float>, Bool)] = [
             (LY_HYPER_ON, "hyper.on", "ON", 0...1, true), (LY_HYPER_RATE, "hyper.rate", "RATE", 0...1, false),
@@ -279,6 +288,21 @@ enum LYSynthParameters {
         for i in 0..<Int(LY_ARP_PATTERN_STEPS) {
             add(LY_ARP_TRANSPOSE_BASE + i, "arp.transpose\(i)", "STEP \(i + 1) TRANSPOSE", -24...24, stepped: true)
         }
+        add(LY_DEC_ON, "decim.on", "ON", 0...1, stepped: true)
+        add(LY_DEC_DESTROY, "decim.destroy", "DESTROY", 0...1)
+        add(LY_DEC_CRUSH, "decim.crush", "CRUSH", 0...1)
+        add(LY_DEC_MIX, "decim.mix", "MIX", 0...1)
+        add(LY_DEC_POST, "decim.post", "AFTER MASTER", 0...1, stepped: true)
+        add(LY_DEC_MOTION_ON, "decim.motion", "MOTION", 0...1, stepped: true)
+        add(LY_DEC_MOTION_RATE, "decim.motion.rate", "RATE", 0...1)
+        add(LY_DEC_MOTION_LENGTH, "decim.motion.length", "LENGTH", 2...Float(LY_DEC_STEPS), stepped: true)
+        add(LY_DEC_MOTION_GLIDE, "decim.motion.glide", "GLIDE", 0...1)
+        add(LY_DEC_MOTION_OFFMODE, "decim.motion.off", "OFF STEPS", 0...Float(LY_DECOFF_COUNT - 1), stepped: true)
+        for i in 0..<Int(LY_DEC_STEPS) {
+            add(decimatorStep(i, LY_DEC_STEP_ON_BASE), "decim.step\(i).on", "STEP \(i + 1)", 0...1, stepped: true)
+            add(decimatorStep(i, LY_DEC_STEP_X_BASE), "decim.step\(i).x", "STEP \(i + 1) DESTROY", 0...1)
+            add(decimatorStep(i, LY_DEC_STEP_Y_BASE), "decim.step\(i).y", "STEP \(i + 1) CRUSH", 0...1)
+        }
         return list
     }()
 
@@ -326,7 +350,10 @@ enum LYSynthNames {
     static let inserts = ["OFF", "BITCRUSH", "DECIMATE", "SINE SHAPER", "FOLD", "RECTIFY", "RING MOD", "FREQ SHIFT", "COMB"]
     static let performerModes = ["SONG", "NOTE"]
     static let stepShapes = ["HOLD", "RAMP UP", "RAMP DOWN", "TRIANGLE", "DECAY", "RISE", "PULSE", "GLIDE"]
-    static let effects = ["HYPER", "DISTORTION", "FLANGER", "PHASER", "CHORUS", "DELAY", "COMPRESSOR", "EQ", "FILTER", "REVERB"]
+    static let effects = ["HYPER", "DISTORTION", "FLANGER", "PHASER", "CHORUS", "DELAY", "COMPRESSOR", "EQ", "FILTER", "REVERB",
+                          "DECIMATOR"]
+    static let decimatorOffModes = ["DRY", "HOLD"]
+    static let decimatorPlaces = ["IN RACK", "AFTER MASTER"]
     static let distortionModes = ["TUBE", "SOFT", "HARD", "DIODE", "LIN FOLD", "SIN FOLD", "ZERO-SQ", "DOWNSAMPLE", "BITCRUSH", "RECTIFY"]
     static let compModes = ["SINGLE", "MULTIBAND"]
     static let reverbModes = ["PLATE", "HALL"]
@@ -382,6 +409,7 @@ enum LYSynthNames {
                 (LY_DST_EQ_LOW, "EQ LOW"), (LY_DST_EQ_MID, "EQ MID"), (LY_DST_EQ_HIGH, "EQ HIGH"),
                 (LY_DST_FXF_CUTOFF, "FX CUTOFF"), (LY_DST_FXF_RES, "FX RES"), (LY_DST_FXF_MIX, "FX FILTER MIX"),
                 (LY_DST_REVERB_SIZE, "REVERB SIZE"), (LY_DST_REVERB_DECAY, "REVERB DECAY"), (LY_DST_REVERB_MIX, "REVERB MIX"),
+                (LY_DST_DEC_DESTROY, "DECIMATOR DESTROY"), (LY_DST_DEC_CRUSH, "DECIMATOR CRUSH"), (LY_DST_DEC_MIX, "DECIMATOR MIX"),
                 (LY_DST_VOC_MIX, "VOCODER MIX"), (LY_DST_VOC_SHIFT, "VOCODER SHIFT"),
                 (LY_DST_MASTER, "MASTER")].map { (Int($0.0), $0.1) }),
     ]
@@ -473,16 +501,16 @@ struct LYSynthPatch: Codable, Equatable {
 
     /// The effects rack in play order.
     var effectOrder: [Int] {
-        let order = (0..<Int(LY_FX_COUNT)).map { Int(value(LY_FX_ORDER + $0)) }
+        let order = (0..<Int(LY_FX_COUNT)).map { Int(value(LYSynthParameters.effectOrder($0))) }
         return Set(order).count == Int(LY_FX_COUNT) && order.allSatisfy({ (0..<Int(LY_FX_COUNT)).contains($0) })
             ? order : LYSynthPatch.defaultEffectOrder
     }
 
     static let defaultEffectOrder = [LY_FX_HYPER, LY_FX_DIST, LY_FX_FLANGER, LY_FX_PHASER, LY_FX_CHORUS,
-                                     LY_FX_DELAY, LY_FX_COMP, LY_FX_REVERB, LY_FX_EQ, LY_FX_FILTER].map { Int($0) }
+                                     LY_FX_DELAY, LY_FX_COMP, LY_FX_REVERB, LY_FX_EQ, LY_FX_FILTER, LY_FX_DECIM].map { Int($0) }
 
     mutating func setEffectOrder(_ order: [Int]) {
-        for (index, fx) in order.enumerated() { set(LY_FX_ORDER + index, Float(fx)) }
+        for (index, fx) in order.enumerated() { set(LYSynthParameters.effectOrder(index), Float(fx)) }
     }
 }
 
@@ -683,7 +711,22 @@ extension LYSynthPatch {
             p.route(source: LY_SRC_LFO1, destination: LY_DST_B_WTPOS, amount: 0.4)
             p.route(source: LY_SRC_LFO1, destination: LY_DST_CUTOFF, amount: 0.16)
             p.route(source: LY_SRC_MACRO1, destination: LY_DST_DRIVE, amount: 0.5)
-            p.set(LY_VOICES, 1); p.set(LY_MASTER, 0.55)
+            p.set(LY_VOICES, 1); p.set(LY_MASTER, 0.954)
+            // The DECIMATOR with MOTION, as it was set on the GLASS ARP track of
+            // the LYLLTH demo: eight 1/8 steps, no glide, step 2 falls dry.
+            // AFTER MASTER, where the track's decimator sat, so it sounds the same.
+            p.set(LY_DEC_ON, 1); p.set(LY_DEC_POST, 1); p.set(LY_DEC_DESTROY, 0.5593); p.set(LY_DEC_CRUSH, 0.0448)
+            p.set(LY_DEC_MOTION_ON, 1); p.set(LY_DEC_MOTION_RATE, division("1/8")); p.set(LY_DEC_MOTION_LENGTH, 8)
+            p.set(LY_DEC_MOTION_GLIDE, 0); p.set(LY_DEC_MOTION_OFFMODE, Float(LY_DECOFF_DRY))
+            let steps: [(on: Bool, x: Float, y: Float)] = [
+                (true, 0.5760, 0.4040), (false, 0.7887, 0.6035), (true, 0.4205, 0.2761), (true, 0.7640, 0.9277),
+                (true, 0.8249, 0.1739), (true, 0.3480, 0.7619), (true, 0.7915, 0.3103), (true, 0.4533, 0.2851),
+            ]
+            for (i, step) in steps.enumerated() {
+                p.set(LYSynthParameters.decimatorStep(i, LY_DEC_STEP_ON_BASE), step.on ? 1 : 0)
+                p.set(LYSynthParameters.decimatorStep(i, LY_DEC_STEP_X_BASE), step.x)
+                p.set(LYSynthParameters.decimatorStep(i, LY_DEC_STEP_Y_BASE), step.y)
+            }
         },
         make("FORMANT CHOIR", tableA: LY_TABLE_FORMANT, tableB: LY_TABLE_CHOIR) { p in
             p.set(osc(0, LY_OSC_UNISON), 5); p.set(osc(0, LY_OSC_DETUNE), 0.3)

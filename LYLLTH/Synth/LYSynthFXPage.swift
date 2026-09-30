@@ -9,19 +9,20 @@ struct LYSynthFXPage: View {
     @State private var dropTarget: Int?
 
     static let onIDs: [Int] = [LY_HYPER_ON, LY_DIST_ON, LY_FLANGER_ON, LY_PHASER_ON, LY_CHORUS_ON,
-                               LY_DELAY_ON, LY_COMP_ON, LY_EQ_ON, LY_FXF_ON, LY_REVERB_ON].map { Int($0) }
+                               LY_DELAY_ON, LY_COMP_ON, LY_EQ_ON, LY_FXF_ON, LY_REVERB_ON, LY_DEC_ON].map { Int($0) }
 
     static func accent(_ fx: Int) -> Color {
         switch fx {
         case LY_FX_HYPER, LY_FX_CHORUS, LY_FX_EQ: return LYLLTHTheme.teal
         case LY_FX_DIST, LY_FX_COMP, LY_FX_FILTER: return LYLLTHTheme.indigo
-        case LY_FX_FLANGER, LY_FX_PHASER: return LYLLTHTheme.purple
+        case LY_FX_FLANGER, LY_FX_PHASER, LY_FX_DECIM: return LYLLTHTheme.purple
         default: return LYLLTHTheme.lavender
         }
     }
 
     static let details = ["UNISON + DIMENSION", "10 CHARACTERS", "COMB SWEEP", "6-STAGE SWEEP", "2-VOICE ENSEMBLE",
-                          "TEMPO · PING-PONG", "SINGLE OR MULTIBAND", "SHELF · PEAK · SHELF", "LP · HP · BP · COMB", "PLATE OR HALL"]
+                          "TEMPO · PING-PONG", "SINGLE OR MULTIBAND", "SHELF · PEAK · SHELF", "LP · HP · BP · COMB", "PLATE OR HALL",
+                          "DESTROY · CRUSH · MOTION"]
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -77,7 +78,7 @@ struct LYSynthFXPage: View {
         let accent = Self.accent(fx)
         let isSelected = selected == fx
         return HStack(spacing: 7) {
-            Text(String(format: "%02d", position + 1))
+            Text(fx == LY_FX_DECIM && context.isOn(LY_DEC_POST) ? "OUT" : String(format: "%02d", position + 1))
                 .font(LYLLTHTheme.value(8))
                 .foregroundStyle(LYLLTHTheme.dim)
                 .frame(width: 16)
@@ -107,7 +108,7 @@ struct LYSynthFXPage: View {
             }
         }
         .padding(.horizontal, 6)
-        .frame(height: 36)
+        .frame(height: 33)
         .background(accent.opacity(isSelected ? 0.12 : (on ? 0.04 : 0)))
         .overlay(Rectangle().stroke(isSelected ? accent : LYLLTHTheme.lineStrong, lineWidth: isSelected ? 1.2 : 1))
         .overlay(alignment: .top) { if dropTarget == fx { Rectangle().fill(accent).frame(height: 2) } }
@@ -154,13 +155,21 @@ struct LYSynthFXPage: View {
                 .tracking(1.3)
                 .foregroundStyle(LYLLTHTheme.dim)
         } content: {
-            VStack(spacing: 12) {
-                LYFXVisual(fx: fx, patch: context.patch, live: context.live, accent: accent, set: context.set)
-                    .frame(maxHeight: .infinity)
-                    .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
-                controls(fx, accent: accent)
-                    .frame(height: 70)
+            if fx == LY_FX_DECIM {
+                AnyView(LYDecimatorDetail(context: context, accent: accent))
+            } else {
+                standardDetail(fx, accent: accent)
             }
+        }
+    }
+
+    private func standardDetail(_ fx: Int, accent: Color) -> some View {
+        VStack(spacing: 12) {
+            LYFXVisual(fx: fx, patch: context.patch, live: context.live, accent: accent, set: context.set)
+                .frame(maxHeight: .infinity)
+                .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+            controls(fx, accent: accent)
+                .frame(height: 70)
         }
     }
 
@@ -729,5 +738,212 @@ struct LYVocoderPanel: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - DECIMATOR
+
+/// The Sonic Decimator in LUNATK: the XY field (DESTROY across, CRUSH up),
+/// MIX, and MOTION, the step sequencer that moves the point with the song.
+/// With MOTION on, dragging the field places the selected step.
+struct LYDecimatorDetail: View {
+    let context: LYSynthContext
+    let accent: Color
+    @State private var selectedStep = 0
+
+    private var motionOn: Bool { context.isOn(LY_DEC_MOTION_ON) }
+    private var length: Int { min(max(Int(context.value(LY_DEC_MOTION_LENGTH).rounded()), 2), Int(LY_DEC_STEPS)) }
+
+    var body: some View {
+        let c = context
+        let pct = { (v: Float) in String(format: "%.0f%%", v * 100) }
+        VStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                LYDecimatorField(patch: c.patch, live: c.live, accent: accent, editingStep: motionOn ? selectedStep : nil) { x, y in
+                    if motionOn {
+                        c.set(LY_DEC_STEP_X_BASE + selectedStep, x)
+                        c.set(LY_DEC_STEP_Y_BASE + selectedStep, y)
+                        if !c.isOn(LY_DEC_STEP_ON_BASE + selectedStep) { c.set(LY_DEC_STEP_ON_BASE + selectedStep, 1) }
+                    } else {
+                        c.set(LY_DEC_DESTROY, x)
+                        c.set(LY_DEC_CRUSH, y)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                VStack(spacing: 12) {
+                    c.knob(LY_DEC_DESTROY, LY_DST_DEC_DESTROY, accent: accent, diameter: 38, format: pct)
+                    c.knob(LY_DEC_CRUSH, LY_DST_DEC_CRUSH, accent: accent, diameter: 38, format: pct)
+                    c.knob(LY_DEC_MIX, LY_DST_DEC_MIX, accent: accent, diameter: 34, format: pct)
+                    Spacer(minLength: 0)
+                    // IN RACK plays in the rack's order; AFTER MASTER is the last
+                    // thing out, where a track's decimator sits.
+                    VStack(spacing: 3) {
+                        ForEach(Array(LYSynthNames.decimatorPlaces.enumerated()), id: \.offset) { place, name in
+                            LYSynthToggle(title: name, isOn: Int(c.value(LY_DEC_POST).rounded()) == place, accent: accent) {
+                                c.set(LY_DEC_POST, Float(place))
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                .frame(width: 92)
+            }
+            .frame(maxHeight: .infinity)
+            motionControls
+            LYDecimatorSteps(context: c, live: c.live, accent: accent, length: length, motionOn: motionOn,
+                             selected: $selectedStep)
+                .frame(height: 38)
+        }
+    }
+
+    private var motionControls: some View {
+        let c = context
+        return HStack(spacing: 10) {
+            LYSynthToggle(title: "MOTION", isOn: motionOn, accent: accent) { c.toggle(LY_DEC_MOTION_ON) }
+                .frame(width: 64)
+            c.knob(LY_DEC_MOTION_RATE, accent: accent, diameter: 26, label: "RATE", format: { v in
+                let i = Int((v * Float(LYSynthNames.syncDivisions.count - 1)).rounded())
+                return LYSynthNames.syncDivisions[min(max(i, 0), LYSynthNames.syncDivisions.count - 1)]
+            })
+            LYSynthStepper(label: "LENGTH", text: "\(length)", accent: accent) { step in
+                c.set(LY_DEC_MOTION_LENGTH, Float(min(max(length + step, 2), Int(LY_DEC_STEPS))))
+            }
+            c.knob(LY_DEC_MOTION_GLIDE, accent: accent, diameter: 26, format: { String(format: "%.0f MS", $0 * 250) })
+            HStack(spacing: 3) {
+                ForEach(Array(LYSynthNames.decimatorOffModes.enumerated()), id: \.offset) { mode, name in
+                    LYSynthToggle(title: name, isOn: Int(c.value(LY_DEC_MOTION_OFFMODE).rounded()) == mode, accent: accent) {
+                        c.set(LY_DEC_MOTION_OFFMODE, Float(mode))
+                    }
+                    .frame(width: 44)
+                }
+            }
+            Text("OFF STEPS")
+                .font(LYLLTHTheme.label(6.5, weight: .bold)).tracking(1)
+                .foregroundStyle(LYLLTHTheme.dim)
+            Spacer(minLength: 0)
+        }
+        .frame(height: 50)
+        .opacity(motionOn ? 1 : 0.6)
+    }
+}
+
+/// The XY field. The panel's point (or, with MOTION on, every step in play)
+/// and the live point the sound is at now.
+struct LYDecimatorField: View {
+    let patch: LYSynthPatch
+    @ObservedObject var live: LYSynthLive
+    let accent: Color
+    /// The step a drag places, when MOTION is on.
+    let editingStep: Int?
+    let move: (Float, Float) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            Canvas { context, size in draw(&context, size) }
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                    let area = Self.area(geo.size)
+                    let x = Float((drag.location.x - area.minX) / area.width)
+                    let y = Float(1 - (drag.location.y - area.minY) / area.height)
+                    move(min(max(x, 0), 1), min(max(y, 0), 1))
+                })
+        }
+    }
+
+    private static func area(_ size: CGSize) -> CGRect { CGRect(origin: .zero, size: size).insetBy(dx: 14, dy: 14) }
+
+    private func point(_ x: Float, _ y: Float, in area: CGRect) -> CGPoint {
+        CGPoint(x: area.minX + CGFloat(x) * area.width, y: area.maxY - CGFloat(y) * area.height)
+    }
+
+    private func draw(_ context: inout GraphicsContext, _ size: CGSize) {
+        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.55)))
+        let area = Self.area(size)
+        for k in 1..<4 {
+            let f = CGFloat(k) / 4
+            context.fill(Path(CGRect(x: area.minX + area.width * f, y: area.minY, width: 1, height: area.height)), with: .color(Color.white.opacity(0.05)))
+            context.fill(Path(CGRect(x: area.minX, y: area.minY + area.height * f, width: area.width, height: 1)), with: .color(Color.white.opacity(0.05)))
+        }
+        context.stroke(Path(area), with: .color(Color.white.opacity(0.08)), lineWidth: 1)
+        context.draw(Text("DESTROY →").font(LYLLTHTheme.label(7, weight: .bold)).foregroundColor(LYLLTHTheme.dim),
+                     at: CGPoint(x: area.maxX - 30, y: area.maxY - 8))
+        context.draw(Text("CRUSH ↑").font(LYLLTHTheme.label(7, weight: .bold)).foregroundColor(LYLLTHTheme.dim),
+                     at: CGPoint(x: area.minX + 24, y: area.minY + 8))
+
+        let isOn = patch.value(LY_DEC_ON) > 0.5
+        if let editingStep {
+            let length = min(max(Int(patch.value(LY_DEC_MOTION_LENGTH).rounded()), 2), Int(LY_DEC_STEPS))
+            var path = Path()
+            var started = false
+            for step in 0..<length where patch.value(LY_DEC_STEP_ON_BASE + step) > 0.5 {
+                let p = point(patch.value(LY_DEC_STEP_X_BASE + step), patch.value(LY_DEC_STEP_Y_BASE + step), in: area)
+                if started { path.addLine(to: p) } else { path.move(to: p); started = true }
+            }
+            context.stroke(path, with: .color(accent.opacity(0.35)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            for step in 0..<length {
+                let on = patch.value(LY_DEC_STEP_ON_BASE + step) > 0.5
+                let p = point(patch.value(LY_DEC_STEP_X_BASE + step), patch.value(LY_DEC_STEP_Y_BASE + step), in: area)
+                let r: CGFloat = step == editingStep ? 9 : 7
+                let box = Path(CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+                context.stroke(box, with: .color(step == editingStep ? LYLLTHTheme.text : (on ? accent : LYLLTHTheme.dim)),
+                               style: StrokeStyle(lineWidth: 1, dash: on ? [] : [2, 2]))
+                context.draw(Text("\(step + 1)").font(LYLLTHTheme.value(7.5)).foregroundColor(on ? LYLLTHTheme.text : LYLLTHTheme.dim), at: p)
+            }
+        } else {
+            let p = point(patch.value(LY_DEC_DESTROY), patch.value(LY_DEC_CRUSH), in: area)
+            context.stroke(Path(CGRect(x: p.x - 8, y: p.y - 8, width: 16, height: 16)), with: .color(accent), lineWidth: 1.2)
+        }
+
+        // Where the sound is now, MOTION and modulation included.
+        guard isOn else { return }
+        let x = live.display.decimatorPosition.0, y = live.display.decimatorPosition.1
+        let p = point(x, y, in: area)
+        var glow = context
+        glow.addFilter(.shadow(color: accent.opacity(0.9), radius: 6))
+        glow.fill(Path(ellipseIn: CGRect(x: p.x - 4.5, y: p.y - 4.5, width: 9, height: 9)), with: .color(accent))
+    }
+}
+
+/// MOTION's steps: tap one to place it on the field, tap its light to switch
+/// it on or off. Steps past LENGTH do not play.
+struct LYDecimatorSteps: View {
+    let context: LYSynthContext
+    @ObservedObject var live: LYSynthLive
+    let accent: Color
+    let length: Int
+    let motionOn: Bool
+    @Binding var selected: Int
+
+    var body: some View {
+        let playing = motionOn ? Int(live.display.decimatorStep) : -1
+        HStack(spacing: 3) {
+            ForEach(0..<Int(LY_DEC_STEPS), id: \.self) { step in
+                let on = context.isOn(LY_DEC_STEP_ON_BASE + step)
+                let inPlay = step < length
+                VStack(spacing: 3) {
+                    Button { context.toggle(LY_DEC_STEP_ON_BASE + step) } label: {
+                        Rectangle()
+                            .fill(on ? accent : Color.clear)
+                            .frame(width: 6, height: 6)
+                            .frame(maxWidth: .infinity, minHeight: 14)
+                            .overlay(Rectangle().stroke(on ? accent : LYLLTHTheme.lineStrong, lineWidth: 1))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(on ? "Step \(step + 1) off" : "Step \(step + 1) on")
+                    Text("\(step + 1)")
+                        .font(LYLLTHTheme.value(8))
+                        .foregroundStyle(inPlay ? LYLLTHTheme.text : LYLLTHTheme.dim)
+                        .frame(maxWidth: .infinity, minHeight: 16)
+                        .background(accent.opacity(step == playing ? 0.35 : (step == selected && motionOn ? 0.12 : 0)))
+                        .overlay(Rectangle().stroke(step == selected && motionOn ? LYLLTHTheme.text : LYLLTHTheme.lineStrong, lineWidth: 1))
+                        .contentShape(Rectangle())
+                        .onTapGesture { selected = step }
+                }
+                .opacity(inPlay ? 1 : 0.4)
+            }
+        }
+        .opacity(motionOn ? 1 : 0.6)
     }
 }

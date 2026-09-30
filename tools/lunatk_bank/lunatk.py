@@ -464,7 +464,8 @@ class Preset:
             errors.append("no documentation")
         # Character by default: at least two sources of damage or texture
         # (one for the few presets marked clean).
-        need = 1 if self.test.get("clean") else 2
+        # Pads, keys and plucks may be clean by default (voicing.degrit): one.
+        need = 1 if self.test.get("clean") or self.category in ("PAD", "KEYS", "PLUCK") else 2
         if len(self.damage()) < need:
             errors.append(f"too clean: {self.damage()} (needs {need} of insert, feedback, distortion, warp, noise, special filter, filter drive)")
         if self.category in MOVING and self.get("macro2") < 0.3 and not self.test.get("still"):

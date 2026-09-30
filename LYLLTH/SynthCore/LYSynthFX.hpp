@@ -772,4 +772,174 @@ struct Reverb {
     }
 };
 
+// MARK: - SONIC DECIMATOR
+
+/// The NIGHTSHAPE Sonic Decimator, ported sample for sample from DrumKit's
+/// SonicDecimatorDSP (and its track adapter's DESTROY / CRUSH mapping), so a
+/// patch sounds the same as the decimator on a DrumKit or LYLLTH track.
+///
+/// Per sample: bass crossover, drive, asymmetric clip, wavefold, bit
+/// reduction, sample-and-hold, DC blocker, sputter gate, bass rejoined,
+/// wet/dry, then a hard ceiling. Every control slews over 10 ms.
+///
+/// One difference from DrumKit: after 50 ms of silence in, it sleeps and
+/// passes the silence. The clip's bias puts DC through the blocker whenever
+/// DESTROY moves, so MOTION stepping over silence would tick; on a track the
+/// transport stops MOTION, but a synth's clock keeps running.
+struct Decimator {
+    struct Controls { float crush, bits, texture, bassPreserve, mix, drive, gate; };
+
+    /// The track adapter's mapping from the two XY controls.
+    static Controls map(float destroy, float crush, float mix) {
+        destroy = clamp01(destroy); crush = clamp01(crush);
+        return Controls {
+            crush,
+            std::min(1.f, crush + destroy * 0.25f),
+            destroy,
+            std::max(0.f, 0.9f - destroy * 0.75f - crush * 0.5f),
+            clamp01(mix),
+            destroy,
+            std::max(0.f, (destroy - 0.6f) / 0.4f) * 0.8f,
+        };
+    }
+
+    float smoothCoeff = 0, bassCoeff = 0;
+    float gateAttack = 0, gateRelease = 0, gateSlew = 0;
+    Controls now {};
+    float bassL = 0, bassR = 0;
+    int holdCountL = 0, holdCountR = 0;
+    float holdL = 0, holdR = 0;
+    float gateEnvelope = 0, gateGain = 1;
+    bool gateOpen = true;
+    float dcInL = 0, dcOutL = 0, dcInR = 0, dcOutR = 0;
+    int quiet = 0, sleepAfter = 2205;
+
+    void prepare(float sampleRate) {
+        // In double, as DrumKit computes them, so the two stay sample-identical.
+        const double sr = sampleRate;
+        smoothCoeff = (float)std::exp(-1.0 / (sr * 0.010));
+        const double rc = 1.0 / (2.0 * 3.14159265358979323846 * 200.0), dt = 1.0 / sr;
+        bassCoeff = (float)(dt / (rc + dt));
+        gateAttack = 1.f - (float)std::exp(-1.0 / (sr * 0.001));
+        gateRelease = 1.f - (float)std::exp(-1.0 / (sr * 0.045));
+        gateSlew = 1.f - (float)std::exp(-1.0 / (sr * 0.004));
+        sleepAfter = (int)(sr * 0.05);
+        clear();
+    }
+
+    void clear() {
+        now = Controls { 0, 0, 0, 0.5f, 1, 0, 0 };
+        bassL = bassR = 0;
+        holdCountL = holdCountR = 0; holdL = holdR = 0;
+        gateEnvelope = 0; gateGain = 1; gateOpen = true;
+        dcInL = dcOutL = dcInR = dcOutR = 0;
+        quiet = 0;
+    }
+
+    static inline float deny(float v) { return std::fabs(v) < 1e-18f ? 0.f : v; }
+
+    static inline float clipBlend(float x, float hardness) {
+        const float c = clampf(x, -1.5f, 1.5f);
+        const float soft = c - (c * c * c) / 4.5f;
+        return soft + hardness * (clampf(x, -1.f, 1.f) - soft);
+    }
+
+    static inline float fold(float x, float amount) {
+        if (amount <= 0) return x;
+        const float t = 1.f - amount * 0.55f;
+        for (int k = 0; k < 3; ++k) {
+            if (x > t) x = t - (x - t);
+            else if (x < -t) x = -t - (x + t);
+            else break;
+        }
+        return x;
+    }
+
+    void process(float *L, float *R, int n, float destroy, float crush, float mix) {
+#if defined(__clang__)
+        // Fused multiply-adds round differently from DrumKit's Swift, and the
+        // quantizer and sample-hold turn that into audible divergence.
+#pragma clang fp contract(off)
+#endif
+        float peak = 0;
+        for (int i = 0; i < n; ++i) peak = std::max(peak, std::max(std::fabs(L[i]), std::fabs(R[i])));
+        if (peak < 1e-5f) {
+            if (quiet >= sleepAfter) return;
+            quiet += n;
+        } else {
+            quiet = 0;
+        }
+        const Controls target = map(destroy, crush, mix);
+        const float a = smoothCoeff, b = 1.f - smoothCoeff;
+        constexpr float kCeiling = 0.985f, kDC = 0.9995f;
+        for (int i = 0; i < n; ++i) {
+            now.crush = deny(a * now.crush + b * target.crush);
+            now.bits = deny(a * now.bits + b * target.bits);
+            now.texture = deny(a * now.texture + b * target.texture);
+            now.bassPreserve = deny(a * now.bassPreserve + b * target.bassPreserve);
+            now.mix = deny(a * now.mix + b * target.mix);
+            now.drive = deny(a * now.drive + b * target.drive);
+            now.gate = deny(a * now.gate + b * target.gate);
+
+            const float dryL = L[i], dryR = R[i];
+            bassL = deny(bassL + bassCoeff * (dryL - bassL));
+            bassR = deny(bassR + bassCoeff * (dryR - bassR));
+            float l = dryL - bassL * now.bassPreserve;
+            float r = dryR - bassR * now.bassPreserve;
+
+            if (now.drive > 0.001f) {
+                const float g = std::pow(10.f, now.drive * 30.f / 20.f);
+                l *= g; r *= g;
+            }
+            if (now.texture > 0.001f) {
+                const float bias = now.texture * 0.1f, hardness = now.texture * now.texture;
+                l = clipBlend(l + bias, hardness);
+                r = clipBlend(r + bias, hardness);
+            }
+            if (now.texture > 0.25f) {
+                const float amount = (now.texture - 0.25f) / 0.75f;
+                l = fold(l, amount);
+                r = fold(r, amount);
+            }
+            if (now.bits > 0.001f) {
+                const float depth = 24.f * std::pow(2.f, -now.bits * 3.585f);
+                const float levels = std::pow(2.f, depth) - 1.f;
+                l = std::round(l * levels) / levels;
+                r = std::round(r * levels) / levels;
+            }
+            if (now.crush > 0.001f) {
+                const int hold = std::max(1, (int)(1.f + now.crush * now.crush * 127.f));
+                if (holdCountL <= 0) { holdL = l; holdCountL = hold; }
+                if (holdCountR <= 0) { holdR = r; holdCountR = hold; }
+                l = holdL; --holdCountL;
+                r = holdR; --holdCountR;
+            }
+
+            const float inL = l;
+            l = deny(l - dcInL + kDC * dcOutL); dcInL = inL; dcOutL = l;
+            const float inR = r;
+            r = deny(r - dcInR + kDC * dcOutR); dcInR = inR; dcOutR = r;
+
+            if (now.gate > 0.01f) {
+                const float level = std::max(std::fabs(l), std::fabs(r));
+                gateEnvelope = deny(gateEnvelope + (level > gateEnvelope ? gateAttack : gateRelease) * (level - gateEnvelope));
+                const float threshold = now.gate * 0.30f;
+                if (gateOpen) { if (gateEnvelope < threshold * 0.7f) gateOpen = false; }
+                else if (gateEnvelope > threshold) gateOpen = true;
+                gateGain += gateSlew * ((gateOpen ? 1.f : 0.04f) - gateGain);
+                l *= gateGain; r *= gateGain;
+            }
+
+            l += bassL * now.bassPreserve;
+            r += bassR * now.bassPreserve;
+            float outL = dryL + now.mix * (l - dryL);
+            float outR = dryR + now.mix * (r - dryR);
+            if (!std::isfinite(outL)) outL = 0;
+            if (!std::isfinite(outR)) outR = 0;
+            L[i] = clampf(outL, -kCeiling, kCeiling);
+            R[i] = clampf(outR, -kCeiling, kCeiling);
+        }
+    }
+};
+
 } // namespace lyfx
