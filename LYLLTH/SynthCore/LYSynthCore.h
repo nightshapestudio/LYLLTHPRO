@@ -322,6 +322,10 @@ enum {
     LY_WARP_OFF = 0, LY_WARP_SYNC, LY_WARP_BEND_POS, LY_WARP_BEND_NEG,
     LY_WARP_MIRROR, LY_WARP_PWM, LY_WARP_FM, LY_WARP_RM, LY_WARP_QUANTIZE,
     LY_WARP_ASYM_POS, LY_WARP_ASYM_NEG, LY_WARP_FLIP, LY_WARP_AM, LY_WARP_FOLD,
+    // Phase distortion, after the CZ: a square from two knees, and the
+    // resonant shapes, a carrier AMOUNT × 16 times faster, restarted every
+    // cycle and faded out by a saw or triangle window so it never clicks.
+    LY_WARP_PD_SQUARE, LY_WARP_PD_RESO_SAW, LY_WARP_PD_RESO_TRI,
     LY_WARP_COUNT
 };
 

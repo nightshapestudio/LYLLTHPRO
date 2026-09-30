@@ -56,6 +56,13 @@ optional DC blocker and reverb low cut. (The voice inserts now have their own DC
   ladder gives up as resonance rises), shared by both filters.
 - **Mono key priority**: LAST, LOW or HIGH, and letting go of the playing key
   returns to one still held (legato if LEGATO is on).
+- **Phase distortion warps**, after the CZ (PWM is already its saw knee):
+  PD SQUARE (each half races to its end and waits, a sine becomes a rounded
+  square with odd harmonics only), and PD RESO SAW / TRI: a carrier 1–16×
+  faster, restarted every cycle and faded by a saw or triangle window, so the
+  peak sweeps up the harmonics like a resonant filter without a click. At
+  AMOUNT 0 each is the plain table. The resonant ones pick a smaller mipmap
+  for the faster carrier.
 - **QUALITY (HQ 1× / 2× / 4×)**, in the VOICE panel: the voices run at 2× or
   4× the sample rate and come back down through halfband filters (79 taps,
   104 dB down; for 4×, a 19-tap stage first). Oscillators, warps, FM, filter

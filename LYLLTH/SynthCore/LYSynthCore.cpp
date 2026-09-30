@@ -1042,9 +1042,24 @@ inline bool isPhaseWarp(int mode) {
     switch (mode) {
     case LY_WARP_SYNC: case LY_WARP_BEND_POS: case LY_WARP_BEND_NEG: case LY_WARP_MIRROR:
     case LY_WARP_PWM: case LY_WARP_ASYM_POS: case LY_WARP_ASYM_NEG: case LY_WARP_FM:
+    case LY_WARP_PD_SQUARE: case LY_WARP_PD_RESO_SAW: case LY_WARP_PD_RESO_TRI:
         return true;
     default: return false;
     }
+}
+
+/// The resonant PD shapes: how much faster the carrier runs, and how deep
+/// the window is (none at AMOUNT 0, so it starts as the plain table).
+inline double pdResoRatio(float amount) { return 1.0 + amount * 15.0; }
+inline float pdResoDepth(float amount) { return std::min(1.f, amount * 4.f); }
+inline bool isPDReso(int mode) { return mode == LY_WARP_PD_RESO_SAW || mode == LY_WARP_PD_RESO_TRI; }
+
+/// The window over a resonant PD cycle at `phase`: `start` (the table where
+/// the carrier restarts) at both ends, so the cycle joins without a step.
+inline float pdResoWindow(int mode, float value, float start, float amount, double phase) {
+    const float w = mode == LY_WARP_PD_RESO_SAW ? 1.f - (float)phase : 1.f - std::fabs(2.f * (float)phase - 1.f);
+    const float window = 1.f - pdResoDepth(amount) * (1.f - w);
+    return start + (value - start) * window;
 }
 
 inline double warpPhase(int mode, double p, float amount, float mod) {
@@ -1072,6 +1087,16 @@ inline double warpPhase(int mode, double p, float amount, float mod) {
     }
     case LY_WARP_FM: {
         const double read = p + mod * amount * 1.5;
+        return read - std::floor(read);
+    }
+    case LY_WARP_PD_SQUARE: {
+        // Each half races to its end and waits there: a sine becomes a
+        // rounded square, sharper as AMOUNT rises.
+        const double w = 0.5 - 0.48 * amount;
+        return p < 0.5 ? 0.5 * std::min(1.0, p / w) : 0.5 + 0.5 * std::min(1.0, (p - 0.5) / w);
+    }
+    case LY_WARP_PD_RESO_SAW: case LY_WARP_PD_RESO_TRI: {
+        const double read = p * pdResoRatio(amount);
         return read - std::floor(read);
     }
     default: return p;
@@ -1141,6 +1166,11 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
     const int f1 = std::min(table->frames - 1, f0 + 1);
     const float ff = (float)(framePosition - f0);
 
+    // A resonant PD carrier plays the table up to 16× faster: a smaller
+    // mipmap keeps it under the band's top.
+    double pdStretch = 1.0;
+    if (isPDReso(mode1)) pdStretch = std::max(pdStretch, pdResoRatio(warp1));
+    if (isPDReso(mode2)) pdStretch = std::max(pdStretch, pdResoRatio(warp2));
     float gainL[kMaxUnison], gainR[kMaxUnison];
     double increment[kMaxUnison];
     const float *t0[kMaxUnison], *t1[kMaxUnison];
@@ -1160,7 +1190,7 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
         if (increment[j] >= 0.5) increment[j] = 0;
         // Oversampled, the table keeps the harmonics it has at the sample
         // rate: the room above is for what the warps add.
-        int level = (int)std::ceil(std::log2(std::max(1.0, increment[j] * kSize * s->oversample)));
+        int level = (int)std::ceil(std::log2(std::max(1.0, increment[j] * kSize * s->oversample * pdStretch)));
         level = std::max(0, std::min(kLevels - 1, level));
         t0[j] = table->frame(level, f0);
         t1[j] = table->frame(level, f1);
@@ -1173,6 +1203,7 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
     }
     const float normal = level / std::sqrt(std::max(gainSum, 1e-6f));
     const bool phase1 = isPhaseWarp(mode1), phase2 = isPhaseWarp(mode2);
+    const bool pdReso = isPDReso(mode1) || isPDReso(mode2);
 
     for (int i = 0; i < n; ++i) {
         float sumL = 0, sumR = 0, sumMono = 0;
@@ -1187,6 +1218,11 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
             read = std::min(std::max(read, 0.0), 0.9999999);
             float value = readWavetable(t0[j], read);
             if (f1 != f0) value += (readWavetable(t1[j], read) - value) * ff;
+            if (pdReso) {
+                const float start = t0[j][0] + (t1[j][0] - t0[j][0]) * ff;
+                if (isPDReso(mode1)) value = pdResoWindow(mode1, value, start, warp1, ph);
+                if (isPDReso(mode2)) value = pdResoWindow(mode2, value, start, warp2, ph);
+            }
             if (!phase1) value = warpSample(mode1, value, warp1, mod, ph);
             if (!phase2) value = warpSample(mode2, value, warp2, mod, ph);
             sumL += value * gainL[j];

@@ -326,11 +326,13 @@ enum LYSynthParameters {
 /// editor presents them.
 enum LYSynthNames {
     static let warps = ["OFF", "SYNC", "BEND +", "BEND −", "MIRROR", "PWM", "FM ← B", "RM ← B", "QUANTIZE",
-                        "ASYM +", "ASYM −", "FLIP", "AM ← B", "FOLD"]
+                        "ASYM +", "ASYM −", "FLIP", "AM ← B", "FOLD",
+                        "PD SQUARE", "PD RESO SAW", "PD RESO TRI"]
     static let warpsB = ["OFF", "SYNC", "BEND +", "BEND −", "MIRROR", "PWM", "FM ← A", "RM ← A", "QUANTIZE",
-                         "ASYM +", "ASYM −", "FLIP", "AM ← A", "FOLD"]
+                         "ASYM +", "ASYM −", "FLIP", "AM ← A", "FOLD",
+                         "PD SQUARE", "PD RESO SAW", "PD RESO TRI"]
     static let warpOrder = [LY_WARP_OFF, LY_WARP_SYNC, LY_WARP_BEND_POS, LY_WARP_BEND_NEG, LY_WARP_ASYM_POS, LY_WARP_ASYM_NEG,
-                            LY_WARP_MIRROR, LY_WARP_PWM, LY_WARP_FLIP, LY_WARP_FOLD, LY_WARP_QUANTIZE,
+                            LY_WARP_MIRROR, LY_WARP_PWM, LY_WARP_PD_SQUARE, LY_WARP_PD_RESO_SAW, LY_WARP_PD_RESO_TRI, LY_WARP_FLIP, LY_WARP_FOLD, LY_WARP_QUANTIZE,
                             LY_WARP_FM, LY_WARP_RM, LY_WARP_AM].map { Int($0) }
     static let unisonModes = ["LINEAR", "SUPER", "EXP", "RANDOM"]
     static let stacks = ["OFF", "+12", "±12", "+7 +12", "+7"]
