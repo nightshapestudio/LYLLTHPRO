@@ -118,15 +118,7 @@ struct ArrangementView: View {
                             openEditor: openSongFXMenu
                         )
                         ForEach(arrangementRows, id: \.self) { row in
-                            switch row {
-                            case .folder(let id):
-                                if let folder = session.trackFolders?.first(where: { $0.id == id }) {
-                                    folderLane(folder)
-                                }
-                            case .track(let index):
-                                trackLane(index: index)
-                                AnyView(automationRows(index: index))
-                            }
+                            arrangementRow(row)
                         }
                         addTrackLane
                         } header: {
@@ -268,6 +260,19 @@ struct ArrangementView: View {
         return rows
     }
 
+    @ViewBuilder
+    private func arrangementRow(_ row: ArrangementRow) -> some View {
+        switch row {
+        case .folder(let id):
+            if let folder = session.trackFolders?.first(where: { $0.id == id }) {
+                folderLane(folder)
+            }
+        case .track(let index):
+            trackLane(index: index)
+            AnyView(automationRows(index: index))
+        }
+    }
+
     private func toggleFolder(_ id: UUID) {
         guard let index = session.trackFolders?.firstIndex(where: { $0.id == id }) else { return }
         withAnimation(LYLLTHTheme.snap) { session.trackFolders?[index].isCollapsed.toggle() }
@@ -275,99 +280,129 @@ struct ArrangementView: View {
 
     /// One row for a folder: its name, how many tracks, mute and solo for all
     /// of them, and a lane showing where they play in the song. Click the
-    /// header to open or close it.
+    /// header to open or close it. Built from small pieces so the type checker
+    /// keeps up.
     private func folderLane(_ folder: LYTrackFolder) -> some View {
-        let members = session.tracks.indices.filter { folder.trackIDs.contains(session.tracks[$0].id) }
-        let accent = LYLLTHTheme.accent(folder.accent)
-        let height = folder.isCollapsed ? laneHeight : 26
-        let allMuted = !members.isEmpty && members.allSatisfy { session.tracks[$0].isMuted }
-        let anySolo = members.contains { session.tracks[$0].isSolo }
-        // Where any member has a region in the song, merged.
-        let spans: [(start: Double, end: Double)] = {
-            let raw = members.flatMap { session.tracks[$0].clips }
-                .filter(\.isInSong)
-                .map { (start: $0.startBeat, end: $0.startBeat + $0.lengthBeats) }
-                .sorted { $0.start < $1.start }
-            var merged: [(start: Double, end: Double)] = []
-            for span in raw {
-                if let last = merged.last, span.start <= last.end + 0.000_1 {
-                    merged[merged.count - 1].end = max(last.end, span.end)
-                } else {
-                    merged.append(span)
-                }
-            }
-            return merged
-        }()
-
+        let members: [Int] = folderMembers(folder)
+        let accent: Color = LYLLTHTheme.accent(folder.accent)
+        let height: CGFloat = folder.isCollapsed ? laneHeight : 26
         return HStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: folder.isCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(LYLLTHTheme.dim)
-                    .frame(width: 12)
-                Rectangle().fill(accent).frame(width: 3, height: max(12, height - 16))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(folder.name)
-                        .font(LYLLTHTheme.label(10, weight: .bold))
-                        .tracking(1.6)
-                        .foregroundStyle(LYLLTHTheme.text)
-                        .lineLimit(1)
-                    if folder.isCollapsed {
-                        Text("\(members.count) TRACKS")
-                            .font(LYLLTHTheme.label(7.5, weight: .bold))
-                            .tracking(1.4)
-                            .foregroundStyle(LYLLTHTheme.dim)
-                    }
-                }
-                Spacer(minLength: 4)
-                Button {
-                    let mute = !allMuted
-                    for member in members { session.tracks[member].isMuted = mute }
-                } label: { Text("M").frame(width: 22, height: 20) }
-                    .buttonStyle(LYChromeButtonStyle(active: allMuted, tint: LYLLTHTheme.purple, compact: true))
-                    .help(allMuted ? "Unmute every track in \(folder.name)" : "Mute every track in \(folder.name)")
-                Button {
-                    let solo = !anySolo
-                    for member in members { session.tracks[member].isSolo = solo }
-                } label: { Text("S").frame(width: 22, height: 20) }
-                    .buttonStyle(LYChromeButtonStyle(active: anySolo, tint: LYLLTHTheme.teal, compact: true))
-                    .help(anySolo ? "Unsolo \(folder.name)" : "Solo every track in \(folder.name)")
+            folderHeader(folder, members: members, accent: accent, height: height)
+            folderSummary(folder, members: members, accent: accent, height: height)
+        }
+        .frame(height: height)
+        .overlay(alignment: .bottom) { LYHairline() }
+    }
+
+    private func folderMembers(_ folder: LYTrackFolder) -> [Int] {
+        session.tracks.indices.filter { folder.trackIDs.contains(session.tracks[$0].id) }
+    }
+
+    /// Where any member has a region in the song, merged into spans of beats.
+    private func folderSpans(_ members: [Int]) -> [ClosedRange<Double>] {
+        var starts: [(Double, Double)] = []
+        for member in members {
+            for clip in session.tracks[member].clips where clip.isInSong {
+                starts.append((clip.startBeat, clip.startBeat + clip.lengthBeats))
             }
+        }
+        starts.sort { $0.0 < $1.0 }
+        var merged: [ClosedRange<Double>] = []
+        for (start, end) in starts {
+            if let last = merged.last, start <= last.upperBound + 0.000_1 {
+                merged[merged.count - 1] = last.lowerBound...max(last.upperBound, end)
+            } else {
+                merged.append(start...max(start, end))
+            }
+        }
+        return merged
+    }
+
+    private func folderHeader(_ folder: LYTrackFolder, members: [Int], accent: Color, height: CGFloat) -> some View {
+        let allMuted: Bool = !members.isEmpty && members.allSatisfy { session.tracks[$0].isMuted }
+        let anySolo: Bool = members.contains { session.tracks[$0].isSolo }
+        let name: String = folder.name
+        let row = HStack(spacing: 8) {
+            Image(systemName: folder.isCollapsed ? "chevron.right" : "chevron.down")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(LYLLTHTheme.dim)
+                .frame(width: 12)
+            Rectangle().fill(accent).frame(width: 3, height: max(12, height - 16))
+            folderTitle(folder, count: members.count)
+            Spacer(minLength: 4)
+            Button { setMuted(!allMuted, members) } label: { Text("M").frame(width: 22, height: 20) }
+                .buttonStyle(LYChromeButtonStyle(active: allMuted, tint: LYLLTHTheme.purple, compact: true))
+                .help(allMuted ? "Unmute every track in " + name : "Mute every track in " + name)
+            Button { setSolo(!anySolo, members) } label: { Text("S").frame(width: 22, height: 20) }
+                .buttonStyle(LYChromeButtonStyle(active: anySolo, tint: LYLLTHTheme.teal, compact: true))
+                .help(anySolo ? "Unsolo " + name : "Solo every track in " + name)
+        }
+        let help: String = folder.isCollapsed ? "Show the tracks in " + name : "Close " + name + " into one row"
+        return row
             .padding(.horizontal, 12)
             .frame(width: headerWidth, height: height)
             .background(LYLLTHTheme.panel)
             .overlay(alignment: .trailing) { Rectangle().fill(LYLLTHTheme.line).frame(width: 1) }
             .contentShape(Rectangle())
             .onTapGesture { toggleFolder(folder.id) }
-            .help(folder.isCollapsed ? "Show the \(members.count) tracks in \(folder.name)" : "Close \(folder.name) into one row")
+            .help(help)
             .offset(x: horizontalScrollOffset)
             .zIndex(10)
+    }
 
-            ZStack(alignment: .topLeading) {
-                BeatGrid(
-                    beats: beats,
-                    beatWidth: beatWidth,
-                    height: height,
-                    beatsPerBar: beatsPerBar,
-                    subdivisionBeats: displayGridBeats,
-                    showsGrid: editor.showsGrid && folder.isCollapsed
-                )
-                if folder.isCollapsed {
-                    ForEach(Array(spans.enumerated()), id: \.offset) { _, span in
-                        Rectangle()
-                            .fill(accent.opacity(0.18))
-                            .overlay { Rectangle().stroke(accent.opacity(0.7), lineWidth: 1) }
-                            .frame(width: max(beatWidth * (span.end - span.start) - 2, 6), height: max(20, height - 16))
-                            .offset(x: beatWidth * span.start + 1, y: 8)
-                    }
-                }
+    private func folderTitle(_ folder: LYTrackFolder, count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(folder.name)
+                .font(LYLLTHTheme.label(10, weight: .bold))
+                .tracking(1.6)
+                .foregroundStyle(LYLLTHTheme.text)
+                .lineLimit(1)
+            if folder.isCollapsed {
+                Text(String(count) + " TRACKS")
+                    .font(LYLLTHTheme.label(7.5, weight: .bold))
+                    .tracking(1.4)
+                    .foregroundStyle(LYLLTHTheme.dim)
             }
-            .frame(width: CGFloat(beats) * beatWidth, height: height, alignment: .topLeading)
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) { toggleFolder(folder.id) }
         }
-        .frame(height: height)
-        .overlay(alignment: .bottom) { LYHairline() }
+    }
+
+    private func folderSummary(_ folder: LYTrackFolder, members: [Int], accent: Color, height: CGFloat) -> some View {
+        let spans: [ClosedRange<Double>] = folder.isCollapsed ? folderSpans(members) : []
+        let blockHeight: CGFloat = max(20, height - 16)
+        return ZStack(alignment: .topLeading) {
+            BeatGrid(
+                beats: beats,
+                beatWidth: beatWidth,
+                height: height,
+                beatsPerBar: beatsPerBar,
+                subdivisionBeats: displayGridBeats,
+                showsGrid: editor.showsGrid && folder.isCollapsed
+            )
+            ForEach(spans.indices, id: \.self) { index in
+                folderBlock(spans[index], accent: accent, height: blockHeight)
+            }
+        }
+        .frame(width: CGFloat(beats) * beatWidth, height: height, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { toggleFolder(folder.id) }
+    }
+
+    private func folderBlock(_ span: ClosedRange<Double>, accent: Color, height: CGFloat) -> some View {
+        let width: CGFloat = max(beatWidth * CGFloat(span.upperBound - span.lowerBound) - 2, 6)
+        let x: CGFloat = beatWidth * CGFloat(span.lowerBound) + 1
+        return Rectangle()
+            .fill(accent.opacity(0.18))
+            .overlay { Rectangle().stroke(accent.opacity(0.7), lineWidth: 1) }
+            .frame(width: width, height: height)
+            .offset(x: x, y: 8)
+    }
+
+    private func setMuted(_ muted: Bool, _ members: [Int]) {
+        for member in members { session.tracks[member].isMuted = muted }
+    }
+
+    private func setSolo(_ solo: Bool, _ members: [Int]) {
+        for member in members { session.tracks[member].isSolo = solo }
     }
 
     private var arrangementSummary: String {
