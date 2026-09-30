@@ -287,8 +287,42 @@ enum {
     LY_DEC_STEP_ON_BASE,
     LY_DEC_STEP_X_BASE = LY_DEC_STEP_ON_BASE + 16,
     LY_DEC_STEP_Y_BASE = LY_DEC_STEP_X_BASE + 16,
-    LY_PARAM_COUNT = LY_DEC_STEP_Y_BASE + 16
+
+    // QUALITY: the voices run at 2× or 4× the sample rate and are filtered
+    // back down, so the oscillators' warps, FM, the filter drive, saturation
+    // and the voice inserts fold far less back into the audio band.
+    LY_OVERSAMPLE = LY_DEC_STEP_Y_BASE + 16, // LY_OS_*
+
+    // Oscillator C: the same fields as A and B from LY_OSCC_BASE. Its FM,
+    // RM and AM read A. It joins filter 1 (and, in SPLIT, A's path).
+    LY_OSCC_BASE,
+    LY_FILTER_ROUTE_C = LY_OSCC_BASE + LY_OSC_PARAM_COUNT,
+
+    // Each oscillator's mode and what the modes add: LY_OSX_STRIDE values
+    // for A, then B, then C, from LY_OSXA_BASE (LY_OSX_* offsets).
+    LY_OSXA_BASE,
+    LY_PARAM_COUNT = LY_OSXA_BASE + 3 * 8
 };
+enum {
+    LY_OSX_MODE = 0,        // LY_OSCMODE_*
+    LY_OSX_SPECTRAL,        // LY_SPEC_*: a spectral warp on the wavetable
+    LY_OSX_SPECTRAL_AMT,    // 0…1
+    LY_OSX_LOOP,            // SAMPLE: 0 plays once, 1 loops from START to the end
+    LY_OSX_ROOT,            // SAMPLE / GRANULAR: the note the sample plays at its own pitch, 0…127
+    LY_OSX_GRAIN_SIZE,      // 0…1: 5…500 ms
+    LY_OSX_GRAIN_DENSITY,   // 0…1: 2…200 grains a second
+    LY_OSX_GRAIN_SPRAY,     // 0…1: how far each grain's start strays from POSITION
+    LY_OSX_STRIDE
+};
+/// Where oscillator `o`'s (0 A, 1 B, 2 C) mode block starts.
+#define LY_OSX_BASE(o) (LY_OSXA_BASE + (o) * LY_OSX_STRIDE)
+enum { LY_OSCMODE_WAVETABLE = 0, LY_OSCMODE_SAMPLE, LY_OSCMODE_GRANULAR, LY_OSCMODE_COUNT };
+enum {
+    LY_SPEC_OFF = 0, LY_SPEC_LOWPASS, LY_SPEC_HIGHPASS, LY_SPEC_FORMANT_UP, LY_SPEC_FORMANT_DOWN,
+    LY_SPEC_SHIFT_UP, LY_SPEC_SHIFT_DOWN, LY_SPEC_SMEAR, LY_SPEC_RANDOM, LY_SPEC_DISPERSE,
+    LY_SPEC_ODD, LY_SPEC_COMB, LY_SPEC_COUNT
+};
+enum { LY_OS_OFF = 0, LY_OS_2X, LY_OS_4X, LY_OS_COUNT };
 enum { LY_DEC_STEPS = 16 };
 enum { LY_DECOFF_DRY = 0, LY_DECOFF_HOLD, LY_DECOFF_COUNT };
 enum { LY_PRIORITY_LAST = 0, LY_PRIORITY_LOW, LY_PRIORITY_HIGH, LY_PRIORITY_COUNT };
@@ -316,6 +350,10 @@ enum {
     LY_WARP_OFF = 0, LY_WARP_SYNC, LY_WARP_BEND_POS, LY_WARP_BEND_NEG,
     LY_WARP_MIRROR, LY_WARP_PWM, LY_WARP_FM, LY_WARP_RM, LY_WARP_QUANTIZE,
     LY_WARP_ASYM_POS, LY_WARP_ASYM_NEG, LY_WARP_FLIP, LY_WARP_AM, LY_WARP_FOLD,
+    // Phase distortion, after the CZ: a square from two knees, and the
+    // resonant shapes, a carrier AMOUNT × 16 times faster, restarted every
+    // cycle and faded out by a saw or triangle window so it never clicks.
+    LY_WARP_PD_SQUARE, LY_WARP_PD_RESO_SAW, LY_WARP_PD_RESO_TRI,
     LY_WARP_COUNT
 };
 
@@ -402,6 +440,12 @@ enum {
     LY_DST_FSAT_DRIVE, LY_DST_VOC_MIX, LY_DST_VOC_SHIFT,
     LY_DST_MORPH, LY_DST_F2_MORPH,
     LY_DST_DEC_DESTROY, LY_DST_DEC_CRUSH, LY_DST_DEC_MIX,
+    LY_DST_C_LEVEL, LY_DST_C_PAN, LY_DST_C_PITCH, LY_DST_C_WTPOS, LY_DST_C_DETUNE, LY_DST_C_BLEND, LY_DST_C_WARP,
+    LY_DST_C_WARP2, LY_DST_C_WIDTH, LY_DST_C_FINE,
+    // Oscillator modes, A B C in turn.
+    LY_DST_A_SPECTRAL, LY_DST_B_SPECTRAL, LY_DST_C_SPECTRAL,
+    LY_DST_A_GRAIN_SIZE, LY_DST_B_GRAIN_SIZE, LY_DST_C_GRAIN_SIZE,
+    LY_DST_A_GRAIN_SPRAY, LY_DST_B_GRAIN_SPRAY, LY_DST_C_GRAIN_SPRAY,
     LY_DST_COUNT
 };
 
@@ -438,6 +482,7 @@ typedef struct {
     float vocoderBands[LY_VOC_MAX_BANDS]; // each band's level from the input, 0…1
     int decimatorStep;            // the MOTION step playing, -1 when MOTION is off
     float decimatorPosition[2];   // where DESTROY (x) and CRUSH (y) are now, MOTION and modulation included
+    float wavetablePositionC;     // oscillator C's, modulated, of the newest voice
 } LYSynthDisplay;
 
 LYSynth *lysynth_create(double sampleRate);
@@ -472,8 +517,13 @@ void lysynth_render(LYSynth *synth, float *left, float *right, int frames, uint6
 void lysynth_render_input(LYSynth *synth, float *left, float *right, const float *inLeft, const float *inRight,
                           int frames, uint64_t blockHostTime);
 
+enum { LY_OSC_COUNT = 3 };   // oscillators A, B and C: 0, 1, 2 below
+
 /// Not the audio thread. frameCount × LY_WT_SIZE samples, frame after frame.
 void lysynth_set_wavetable(LYSynth *synth, int oscillator, const float *frames, int frameCount);
+/// Not the audio thread. A mono sample for SAMPLE and GRANULAR, at its own
+/// rate; null or 0 frames clears it (they then play the wavetable).
+void lysynth_set_sample(LYSynth *synth, int oscillator, const float *samples, int frameCount, double sampleRate);
 /// Not the audio thread. Uses a factory table built once and shared by every
 /// synth instance, so sixteen synth tracks do not hold sixteen copies.
 void lysynth_use_factory_table(LYSynth *synth, int oscillator, int tableID);

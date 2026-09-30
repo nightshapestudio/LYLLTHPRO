@@ -203,6 +203,10 @@
 		F3072584030C31119C4860C6 /* LYLLTHSessionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3CD09BD4ADFFEC5E0ADF896 /* LYLLTHSessionDocument.swift */; };
 		F3B64D71CED48EEFD02691B4 /* LYRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16D07685D250C91B37E5CD8F /* LYRecorder.swift */; };
 		F466E72CC69A9D3452A50F01 /* LUNATKAnalogFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE54E9104F92142C7384552F /* LUNATKAnalogFeatureTests.swift */; };
+		A1C0FFEE0000000000000A01 /* LUNATKQualityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FFEE0000000000000A02 /* LUNATKQualityTests.swift */; };
+		A1C0FFEE0000000000000A07 /* LUNATKOscillatorModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FFEE0000000000000A08 /* LUNATKOscillatorModeTests.swift */; };
+		A1C0FFEE0000000000000A05 /* LUNATKOscillatorCTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FFEE0000000000000A06 /* LUNATKOscillatorCTests.swift */; };
+		A1C0FFEE0000000000000A03 /* LUNATKPhaseDistortionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FFEE0000000000000A04 /* LUNATKPhaseDistortionTests.swift */; };
 		F5073A5322475A1DCD36C06D /* LYBounce.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26A43024412B8FC79FFECBA7 /* LYBounce.swift */; };
 		F5914CB573EBA8C4B066278D /* OfflineExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6FFC78FDE604528578BAEF /* OfflineExportTests.swift */; };
 		F6425EFC86DFFF2A183B2134 /* LYSoundStepping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 135EB2581CD1ED1E9C275888 /* LYSoundStepping.swift */; };
@@ -393,6 +397,10 @@
 		FAC094EC8C7B15AEE6861B01 /* DrumKitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumKitTests.swift; sourceTree = "<group>"; };
 		FD5B70CF37364E26AC9E2D61 /* LUNATKVST3.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LUNATKVST3.bundle; sourceTree = BUILT_PRODUCTS_DIR; };
 		FE54E9104F92142C7384552F /* LUNATKAnalogFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUNATKAnalogFeatureTests.swift; sourceTree = "<group>"; };
+		A1C0FFEE0000000000000A02 /* LUNATKQualityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUNATKQualityTests.swift; sourceTree = "<group>"; };
+		A1C0FFEE0000000000000A08 /* LUNATKOscillatorModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUNATKOscillatorModeTests.swift; sourceTree = "<group>"; };
+		A1C0FFEE0000000000000A06 /* LUNATKOscillatorCTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUNATKOscillatorCTests.swift; sourceTree = "<group>"; };
+		A1C0FFEE0000000000000A04 /* LUNATKPhaseDistortionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUNATKPhaseDistortionTests.swift; sourceTree = "<group>"; };
 		FE62624DC1072EDB75314783 /* LYSynthFX.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = LYSynthFX.hpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -599,6 +607,10 @@
 				6F6FDEB2771DB26C743DA3A2 /* FKitTests.swift */,
 				0F27ED40BF04A9BCA0E2B207 /* HelpCenterTests.swift */,
 				FE54E9104F92142C7384552F /* LUNATKAnalogFeatureTests.swift */,
+				A1C0FFEE0000000000000A02 /* LUNATKQualityTests.swift */,
+				A1C0FFEE0000000000000A08 /* LUNATKOscillatorModeTests.swift */,
+				A1C0FFEE0000000000000A06 /* LUNATKOscillatorCTests.swift */,
+				A1C0FFEE0000000000000A04 /* LUNATKPhaseDistortionTests.swift */,
 				173F297644479B0758C8F0A2 /* LUNATKBankRenderTests.swift */,
 				3452F5778039C9C7CCB82DC9 /* LUNATKFeatureTests.swift */,
 				84AE0F65DFC17746EDC090A3 /* LUNATKTests.swift */,
@@ -1072,6 +1084,10 @@
 				33D122DA12E5EDB99EC07FC3 /* FactoryBankTests.swift in Sources */,
 				2A36ABBF7884CC95A3ED6B35 /* HelpCenterTests.swift in Sources */,
 				F466E72CC69A9D3452A50F01 /* LUNATKAnalogFeatureTests.swift in Sources */,
+				A1C0FFEE0000000000000A01 /* LUNATKQualityTests.swift in Sources */,
+				A1C0FFEE0000000000000A07 /* LUNATKOscillatorModeTests.swift in Sources */,
+				A1C0FFEE0000000000000A05 /* LUNATKOscillatorCTests.swift in Sources */,
+				A1C0FFEE0000000000000A03 /* LUNATKPhaseDistortionTests.swift in Sources */,
 				6B4BF4D2FD74FB3868170070 /* LUNATKBankRenderTests.swift in Sources */,
 				63B60A0D56425120868D633F /* LUNATKFeatureTests.swift in Sources */,
 				7759F7B9F7F7186B3C840682 /* LUNATKTests.swift in Sources */,

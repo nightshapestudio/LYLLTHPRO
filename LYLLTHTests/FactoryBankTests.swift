@@ -22,7 +22,7 @@ final class FactoryBankTests: XCTestCase {
     func testFactoryWavetablesShipAndResolve() {
         let library = LYWavetableLibrary.shared
         XCTAssertEqual(library.factoryNames.count, 12)
-        let used = Set(LYSynthFactoryBank.presets.flatMap { [$0.customTableA, $0.customTableB].compactMap { $0 } })
+        let used = Set(LYSynthFactoryBank.presets.flatMap { [$0.customTableA, $0.customTableB, $0.customTableC].compactMap { $0 } })
         XCTAssertFalse(used.isEmpty)
         for name in used {
             XCTAssertTrue(library.factoryNames.contains(name), name)

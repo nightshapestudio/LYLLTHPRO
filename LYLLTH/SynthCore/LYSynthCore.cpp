@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -24,15 +25,22 @@ constexpr int kMaxUnison = 16;
 constexpr int kChunk = 16;           // modulation is recomputed every 16 samples at most
 // Display slots: the DECIMATOR's level, MOTION step and position follow the vocoder bands.
 constexpr int kDisplayDecimator = 40 + LY_DST_COUNT + 12 + LY_VOC_MAX_BANDS;
+constexpr int kDisplayWavetableC = kDisplayDecimator + 4;
 constexpr int kQueue = 1024;
 constexpr int kPending = 1024;
 constexpr int kScope = 2048;
-constexpr int kCombSize = 4096;      // voice comb filter: down to ~11 Hz at 44.1 kHz
+constexpr int kMaxOversample = 4;    // QUALITY: the voices at up to 4× the sample rate
+constexpr int kCombBase = 4096;      // voice comb filter: down to ~11 Hz at 44.1 kHz
+constexpr int kCombSize = kCombBase * kMaxOversample;
 constexpr int kHeldNotes = 32;
-constexpr int kInsertComb = 2048;   // voice insert comb: down to ~22 Hz at 44.1 kHz
+constexpr int kInsertCombBase = 2048; // voice insert comb: down to ~22 Hz at 44.1 kHz
+constexpr int kInsertComb = kInsertCombBase * kMaxOversample;
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 
 // MARK: - Small helpers
+
+/// Where oscillator `o`'s parameters start.
+inline int oscBase(int o) { return o == 0 ? (int)LY_OSCA_BASE : o == 1 ? (int)LY_OSCB_BASE : (int)LY_OSCC_BASE; }
 
 inline float clamp01(float v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -68,6 +76,10 @@ inline double syncBeats(float normalized) {
 struct Wavetable {
     int frames = 1;
     std::vector<float> data;   // [level][frame][kSize + 1], last sample repeats the first
+    // Each frame's spectrum for SPECTRAL, scaled like level 0: [frame][re 1024, im 1024].
+    std::vector<float> spectrum;
+    inline const float *spectrumRe(int f) const { return spectrum.data() + (size_t)f * kSize; }
+    inline const float *spectrumIm(int f) const { return spectrum.data() + (size_t)f * kSize + kSize / 2; }
     inline const float *frame(int level, int f) const {
         return data.data() + ((size_t)level * frames + (size_t)f) * (kSize + 1);
     }
@@ -78,6 +90,7 @@ std::shared_ptr<Wavetable> buildWavetable(const float *source, int frameCount) {
     auto table = std::make_shared<Wavetable>();
     table->frames = frames;
     table->data.assign((size_t)kLevels * frames * (kSize + 1), 0.f);
+    table->spectrum.assign((size_t)frames * kSize, 0.f);
 
     const vDSP_Length log2n = 11;
     FFTSetup setup = vDSP_create_fftsetup(log2n, kFFTRadix2);
@@ -87,6 +100,8 @@ std::shared_ptr<Wavetable> buildWavetable(const float *source, int frameCount) {
         DSPSplitComplex spectrum { re.data(), im.data() };
         vDSP_ctoz((const DSPComplex *)(source + (size_t)f * kSize), 2, &spectrum, 1, kSize / 2);
         vDSP_fft_zrip(setup, &spectrum, 1, log2n, kFFTDirection_Forward);
+        float *keep = table->spectrum.data() + (size_t)f * kSize;
+        for (int bin = 1; bin < kSize / 2; ++bin) { keep[bin] = re[bin]; keep[kSize / 2 + bin] = im[bin]; }
 
         for (int level = 0; level < kLevels; ++level) {
             const int limit = (kSize / 2) >> level;   // keep harmonics below this
@@ -113,9 +128,17 @@ std::shared_ptr<Wavetable> buildWavetable(const float *source, int frameCount) {
     if (peak > 1e-6f) {
         const float gain = 1.f / peak;
         for (float &value : table->data) value *= gain;
+        for (float &value : table->spectrum) value *= gain;
     }
     return table;
 }
+
+/// A mono sample at its own rate, with guard samples so reads need no checks.
+struct Sample {
+    std::vector<float> data;
+    int length = 0;
+    double rate = 44100;
+};
 
 // MARK: - Modulation building blocks
 
@@ -246,7 +269,7 @@ inline void svfCoefficients(double hz, double sampleRate, float k, float &a1, fl
 }
 
 FilterSetup makeFilter(int type, double hz, float res, float drive, float mix, double sampleRate,
-                       float morph = 0.f, bool twoPole = false, float bassLoss = 0.f) {
+                       float morph = 0.f, bool twoPole = false, float bassLoss = 0.f, int oversample = 1) {
     FilterSetup f;
     f.type = type; f.res = res; f.drive = drive; f.mix = mix;
     f.preGain = 1.f + drive * 9.f;
@@ -262,7 +285,7 @@ FilterSetup makeFilter(int type, double hz, float res, float drive, float mix, d
         f.ladderMakeup = 1.f + res * (twoPole ? 0.5f : 0.8f) * (1.f - clamp01(bassLoss));
         break;
     case LY_FILTER_COMB_POS: case LY_FILTER_COMB_NEG:
-        f.combDelay = (float)std::min(sampleRate / hz, (double)kCombSize - 4);
+        f.combDelay = (float)std::min(sampleRate / hz, (double)kCombBase * oversample - 4);
         f.combFeedback = (type == LY_FILTER_COMB_POS ? 1.f : -1.f) * res * 0.96f;
         break;
     case LY_FILTER_FORMANT: {
@@ -324,14 +347,23 @@ struct FilterChannel {
     float phaserFeedback = 0;
     float comb[kCombSize] = {};
     int combWrite = 0;
+    int combLength = kCombBase;          // the base length times the oversampling
+    bool combUsed = false;               // the comb is cleared only after it has run
     void reset() {
         svf[0].reset(); svf[1].reset();
         for (auto &f : formant) f.reset();
         std::memset(ladder, 0, sizeof(ladder));
         std::memset(allpass, 0, sizeof(allpass));
         phaserFeedback = 0;
-        std::memset(comb, 0, sizeof(comb));
+        if (combUsed) std::memset(comb, 0, sizeof(float) * combLength);
+        combUsed = false;
         combWrite = 0;
+    }
+    void setOversample(int oversample) {
+        std::memset(comb, 0, sizeof(float) * std::max(combLength, kCombBase * oversample));
+        combLength = kCombBase * oversample;
+        combWrite = 0;
+        combUsed = false;
     }
     inline float process(const FilterSetup &f, float input) {
         const float x = f.drive > 0.001f ? fastTanh(input * f.preGain) * f.postGain * 1.4f : input;
@@ -354,14 +386,15 @@ struct FilterChannel {
             break;
         }
         case LY_FILTER_COMB_POS: case LY_FILTER_COMB_NEG: {
+            combUsed = true;
             float position = (float)combWrite - f.combDelay;
-            if (position < 0) position += kCombSize;
+            if (position < 0) position += combLength;
             const int i = (int)position;
             const float frac = position - i;
-            const float delayed = comb[i % kCombSize] + (comb[(i + 1) % kCombSize] - comb[i % kCombSize]) * frac;
+            const float delayed = comb[i % combLength] + (comb[(i + 1) % combLength] - comb[i % combLength]) * frac;
             const float out = x + delayed * f.combFeedback;
             comb[combWrite] = flushf(fastTanh(out));
-            combWrite = (combWrite + 1) % kCombSize;
+            combWrite = (combWrite + 1) % combLength;
             y = out * (1.f - std::fabs(f.combFeedback) * 0.5f);
             break;
         }
@@ -487,7 +520,22 @@ struct InsertState {
     float hilbertDelay[2];
     float comb[2][kInsertComb];
     int combWrite;
-    void reset() { std::memset(this, 0, sizeof(*this)); holdPhase = 1; }
+    int combLength;                      // the base length times the oversampling
+    bool combUsed;                       // the comb is cleared only after it has run
+    void reset() {
+        const int length = combLength > 0 ? combLength : kInsertCombBase;
+        const bool used = combUsed;
+        std::memset(this, 0, offsetof(InsertState, comb));
+        if (used) for (auto &c : comb) std::memset(c, 0, sizeof(float) * length);
+        combWrite = 0; combLength = length; combUsed = false;
+        holdPhase = 1;
+    }
+    void setOversample(int oversample) {
+        for (auto &c : comb) std::memset(c, 0, sizeof(float) * std::max(combLength, kInsertCombBase * oversample));
+        combLength = kInsertCombBase * oversample;
+        combWrite = 0;
+        combUsed = false;
+    }
 };
 
 // Two 4-stage allpass chains 90° apart across the audio band (Olli Niemitalo's
@@ -509,7 +557,7 @@ inline float hilbertChain(float (*stages)[4], const float *coefficients, float x
 
 /// One insert over a chunk, in place. `noteHz` is the voice's pitch.
 void processInsert(InsertState &st, int type, float *L, float *R, int n, float amount, float freq, float mix,
-                   double noteHz, double sampleRate) {
+                   double noteHz, double sampleRate, int oversample) {
     if (type <= LY_INS_OFF || type >= LY_INS_COUNT || mix <= 0.0005f) return;
     float *ch[2] = { L, R };
     switch (type) {
@@ -522,7 +570,8 @@ void processInsert(InsertState &st, int type, float *L, float *R, int n, float a
         break;
     }
     case LY_INS_DECIMATE: {
-        const float step = 1.f / (1.f + amount * amount * 63.f);
+        // Held for the same time at any QUALITY.
+        const float step = 1.f / (1.f + amount * amount * 63.f) / oversample;
         for (int i = 0; i < n; ++i) {
             st.holdPhase += step;
             if (st.holdPhase >= 1.f) { st.holdPhase -= std::floor(st.holdPhase); st.hold[0] = L[i]; st.hold[1] = R[i]; }
@@ -592,15 +641,17 @@ void processInsert(InsertState &st, int type, float *L, float *R, int n, float a
     }
     case LY_INS_COMB: {
         const double hz = std::max(25.0, noteHz * std::pow(2.0, (freq - 0.5) * 4.0));
-        const float delay = (float)std::min((double)kInsertComb - 2, std::max(2.0, sampleRate / hz));
+        const int length = st.combLength > 0 ? st.combLength : kInsertCombBase;
+        const float delay = (float)std::min((double)length - 2, std::max(2.0, sampleRate / hz));
         const float feedback = amount * 0.95f;
         const float gain = std::sqrt(1.f - feedback * feedback);
+        st.combUsed = true;
         for (int i = 0; i < n; ++i) {
             float read = (float)st.combWrite - delay;
-            if (read < 0) read += kInsertComb;
+            if (read < 0) read += length;
             const int r0 = (int)read;
             const float t = read - r0;
-            const int r1 = (r0 + 1) % kInsertComb;
+            const int r1 = (r0 + 1) % length;
             for (int c = 0; c < 2; ++c) {
                 const float delayed = st.comb[c][r0] + (st.comb[c][r1] - st.comb[c][r0]) * t;
                 const float x = ch[c][i];
@@ -608,7 +659,7 @@ void processInsert(InsertState &st, int type, float *L, float *R, int n, float a
                 st.comb[c][st.combWrite] = flushf(fastTanh(y));
                 ch[c][i] = x + (y * gain - x) * mix;
             }
-            st.combWrite = (st.combWrite + 1) % kInsertComb;
+            st.combWrite = (st.combWrite + 1) % length;
         }
         break;
     }
@@ -651,6 +702,16 @@ inline float saturate(int type, float x, float g, float drive, float &dcX, float
 
 // MARK: - Voices, events
 
+static_assert(LY_OSX_STRIDE == 8, "LY_PARAM_COUNT counts 8 mode values per oscillator");
+constexpr int kGrains = 32;               // GRANULAR: grains at once, per oscillator per voice
+constexpr int kSpectralHop = 64;          // SPECTRAL: samples between rebuilds (at the sample rate)
+
+struct Grain {
+    double position = 0, increment = 0;
+    float age = 0, length = 0, gainL = 0, gainR = 0;
+    bool on = false;
+};
+
 struct Voice {
     bool active = false;
     bool gate = false;
@@ -659,11 +720,12 @@ struct Voice {
     uint64_t age = 0;
     double frequency = 261.6;
     double targetFrequency = 261.6;
-    double phase[2][kMaxUnison] = {};
-    float uniRandom[2][kMaxUnison] = {};
+    double phase[LY_OSC_COUNT][kMaxUnison] = {};
+    float uniRandom[LY_OSC_COUNT][kMaxUnison] = {};
     double subPhase = 0;
     float lastA[kChunk] = {};            // oscillator A's last chunk, B's FM source
     float noiseColor = 0;
+    int noiseCount = 0;                  // oversampled: where in the held base-rate noise sample
     NoiseState noise;
     float random = 0;
     float stepCutoff = 1, stepResonance = 0;
@@ -678,16 +740,25 @@ struct Voice {
     LFOState lfo[4];
     FilterChannel filter[2][2];          // [filter][channel]
     float modulation[LY_DST_COUNT] = {};
-    float wavetablePosition[2] = {0, 0};
+    float wavetablePosition[LY_OSC_COUNT] = {};
     float cutoffHz = 1000, cutoff2Hz = 1000;
     InsertState insert[2];
     float feedback[2] = {}, feedbackLow[2] = {}, feedbackDCX[2] = {}, feedbackDCY[2] = {};
     // Saturation between the filters.
     float satHold[2] = {}, satPhase = 1, satDCX[2] = {}, satDCY[2] = {};
     // VINTAGE: this note's own offsets (-1…1, scaled by VINTAGE), and a slow drift.
-    float vintagePitch[2] = {}, vintageCutoff = 0, vintageTime[3] = {};
+    float vintagePitch[LY_OSC_COUNT] = {}, vintageCutoff = 0, vintageTime[3] = {};
     double driftPhase = 0;
     float driftFrom = 0, driftTo = 0, driftRate = 0.3f;
+    // Oscillator modes. `oscFresh`: the note has just begun, so SAMPLE starts
+    // over, GRANULAR clears its grains and SPECTRAL builds its first cycle.
+    bool oscFresh[LY_OSC_COUNT] = {};
+    bool sampleDone[LY_OSC_COUNT][kMaxUnison] = {};
+    Grain grains[LY_OSC_COUNT][kGrains] = {};
+    double grainClock[LY_OSC_COUNT] = {};
+    float spectralCycle[LY_OSC_COUNT][2][kSize + 1] = {};
+    int spectralNewest[LY_OSC_COUNT] = {};
+    float spectralFade[LY_OSC_COUNT] = {};
     inline float drift() const {
         return driftFrom + (driftTo - driftFrom) * (0.5f - 0.5f * std::cos((float)M_PI * (float)driftPhase));
     }
@@ -712,12 +783,45 @@ double hostTicksPerSecond() {
     return 1e9 * (double)info.denom / (double)info.numer;
 }
 
+// Halfband low-passes for coming back down from oversampled voices. Every
+// other tap is zero and the middle one is ½, so only the rest are kept: the
+// taps 1, 3, 5… from the middle.
+// 79 taps: flat to 0.21 of the rate, 104 dB down from 0.29 (2× to 1×).
+const float kHalfband2[20] = {
+    3.173955095e-01f, -1.033884160e-01f, 5.922984632e-02f, -3.945633506e-02f, 2.794163766e-02f,
+    -2.030764245e-02f, 1.487843304e-02f, -1.087035518e-02f, 7.860958270e-03f, -5.593783084e-03f,
+    3.896830794e-03f, -2.644216800e-03f, 1.738331268e-03f, -1.100119679e-03f, 6.649709550e-04f,
+    -3.797156114e-04f, 2.016891471e-04f, -9.708471847e-05f, 4.043417588e-05f, -1.360747532e-05f
+};
+// 19 taps: flat to 0.12 of the rate, 92 dB down from 0.38 (4× to 2×, where
+// only what would fold into the audio band has to go).
+const float kHalfband4[5] = { 3.073924582e-01f, -7.709985448e-02f, 2.538772024e-02f, -6.667608381e-03f, 9.988628678e-04f };
+
+/// Two samples in, one out, low-passed at half the incoming band.
+template <int K> struct Halfband {
+    static constexpr int kTaps = 4 * K - 1;
+    float history[2 * kTaps] = {};       // written twice, so the window is always contiguous
+    int write = 0;
+    void reset() { std::memset(history, 0, sizeof(history)); write = 0; }
+    inline void push(float x) { history[write] = history[write + kTaps] = x; write = write + 1 == kTaps ? 0 : write + 1; }
+    inline float process(const float *h, float a, float b) {
+        push(a); push(b);
+        const float *x = history + write;   // oldest to newest
+        float y = 0.5f * x[2 * K - 1];
+        for (int k = 0; k < K; ++k) y += h[k] * (x[2 * K - 2 - 2 * k] + x[2 * K + 2 * k]);
+        return y;
+    }
+};
+
 } // namespace
 
 // MARK: - Synth
 
 struct LYSynth {
     double sampleRate;
+    // QUALITY: the voices' rate, and how many times the sample rate it is.
+    int oversample = 1;
+    double voiceRate = 44100;
     double ticksPerSecond = hostTicksPerSecond();
     std::array<std::atomic<float>, LY_PARAM_COUNT> parameters;
     float smoothed[LY_PARAM_COUNT];
@@ -725,9 +829,16 @@ struct LYSynth {
     bool smooths[LY_PARAM_COUNT];
 
     // Wavetables: the audio thread reads `live`; `owned` keeps them alive.
-    std::atomic<const Wavetable *> live[2] = { {nullptr}, {nullptr} };
-    std::shared_ptr<Wavetable> owned[2];
+    std::atomic<const Wavetable *> live[LY_OSC_COUNT] = { {nullptr}, {nullptr}, {nullptr} };
+    std::shared_ptr<Wavetable> owned[LY_OSC_COUNT];
     std::vector<std::shared_ptr<Wavetable>> retired;
+    // SAMPLE / GRANULAR: each oscillator's sample, swapped in like the tables.
+    std::atomic<const Sample *> sampleLive[LY_OSC_COUNT] = { {nullptr}, {nullptr}, {nullptr} };
+    std::shared_ptr<Sample> sampleOwned[LY_OSC_COUNT];
+    std::vector<std::shared_ptr<Sample>> sampleRetired;
+    // SPECTRAL: the audio thread's FFT and its working space.
+    FFTSetup fft = nullptr;
+    float spectralRe[kSize / 2], spectralIm[kSize / 2], spectralWork[kSize / 2 * 2], spectralTime[kSize];
     std::mutex tableMutex;
 
     // Multi-producer event queue; producers serialise on a spin flag, the
@@ -823,11 +934,15 @@ struct LYSynth {
 
     float scope[kScope] = {};
     std::atomic<uint32_t> scopeWrite { 0 };
-    std::atomic<float> display[kDisplayDecimator + 4];
+    std::atomic<float> display[kDisplayWavetableC + 1];
 
     float mixL[kChunk], mixR[kChunk];
     float busL[kChunk], busR[kChunk];
-    float oscL[2][kChunk], oscR[2][kChunk], oscMono[2][kChunk];
+    float oscL[LY_OSC_COUNT][kChunk], oscR[LY_OSC_COUNT][kChunk], oscMono[LY_OSC_COUNT][kChunk];
+    // The voices summed at the oversampled rate, and the way back down.
+    float overL[kChunk * kMaxOversample], overR[kChunk * kMaxOversample];
+    Halfband<20> down2[2];
+    Halfband<5> down4[2];
 };
 
 namespace {
@@ -847,8 +962,8 @@ inline int fxLevelSlot(int fx) { return fx < 10 ? 20 + fx : kDisplayDecimator; }
 void setDefaults(LYSynth *s) {
     auto set = [s](int id, float v) { s->parameters[id].store(v, std::memory_order_relaxed); };
     for (int i = 0; i < LY_PARAM_COUNT; ++i) set(i, 0);
-    for (int o = 0; o < 2; ++o) {
-        const int b = o == 0 ? LY_OSCA_BASE : LY_OSCB_BASE;
+    for (int o = 0; o < LY_OSC_COUNT; ++o) {
+        const int b = oscBase(o);
         set(b + LY_OSC_ON, o == 0 ? 1 : 0);
         set(b + LY_OSC_LEVEL, 0.75f);
         set(b + LY_OSC_UNISON, 1);
@@ -861,7 +976,12 @@ void setDefaults(LYSynth *s) {
     set(LY_NOISE_LEVEL, 0.3f); set(LY_NOISE_PITCH, 0.5f); set(LY_NOISE_KEYTRACK, 1);
     set(LY_FILTER_ON, 1); set(LY_FILTER_TYPE, LY_FILTER_LP24);
     set(LY_FILTER_CUTOFF, 0.8f); set(LY_FILTER_RES, 0.15f); set(LY_FILTER_MIX, 1);
-    set(LY_FILTER_ROUTE_A, 1); set(LY_FILTER_ROUTE_B, 1); set(LY_FILTER_ROUTE_SUB, 1); set(LY_FILTER_ROUTE_NOISE, 1);
+    set(LY_FILTER_ROUTE_A, 1); set(LY_FILTER_ROUTE_B, 1); set(LY_FILTER_ROUTE_C, 1);
+    for (int o = 0; o < LY_OSC_COUNT; ++o) {
+        const int x = LY_OSX_BASE(o);
+        set(x + LY_OSX_ROOT, 60); set(x + LY_OSX_LOOP, 1);
+        set(x + LY_OSX_GRAIN_SIZE, 0.5f); set(x + LY_OSX_GRAIN_DENSITY, 0.5f); set(x + LY_OSX_GRAIN_SPRAY, 0.1f);
+    } set(LY_FILTER_ROUTE_SUB, 1); set(LY_FILTER_ROUTE_NOISE, 1);
     set(LY_F2_TYPE, LY_FILTER_HP12); set(LY_F2_CUTOFF, 0.15f); set(LY_F2_RES, 0.1f); set(LY_F2_MIX, 1);
     const float env[4][4] = { {0.05f, 0.4f, 0.8f, 0.35f}, {0.02f, 0.42f, 0.3f, 0.4f}, {0.02f, 0.42f, 0.3f, 0.4f}, {0.02f, 0.42f, 0.3f, 0.4f} };
     for (int e = 0; e < 4; ++e) for (int k = 0; k < 4; ++k) set(LY_ENV1_A + e * 4 + k, env[e][k]);
@@ -935,8 +1055,9 @@ void setDefaults(LYSynth *s) {
 void buildSmoothing(LYSynth *s) {
     for (int i = 0; i < LY_PARAM_COUNT; ++i) s->smooths[i] = false;
     auto on = [s](int id) { s->smooths[id] = true; };
-    for (int o = 0; o < 2; ++o) {
-        const int b = o == 0 ? LY_OSCA_BASE : LY_OSCB_BASE;
+    for (int o = 0; o < LY_OSC_COUNT; ++o) {
+        for (int local : { LY_OSX_SPECTRAL_AMT, LY_OSX_GRAIN_SIZE, LY_OSX_GRAIN_DENSITY, LY_OSX_GRAIN_SPRAY }) on(LY_OSX_BASE(o) + local);
+        const int b = oscBase(o);
         for (int local : { LY_OSC_LEVEL, LY_OSC_PAN, LY_OSC_FINE, LY_OSC_WTPOS, LY_OSC_DETUNE, LY_OSC_BLEND,
                            LY_OSC_WIDTH, LY_OSC_WARPAMT, LY_OSC_WARPAMT2 }) on(b + local);
     }
@@ -972,9 +1093,24 @@ inline bool isPhaseWarp(int mode) {
     switch (mode) {
     case LY_WARP_SYNC: case LY_WARP_BEND_POS: case LY_WARP_BEND_NEG: case LY_WARP_MIRROR:
     case LY_WARP_PWM: case LY_WARP_ASYM_POS: case LY_WARP_ASYM_NEG: case LY_WARP_FM:
+    case LY_WARP_PD_SQUARE: case LY_WARP_PD_RESO_SAW: case LY_WARP_PD_RESO_TRI:
         return true;
     default: return false;
     }
+}
+
+/// The resonant PD shapes: how much faster the carrier runs, and how deep
+/// the window is (none at AMOUNT 0, so it starts as the plain table).
+inline double pdResoRatio(float amount) { return 1.0 + amount * 15.0; }
+inline float pdResoDepth(float amount) { return std::min(1.f, amount * 4.f); }
+inline bool isPDReso(int mode) { return mode == LY_WARP_PD_RESO_SAW || mode == LY_WARP_PD_RESO_TRI; }
+
+/// The window over a resonant PD cycle at `phase`: `start` (the table where
+/// the carrier restarts) at both ends, so the cycle joins without a step.
+inline float pdResoWindow(int mode, float value, float start, float amount, double phase) {
+    const float w = mode == LY_WARP_PD_RESO_SAW ? 1.f - (float)phase : 1.f - std::fabs(2.f * (float)phase - 1.f);
+    const float window = 1.f - pdResoDepth(amount) * (1.f - w);
+    return start + (value - start) * window;
 }
 
 inline double warpPhase(int mode, double p, float amount, float mod) {
@@ -1004,6 +1140,16 @@ inline double warpPhase(int mode, double p, float amount, float mod) {
         const double read = p + mod * amount * 1.5;
         return read - std::floor(read);
     }
+    case LY_WARP_PD_SQUARE: {
+        // Each half races to its end and waits there: a sine becomes a
+        // rounded square, sharper as AMOUNT rises.
+        const double w = 0.5 - 0.48 * amount;
+        return p < 0.5 ? 0.5 * std::min(1.0, p / w) : 0.5 + 0.5 * std::min(1.0, (p - 0.5) / w);
+    }
+    case LY_WARP_PD_RESO_SAW: case LY_WARP_PD_RESO_TRI: {
+        const double read = p * pdResoRatio(amount);
+        return read - std::floor(read);
+    }
     default: return p;
     }
 }
@@ -1030,18 +1176,288 @@ inline float warpSample(int mode, float value, float amount, float mod, double p
 const float kStacks[LY_STACK_COUNT][3] = { {0, 0, 0}, {0, 12, 0}, {-12, 0, 12}, {0, 7, 12}, {0, 7, 0} };
 const int kStackLength[LY_STACK_COUNT] = { 1, 2, 3, 3, 2 };
 
+// MARK: - Oscillator modes: sample, granular, spectral
+
+/// What SAMPLE and GRANULAR play: the oscillator's sample, or with none its
+/// wavetable, frame after frame, as one long sound (at one mipmap level).
+struct SourceView {
+    const float *data = nullptr;
+    const Wavetable *table = nullptr;
+    int level = 0;
+    int length = 1;
+    inline float at(int i) const {
+        i %= length; if (i < 0) i += length;
+        return data ? data[i] : table->frame(level, i / kSize)[i % kSize];
+    }
+    inline float fast(int i) const { return data ? data[i] : table->frame(level, i >> 11)[i & (kSize - 1)]; }
+    /// Four-point Hermite between samples.
+    inline float read(double position) const {
+        const int i = (int)std::floor(position);
+        const float t = (float)(position - i);
+        float xm1, x0, x1, x2;
+        if (i >= 1 && i + 2 < length) { xm1 = fast(i - 1); x0 = fast(i); x1 = fast(i + 1); x2 = fast(i + 2); }
+        else { xm1 = at(i - 1); x0 = at(i); x1 = at(i + 1); x2 = at(i + 2); }
+        const float c1 = 0.5f * (x1 - xm1);
+        const float c2 = xm1 - 2.5f * x0 + 2.f * x1 - 0.5f * x2;
+        const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+        return ((c3 * t + c2) * t + c1) * t + x0;
+    }
+};
+
+/// A Hann window, 0…1 across a grain, from a table.
+struct HannTable {
+    float values[1025];
+    HannTable() { for (int i = 0; i <= 1024; ++i) values[i] = 0.5f - 0.5f * std::cos((float)kTwoPi * i / 1024.f); }
+    inline float at(float t) const {
+        const float x = std::min(std::max(t, 0.f), 1.f) * 1024.f;
+        const int i = std::min(1023, (int)x);
+        return values[i] + (values[i + 1] - values[i]) * (x - i);
+    }
+};
+const HannTable kHann;
+
+inline float hashUnit(uint32_t x) {
+    x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16;
+    return (float)(x >> 8) / 16777216.f;
+}
+
+/// One SPECTRAL cycle: the table's spectrum at `position`, warped, cut at
+/// harmonic `top` so the note can't alias, and turned back into a cycle.
+void buildSpectralCycle(LYSynth *s, const Wavetable *table, int o, float position, int type, float amount, int top, float *out) {
+    constexpr int kBins = kSize / 2;
+    float *re = s->spectralRe, *im = s->spectralIm;
+    const double framePosition = position * (table->frames - 1);
+    const int f0 = (int)framePosition;
+    const int f1 = std::min(table->frames - 1, f0 + 1);
+    const float ff = (float)(framePosition - f0);
+    const float *r0 = table->spectrumRe(f0), *i0 = table->spectrumIm(f0), *r1 = table->spectrumRe(f1), *i1 = table->spectrumIm(f1);
+    re[0] = im[0] = 0;
+    for (int k = 1; k < kBins; ++k) { re[k] = r0[k] + (r1[k] - r0[k]) * ff; im[k] = i0[k] + (i1[k] - i0[k]) * ff; }
+    const float a = clamp01(amount);
+    auto magnitudes = [&](float *mag) { for (int k = 0; k < kBins; ++k) mag[k] = std::sqrt(re[k] * re[k] + im[k] * im[k]); };
+    float *work = s->spectralWork, *work2 = s->spectralWork + kBins;
+    switch (type) {
+    case LY_SPEC_LOWPASS: {
+        const float kc = (float)kBins * std::exp2(-a * 9.f);
+        for (int k = 1; k < kBins; ++k) { const float r = k / kc, r4 = r * r * r * r; const float g = 1.f / std::sqrt(1.f + r4 * r4); re[k] *= g; im[k] *= g; }
+        break;
+    }
+    case LY_SPEC_HIGHPASS: {
+        const float kc = std::exp2(a * 6.f) - 1.f;   // up to the 63rd harmonic
+        if (kc < 0.05f) break;
+        for (int k = 1; k < kBins; ++k) { const float r = k / kc, r4 = r * r * r * r; const float g = r4 / std::sqrt(1.f + r4 * r4); re[k] *= g; im[k] *= g; }
+        break;
+    }
+    case LY_SPEC_FORMANT_UP: case LY_SPEC_FORMANT_DOWN: {
+        // The spectrum's shape slides along the harmonics; the pitch stays.
+        const float scale = std::exp2((type == LY_SPEC_FORMANT_UP ? 2.f : -2.f) * a);
+        magnitudes(work);
+        for (int k = 1; k < kBins; ++k) {
+            const float from = k / scale;
+            const int j = (int)from;
+            const float t = from - j;
+            const float want = j + 1 < kBins ? work[j] + (work[j + 1] - work[j]) * t : 0.f;
+            const float g = work[k] > 1e-9f ? want / work[k] : 0.f;
+            if (work[k] > 1e-9f) { re[k] *= g; im[k] *= g; } else { re[k] = want; im[k] = 0; }
+        }
+        break;
+    }
+    case LY_SPEC_SHIFT_UP: case LY_SPEC_SHIFT_DOWN: {
+        // Each harmonic moves to another along the series.
+        const float scale = std::exp2((type == LY_SPEC_SHIFT_UP ? 2.f : -2.f) * a);
+        for (int k = 0; k < kBins; ++k) { work[k] = 0; work2[k] = 0; }
+        for (int k = 1; k < kBins; ++k) {
+            const int to = (int)std::lround(k * scale);
+            if (to >= 1 && to < kBins) { work[to] += re[k]; work2[to] += im[k]; }
+        }
+        for (int k = 0; k < kBins; ++k) { re[k] = work[k]; im[k] = work2[k]; }
+        break;
+    }
+    case LY_SPEC_SMEAR: {
+        const int width = 1 + (int)(a * 24.f);
+        magnitudes(work);
+        float sum = 0;
+        for (int k = 1; k < kBins; ++k) {
+            sum += work[k];
+            if (k - width >= 1) sum -= work[k - width];
+            const float blurred = sum / (float)std::min(k, width);
+            const float g = work[k] > 1e-9f ? blurred / work[k] : 0.f;
+            re[k] *= g; im[k] *= g;
+        }
+        break;
+    }
+    case LY_SPEC_RANDOM: {
+        for (int k = 1; k < kBins; ++k) { const float g = 1.f - a * hashUnit((uint32_t)k * 2654435761u + (uint32_t)o * 97u); re[k] *= g; im[k] *= g; }
+        break;
+    }
+    case LY_SPEC_DISPERSE: {
+        for (int k = 1; k < kBins; ++k) {
+            const float angle = a * 0.02f * (float)k * (float)k;
+            const float c = std::cos(angle), sn = std::sin(angle);
+            const float x = re[k], y = im[k];
+            re[k] = x * c - y * sn; im[k] = x * sn + y * c;
+        }
+        break;
+    }
+    case LY_SPEC_ODD: {
+        for (int k = 2; k < kBins; k += 2) { re[k] *= 1.f - a; im[k] *= 1.f - a; }
+        break;
+    }
+    case LY_SPEC_COMB: {
+        const float period = 2.f + a * 14.f, depth = std::min(1.f, a * 4.f);
+        for (int k = 1; k < kBins; ++k) {
+            const float g = 1.f - depth * (0.5f - 0.5f * std::cos((float)kTwoPi * k / period));
+            re[k] *= g; im[k] *= g;
+        }
+        break;
+    }
+    default: break;
+    }
+    for (int k = std::max(1, top + 1); k < kBins; ++k) { re[k] = 0; im[k] = 0; }
+    re[0] = 0; im[0] = 0;
+    DSPSplitComplex spectrum { re, im };
+    vDSP_fft_zrip(s->fft, &spectrum, 1, 11, kFFTDirection_Inverse);
+    vDSP_ztoc(&spectrum, 1, (DSPComplex *)s->spectralTime, 2, kBins);
+    const float scale = 1.f / (2.f * kSize);
+    for (int i = 0; i < kSize; ++i) out[i] = s->spectralTime[i] * scale;
+    out[kSize] = out[0];
+}
+
+/// SAMPLE and GRANULAR, for one oscillator of one voice.
+void renderSampled(LYSynth *s, Voice &v, int o, int n, int oscMode, const Wavetable *table, float position,
+                   const double *increment, const float *gainL, const float *gainR, float normal, int unison,
+                   int mode1, float warp1, int mode2, float warp2, const float *modulator, const float *m) {
+    float *outL = s->oscL[o], *outR = s->oscR[o], *mono = s->oscMono[o];
+    const int x = LY_OSX_BASE(o);
+    const float *p = s->smoothed;
+    const Sample *sample = s->sampleLive[o].load(std::memory_order_acquire);
+    SourceView source;
+    double scale;
+    double fastest = 0;
+    for (int j = 0; j < unison; ++j) fastest = std::max(fastest, increment[j]);
+    if (sample) {
+        source.data = sample->data.data();
+        source.length = std::max(1, sample->length);
+        const double root = 440.0 * std::pow(2.0, (clampf(s->raw[x + LY_OSX_ROOT], 0.f, 127.f) - 69.0) / 12.0);
+        scale = sample->rate / root;
+    } else {
+        // The table plays a cycle per note period, so it is in tune.
+        source.table = table;
+        source.length = table->frames * kSize;
+        scale = kSize;
+        const int level = (int)std::ceil(std::log2(std::max(1.0, fastest * kSize * s->oversample)));
+        source.level = std::max(0, std::min(kLevels - 1, level));
+    }
+    const double length = source.length;
+    const bool phase1 = isPhaseWarp(mode1), phase2 = isPhaseWarp(mode2);
+    auto shape = [&](float value, float mod, double where) {
+        if (!phase1) value = warpSample(mode1, value, warp1, mod, where);
+        if (!phase2) value = warpSample(mode2, value, warp2, mod, where);
+        return value;
+    };
+
+    if (oscMode == LY_OSCMODE_SAMPLE) {
+        const double start = std::min((double)position * length, length - 1);
+        if (v.oscFresh[o]) {
+            for (int j = 0; j < kMaxUnison; ++j) { v.phase[o][j] = start; v.sampleDone[o][j] = false; }
+        }
+        const bool loop = s->raw[x + LY_OSX_LOOP] > 0.5f;
+        const double loopLength = std::max(1.0, length - start);
+        for (int i = 0; i < n; ++i) {
+            float sumL = 0, sumR = 0, sumMono = 0;
+            const float mod = modulator ? modulator[i] : 0.f;
+            for (int j = 0; j < unison; ++j) {
+                if (v.sampleDone[o][j]) continue;
+                double ph = v.phase[o][j];
+                if (ph >= length) {
+                    if (!loop) { v.sampleDone[o][j] = true; continue; }
+                    ph = start + std::fmod(ph - start, loopLength);
+                }
+                const float value = shape(source.read(ph), mod, ph / length);
+                v.phase[o][j] = ph + increment[j] * scale;
+                sumL += value * gainL[j];
+                sumR += value * gainR[j];
+                sumMono += value;
+            }
+            outL[i] = sumL * normal;
+            outR[i] = sumR * normal;
+            mono[i] = sumMono / unison;
+        }
+        return;
+    }
+
+    // GRANULAR: Hann-windowed grains from around POSITION, each on one of
+    // the unison voices (its tuning and place in the stereo field).
+    const float size = clamp01(p[x + LY_OSX_GRAIN_SIZE] + m[LY_DST_A_GRAIN_SIZE + o]);
+    const float spray = clamp01(p[x + LY_OSX_GRAIN_SPRAY] + m[LY_DST_A_GRAIN_SPRAY + o]);
+    const double seconds = 0.005 * std::pow(100.0, (double)size);
+    const double density = 2.0 * std::pow(100.0, (double)clamp01(p[x + LY_OSX_GRAIN_DENSITY]));
+    const float grainLength = (float)std::max(16.0, seconds * s->voiceRate);
+    const double spawnStep = density / s->voiceRate;
+    // Overlapping grains add up; this keeps the level near the wavetable's.
+    const float gain = normal * std::sqrt((float)unison) * 1.6f / std::sqrt(std::max(1.f, (float)(density * seconds)));
+    Grain *grains = v.grains[o];
+    if (v.oscFresh[o]) {
+        for (int g = 0; g < kGrains; ++g) grains[g].on = false;
+        v.grainClock[o] = 1.0;
+    }
+    for (int i = 0; i < n; ++i) {
+        v.grainClock[o] += spawnStep;
+        if (v.grainClock[o] >= 1.0) {
+            v.grainClock[o] -= std::floor(v.grainClock[o]);
+            int slot = 0;
+            float oldest = -1;
+            for (int g = 0; g < kGrains; ++g) {
+                if (!grains[g].on) { slot = g; oldest = -2; break; }
+                if (grains[g].age > oldest) { oldest = grains[g].age; slot = g; }
+            }
+            Grain &grain = grains[slot];
+            const int j = unison > 1 ? std::min(unison - 1, (int)(s->random.unit() * unison)) : 0;
+            double start = (position + spray * 0.5f * s->random.bipolar()) * length;
+            start -= std::floor(start / length) * length;
+            grain.position = start;
+            grain.increment = increment[j] * scale;
+            grain.gainL = gainL[j] * gain;
+            grain.gainR = gainR[j] * gain;
+            grain.age = 0;
+            grain.length = grainLength;
+            grain.on = true;
+        }
+        float sumL = 0, sumR = 0, sumMono = 0;
+        const float mod = modulator ? modulator[i] : 0.f;
+        for (int g = 0; g < kGrains; ++g) {
+            Grain &grain = grains[g];
+            if (!grain.on) continue;
+            const float window = kHann.at(grain.age / grain.length);
+            const float value = shape(source.read(grain.position), mod, grain.position / length) * window;
+            sumL += value * grain.gainL;
+            sumR += value * grain.gainR;
+            sumMono += value;
+            grain.position += grain.increment;
+            if (grain.position >= length) grain.position -= length;
+            grain.age += 1.f;
+            if (grain.age >= grain.length) grain.on = false;
+        }
+        outL[i] = sumL;
+        outR[i] = sumR;
+        mono[i] = sumMono;
+    }
+}
+
 void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const float *modulator) {
     const Wavetable *table = s->live[o].load(std::memory_order_acquire);
     float *outL = s->oscL[o], *outR = s->oscR[o], *mono = s->oscMono[o];
     std::memset(outL, 0, sizeof(float) * n);
     std::memset(outR, 0, sizeof(float) * n);
     std::memset(mono, 0, sizeof(float) * n);
-    const int b = o == 0 ? LY_OSCA_BASE : LY_OSCB_BASE;
+    const int b = oscBase(o);
     const float *p = s->smoothed;
     if (s->raw[b + LY_OSC_ON] < 0.5f || table == nullptr) return;
 
-    const int dOffset = o == 0 ? 0 : (LY_DST_B_LEVEL - LY_DST_A_LEVEL);
-    const int d2 = o == 0 ? 0 : (LY_DST_B_WARP2 - LY_DST_A_WARP2);
+    // Each oscillator's destinations sit at the same offsets from its first
+    // two blocks' starts as A's do.
+    const int dOffset = o == 0 ? 0 : o == 1 ? (LY_DST_B_LEVEL - LY_DST_A_LEVEL) : (LY_DST_C_LEVEL - LY_DST_A_LEVEL);
+    const int d2 = o == 0 ? 0 : o == 1 ? (LY_DST_B_WARP2 - LY_DST_A_WARP2) : (LY_DST_C_WARP2 - LY_DST_A_WARP2);
     const float level = clamp01(p[b + LY_OSC_LEVEL] + m[LY_DST_A_LEVEL + dOffset]);
     if (level <= 0.0001f) return;
     const float pan = clampf(p[b + LY_OSC_PAN] + m[LY_DST_A_PAN + dOffset] + m[LY_DST_PAN], -1, 1);
@@ -1063,7 +1479,7 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
         + m[LY_DST_A_PITCH + dOffset] * 24.f + m[LY_DST_PITCH] * 24.f + v.bendSemis
         + clamp01(s->raw[LY_VINTAGE]) * (v.vintagePitch[o] * 0.06f + v.drift() * 0.04f);
     const double frequency = v.frequency * std::pow(2.0, semis / 12.0);
-    const double baseIncrement = frequency / s->sampleRate;
+    const double baseIncrement = frequency / s->voiceRate;
     if (baseIncrement >= 0.5) return;
 
     const double framePosition = position * (table->frames - 1);
@@ -1071,6 +1487,11 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
     const int f1 = std::min(table->frames - 1, f0 + 1);
     const float ff = (float)(framePosition - f0);
 
+    // A resonant PD carrier plays the table up to 16× faster: a smaller
+    // mipmap keeps it under the band's top.
+    double pdStretch = 1.0;
+    if (isPDReso(mode1)) pdStretch = std::max(pdStretch, pdResoRatio(warp1));
+    if (isPDReso(mode2)) pdStretch = std::max(pdStretch, pdResoRatio(warp2));
     float gainL[kMaxUnison], gainR[kMaxUnison];
     double increment[kMaxUnison];
     const float *t0[kMaxUnison], *t1[kMaxUnison];
@@ -1088,7 +1509,9 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
         const float cents = spread * detune * detune * 100.f + stackSemis * 100.f;
         increment[j] = baseIncrement * std::pow(2.0, cents / 1200.0);
         if (increment[j] >= 0.5) increment[j] = 0;
-        int level = (int)std::ceil(std::log2(std::max(1.0, increment[j] * kSize)));
+        // Oversampled, the table keeps the harmonics it has at the sample
+        // rate: the room above is for what the warps add.
+        int level = (int)std::ceil(std::log2(std::max(1.0, increment[j] * kSize * s->oversample * pdStretch)));
         level = std::max(0, std::min(kLevels - 1, level));
         t0[j] = table->frame(level, f0);
         t1[j] = table->frame(level, f1);
@@ -1101,6 +1524,47 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
     }
     const float normal = level / std::sqrt(std::max(gainSum, 1e-6f));
     const bool phase1 = isPhaseWarp(mode1), phase2 = isPhaseWarp(mode2);
+    const bool pdReso = isPDReso(mode1) || isPDReso(mode2);
+
+    // The oscillator's mode.
+    const int x = LY_OSX_BASE(o);
+    const int oscMode = (int)std::lround(s->raw[x + LY_OSX_MODE]);
+    if (oscMode == LY_OSCMODE_SAMPLE || oscMode == LY_OSCMODE_GRANULAR) {
+        renderSampled(s, v, o, n, oscMode, table, position, increment, gainL, gainR, normal, unison,
+                      mode1, warp1, mode2, warp2, modulator, m);
+        v.oscFresh[o] = false;
+        return;
+    }
+    // SPECTRAL: the voice's own cycle, rebuilt every kSpectralHop samples
+    // and crossfaded from the last, in place of the table's frames.
+    const int spectral = (int)std::lround(s->raw[x + LY_OSX_SPECTRAL]);
+    bool crossfade = f1 != f0;
+    float fade = ff;
+    if (spectral > LY_SPEC_OFF && spectral < LY_SPEC_COUNT) {
+        const float amount = clamp01(p[x + LY_OSX_SPECTRAL_AMT] + m[LY_DST_A_SPECTRAL + o]);
+        double fastest = baseIncrement;
+        for (int j = 0; j < unison; ++j) fastest = std::max(fastest, increment[j]);
+        const int top = std::max(1, std::min(kSize / 2 - 1, (int)(0.5 / (fastest * s->oversample * pdStretch))));
+        const float hop = (float)(kSpectralHop * s->oversample);
+        if (v.oscFresh[o]) {
+            buildSpectralCycle(s, table, o, position, spectral, amount, top, v.spectralCycle[o][0]);
+            std::memcpy(v.spectralCycle[o][1], v.spectralCycle[o][0], sizeof(v.spectralCycle[o][0]));
+            v.spectralNewest[o] = 1;
+            v.spectralFade[o] = 1;
+        } else if (v.spectralFade[o] >= 1.f) {
+            const int next = v.spectralNewest[o] ^ 1;
+            buildSpectralCycle(s, table, o, position, spectral, amount, top, v.spectralCycle[o][next]);
+            v.spectralNewest[o] = next;
+            v.spectralFade[o] = 0;
+        }
+        const int newest = v.spectralNewest[o];
+        // The crossfade moves a chunk at a time, from its middle.
+        fade = std::min(1.f, v.spectralFade[o] + 0.5f * n / hop);
+        v.spectralFade[o] = std::min(1.f, v.spectralFade[o] + n / hop);
+        for (int j = 0; j < unison; ++j) { t0[j] = v.spectralCycle[o][newest ^ 1]; t1[j] = v.spectralCycle[o][newest]; }
+        crossfade = true;
+    }
+    v.oscFresh[o] = false;
 
     for (int i = 0; i < n; ++i) {
         float sumL = 0, sumR = 0, sumMono = 0;
@@ -1114,7 +1578,12 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
             if (phase2) read = warpPhase(mode2, read, warp2, mod);
             read = std::min(std::max(read, 0.0), 0.9999999);
             float value = readWavetable(t0[j], read);
-            if (f1 != f0) value += (readWavetable(t1[j], read) - value) * ff;
+            if (crossfade) value += (readWavetable(t1[j], read) - value) * fade;
+            if (pdReso) {
+                const float start = t0[j][0] + (t1[j][0] - t0[j][0]) * fade;
+                if (isPDReso(mode1)) value = pdResoWindow(mode1, value, start, warp1, ph);
+                if (isPDReso(mode2)) value = pdResoWindow(mode2, value, start, warp2, ph);
+            }
             if (!phase1) value = warpSample(mode1, value, warp1, mod, ph);
             if (!phase2) value = warpSample(mode2, value, warp2, mod, ph);
             sumL += value * gainL[j];
@@ -1270,14 +1739,23 @@ double lfoIncrement(const LYSynth *s, int l, const float *m, int n) {
     return hz * n / s->sampleRate;
 }
 
-void renderVoice(LYSynth *s, Voice &v, int n) {
+/// One voice over `n` samples at the voice rate. Oversampled, a chunk comes
+/// in `pieces` calls: the modulation is worked out on the first
+/// (`fresh`), and the amplifier ramps across all of them.
+void renderVoice(LYSynth *s, Voice &v, int n, int piecesLeft = 1, bool fresh = true) {
     const float *p = s->smoothed;
     const float *r = s->raw;
+    const double sampleRate = s->voiceRate;
+    const int oversample = s->oversample;
 
     // Modulation for this chunk, from where every source is now.
     float m[LY_DST_COUNT];
-    evaluateMatrix(s, v, m);
-    std::memcpy(v.modulation, m, sizeof(m));
+    if (fresh) {
+        evaluateMatrix(s, v, m);
+        std::memcpy(v.modulation, m, sizeof(m));
+    } else {
+        std::memcpy(m, v.modulation, sizeof(m));
+    }
     const bool mpe = r[LY_MPE] > 0.5f;
     v.bendSemis = s->masterBend * r[LY_BEND_RANGE] + (mpe && v.channel != 0 ? s->channelBend[v.channel & 15] * 48.f : 0.f);
     if (mpe) v.pressure = s->channelPressure[v.channel & 15];
@@ -1285,7 +1763,7 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
     // Glide.
     const float glide = r[LY_GLIDE];
     if (glide > 0.001f) {
-        const double k = std::exp(-(double)n / (glide * s->sampleRate * 0.25));
+        const double k = std::exp(-(double)n / (glide * sampleRate * 0.25));
         v.frequency = v.targetFrequency + (v.frequency - v.targetFrequency) * k;
     } else {
         v.frequency = v.targetFrequency;
@@ -1295,6 +1773,9 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
     // previous chunk, one chunk late, which FM cannot hear.
     renderOscillator(s, v, 1, n, m, v.lastA);
     renderOscillator(s, v, 0, n, m, s->oscMono[1]);
+    // C after A, with A (this chunk) as its FM / ring / AM source.
+    const bool cOn = r[LY_OSCC_BASE + LY_OSC_ON] > 0.5f;
+    if (cOn) renderOscillator(s, v, 2, n, m, s->oscMono[0]);
     std::memcpy(v.lastA, s->oscMono[0], sizeof(float) * n);
     for (int i = n; i < kChunk; ++i) v.lastA[i] = 0;
 
@@ -1315,6 +1796,7 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         for (int i = 0; i < n; ++i) { dl[i] += l[i]; dr[i] += rr[i]; }
     };
     route(s->oscL[0], s->oscR[0], r[LY_FILTER_ROUTE_A] > 0.5f);
+    if (cOn) route(s->oscL[2], s->oscR[2], r[LY_FILTER_ROUTE_C] > 0.5f);
     if (split && r[LY_FILTER_ROUTE_B] > 0.5f) {
         for (int i = 0; i < n; ++i) { splitL[i] += s->oscL[1][i]; splitR[i] += s->oscR[1][i]; }
     } else {
@@ -1331,7 +1813,7 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         const float level = clamp01(p[LY_SUB_LEVEL] + m[LY_DST_SUB_LEVEL]);
         float gl, gr; panGains(p[LY_SUB_PAN] + m[LY_DST_SUB_PAN], gl, gr);
         const double increment = v.frequency * std::pow(2.0, (v.bendSemis + p[LY_TUNE] / 100.0 + m[LY_DST_PITCH] * 24.0) / 12.0)
-            / std::exp2(std::max(1.f, std::round(r[LY_SUB_OCTAVE]))) / s->sampleRate;
+            / std::exp2(std::max(1.f, std::round(r[LY_SUB_OCTAVE]))) / sampleRate;
         const int shape = (int)std::lround(r[LY_SUB_SHAPE]);
         const float dt = (float)increment;
         auto blep = [dt](float t) {
@@ -1366,12 +1848,17 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         const double keyHz = r[LY_NOISE_KEYTRACK] > 0.5f ? v.frequency : 261.6;
         const double rateHz = keyHz * std::pow(2.0, (clamp01(p[LY_NOISE_PITCH] + m[LY_DST_NOISE_PITCH]) - 0.5) * 8.0)
             * (type == LY_NOISE_CRACKLE ? 4.0 : type == LY_NOISE_DIGITAL ? 16.0 : type == LY_NOISE_METAL ? 12.0 : 1.0);
+        // Noise is made at the sample rate and held when oversampled: the
+        // same colour and level at any QUALITY.
         float ba1 = 0, ba2 = 0, ba3 = 0;
         if (type == LY_NOISE_BREATH) svfCoefficients(std::min(rateHz * 2.0, s->sampleRate * 0.4), s->sampleRate, 0.35f, ba1, ba2, ba3);
         const float k = 1.f - color * 0.97f;
         for (int i = 0; i < n; ++i) {
-            const float raw = v.noise.next(type, s->random, rateHz, s->sampleRate, ba1, ba2, ba3);
-            v.noiseColor = flushf(v.noiseColor + (raw - v.noiseColor) * k);
+            if (v.noiseCount == 0) {
+                const float raw = v.noise.next(type, s->random, rateHz, s->sampleRate, ba1, ba2, ba3);
+                v.noiseColor = flushf(v.noiseColor + (raw - v.noiseColor) * k);
+            }
+            if (oversample > 1) v.noiseCount = (v.noiseCount + 1) % oversample;
             const float value = v.noiseColor * level * (0.6f + color * 0.8f);
             extraL[i] = value * gl;
             extraR[i] = value * gr;
@@ -1390,7 +1877,7 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
             processInsert(v.insert[k], type, L, R, n,
                           clamp01(p[b + (LY_INS1_AMOUNT - LY_INS1_TYPE)] + m[d]),
                           clamp01(p[b + (LY_INS1_FREQ - LY_INS1_TYPE)] + m[d + 1]),
-                          clamp01(p[b + (LY_INS1_MIX - LY_INS1_TYPE)]), v.frequency, s->sampleRate);
+                          clamp01(p[b + (LY_INS1_MIX - LY_INS1_TYPE)]), v.frequency, sampleRate, oversample);
         }
     };
     auto anyInsertAt = [&](int position) {
@@ -1419,18 +1906,18 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         if (f1On) {
             const double hz = cutoffHz(p[LY_FILTER_CUTOFF], p[LY_FILTER_KEYTRACK], p[LY_FILTER_ENVAMT], v.envelope[1].value,
                                        m[LY_DST_CUTOFF] + vintageCutoff);
-            v.cutoffHz = (float)std::min(hz, s->sampleRate * 0.45);
+            v.cutoffHz = (float)std::min(hz, sampleRate * 0.45);
             one = makeFilter((int)std::lround(r[LY_FILTER_TYPE]), hz, clamp01(p[LY_FILTER_RES] + m[LY_DST_RES]),
-                             clamp01(p[LY_FILTER_DRIVE] + m[LY_DST_DRIVE]), clamp01(p[LY_FILTER_MIX] + m[LY_DST_FILTER_MIX]), s->sampleRate,
-                             clamp01(p[LY_FILTER_MORPH_POS] + m[LY_DST_MORPH]), r[LY_LADDER_POLES] > 0.5f, p[LY_LADDER_BASS]);
+                             clamp01(p[LY_FILTER_DRIVE] + m[LY_DST_DRIVE]), clamp01(p[LY_FILTER_MIX] + m[LY_DST_FILTER_MIX]), sampleRate,
+                             clamp01(p[LY_FILTER_MORPH_POS] + m[LY_DST_MORPH]), r[LY_LADDER_POLES] > 0.5f, p[LY_LADDER_BASS], oversample);
         }
         if (f2On) {
             const double hz = cutoffHz(p[LY_F2_CUTOFF], p[LY_F2_KEYTRACK], p[LY_F2_ENVAMT], v.envelope[2].value,
                                        m[LY_DST_F2_CUTOFF] + vintageCutoff);
-            v.cutoff2Hz = (float)std::min(hz, s->sampleRate * 0.45);
+            v.cutoff2Hz = (float)std::min(hz, sampleRate * 0.45);
             two = makeFilter((int)std::lround(r[LY_F2_TYPE]), hz, clamp01(p[LY_F2_RES] + m[LY_DST_F2_RES]),
-                             clamp01(p[LY_F2_DRIVE] + m[LY_DST_F2_DRIVE]), clamp01(p[LY_F2_MIX] + m[LY_DST_F2_MIX]), s->sampleRate,
-                             clamp01(p[LY_F2_MORPH] + m[LY_DST_F2_MORPH]), r[LY_LADDER_POLES] > 0.5f, p[LY_LADDER_BASS]);
+                             clamp01(p[LY_F2_DRIVE] + m[LY_DST_F2_DRIVE]), clamp01(p[LY_F2_MIX] + m[LY_DST_F2_MIX]), sampleRate,
+                             clamp01(p[LY_F2_MORPH] + m[LY_DST_F2_MORPH]), r[LY_LADDER_POLES] > 0.5f, p[LY_LADDER_BASS], oversample);
         }
         const bool parallel = routing == LY_ROUTING_PARALLEL && f1On && f2On;
         // SATURATION between the filters: after filter 1 (and before filter 2
@@ -1441,8 +1928,8 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         const float satDrive = clamp01(p[LY_FSAT_DRIVE] + m[LY_DST_FSAT_DRIVE]);
         const float satGain = 1.f + satDrive * 15.f;
         const float satSteps = std::exp2(12.f - satDrive * 10.f);
-        const float satStep = 1.f / (1.f + satDrive * satDrive * 40.f);
-        const float satDC = 1.f - (float)(kTwoPi * 5.0 / s->sampleRate);
+        const float satStep = 1.f / (1.f + satDrive * satDrive * 40.f) / oversample;
+        const float satDC = 1.f - (float)(kTwoPi * 5.0 / sampleRate);
         float gl = 1, gr = 1;
         const float fpan = clampf(p[LY_FILTER_PAN] + m[LY_DST_FILTER_PAN], -1, 1);
         if (std::fabs(fpan) > 0.001f) { gl = fpan > 0 ? 1.f - fpan : 1.f; gr = fpan < 0 ? 1.f + fpan : 1.f; }
@@ -1453,7 +1940,7 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
         const float fbGain = fbAmount * 1.25f;
         const float fbDrive = 1.f + p[LY_FB_DRIVE] * 7.f;
         const float fbHz = 150.f * std::pow(100.f, clamp01(p[LY_FB_TONE] + m[LY_DST_FB_TONE]));
-        const float fbCoef = 1.f - std::exp(-(float)kTwoPi * std::min(fbHz, (float)s->sampleRate * 0.45f) / (float)s->sampleRate);
+        const float fbCoef = 1.f - std::exp(-(float)kTwoPi * std::min(fbHz, (float)sampleRate * 0.45f) / (float)sampleRate);
         for (int i = 0; i < n; ++i) {
             float in[2] = { wetL[i], wetR[i] };
             const float in2[2] = { splitL[i], splitR[i] };
@@ -1515,14 +2002,48 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
     // PUNCH: a short lift on each attack, gone after about 30 ms.
     const float punch = clamp01(p[LY_PUNCH]);
     if (punch > 0.0005f) ampTarget *= 1.f + punch * 1.5f * std::exp(-(float)v.elapsed / 0.012f);
-    const float step = (ampTarget - v.amp) / n;
+    const float step = (ampTarget - v.amp) / (n * piecesLeft);
     float amp = v.amp;
     for (int i = 0; i < n; ++i) {
         amp += step;
         wetL[i] = (wetL[i] + dryL[i]) * amp;
         wetR[i] = (wetR[i] + dryR[i]) * amp;
     }
-    v.amp = ampTarget;
+    v.amp = piecesLeft > 1 ? amp : ampTarget;
+}
+
+/// QUALITY: a new voice rate. The comb delays take the longer lines it needs
+/// and start empty; the way down starts silent.
+void setOversample(LYSynth *s, int quality) {
+    const int oversample = quality >= LY_OS_4X ? 4 : quality == LY_OS_2X ? 2 : 1;
+    if (oversample == s->oversample) return;
+    s->oversample = oversample;
+    s->voiceRate = s->sampleRate * oversample;
+    for (Voice *v = s->voices; v != s->voices + kMaxVoices + 1; ++v) {
+        Voice &voice = v == s->voices + kMaxVoices ? s->idle : *v;
+        for (auto &filter : voice.filter) for (auto &channel : filter) channel.setOversample(oversample);
+        for (auto &insert : voice.insert) insert.setOversample(oversample);
+        voice.noiseCount = 0;
+    }
+    for (int c = 0; c < 2; ++c) { s->down2[c].reset(); s->down4[c].reset(); }
+}
+
+/// The voices, summed at the voice rate, back down to the sample rate and
+/// into `outL` / `outR`.
+void comeDown(LYSynth *s, float *outL, float *outR, int n) {
+    for (int c = 0; c < 2; ++c) {
+        const float *x = c == 0 ? s->overL : s->overR;
+        float *out = c == 0 ? outL : outR;
+        if (s->oversample == 4) {
+            for (int i = 0; i < n; ++i) {
+                const float a = s->down4[c].process(kHalfband4, x[4 * i], x[4 * i + 1]);
+                const float b = s->down4[c].process(kHalfband4, x[4 * i + 2], x[4 * i + 3]);
+                out[i] += s->down2[c].process(kHalfband2, a, b);
+            }
+        } else {
+            for (int i = 0; i < n; ++i) out[i] += s->down2[c].process(kHalfband2, x[2 * i], x[2 * i + 1]);
+        }
+    }
 }
 
 bool anyGateHeld(const LYSynth *s) {
@@ -1575,19 +2096,19 @@ void startVoice(LYSynth *s, const Event &e, bool fromArp = false) {
     v.random = s->random.bipolar();
     v.elapsed = 0;
     if (s->raw[LY_VINTAGE] > 0.0005f) {
-        for (auto &o : v.vintagePitch) o = s->random.bipolar();
+        for (int o = 0; o < 2; ++o) v.vintagePitch[o] = s->random.bipolar();
         v.vintageCutoff = s->random.bipolar();
         for (auto &t : v.vintageTime) t = (float)(std::log(1.0 + 0.25 * s->random.bipolar()) / std::log(20000.0));
         v.driftFrom = s->random.bipolar(); v.driftTo = s->random.bipolar();
         v.driftPhase = s->random.unit();
         v.driftRate = 0.15f + 0.3f * s->random.unit();
     } else {
-        v.vintagePitch[0] = v.vintagePitch[1] = v.vintageCutoff = 0;
+        v.vintagePitch[0] = v.vintagePitch[1] = v.vintagePitch[2] = v.vintageCutoff = 0;
         v.vintageTime[0] = v.vintageTime[1] = v.vintageTime[2] = 0;
         v.driftFrom = v.driftTo = 0;
     }
     for (int o = 0; o < 2; ++o) {
-        const int b = o == 0 ? LY_OSCA_BASE : LY_OSCB_BASE;
+        const int b = oscBase(o);
         const float start = s->raw[b + LY_OSC_PHASE];
         const float spread = s->raw[b + LY_OSC_RANDPHASE];
         for (int j = 0; j < kMaxUnison; ++j) {
@@ -1597,8 +2118,21 @@ void startVoice(LYSynth *s, const Event &e, bool fromArp = false) {
         }
     }
     v.subPhase = 0;
+    for (auto &fresh : v.oscFresh) fresh = true;
     for (int k = 0; k < 4; ++k) v.envelope[k].gateOn();
     for (int l = 0; l < 4; ++l) v.lfo[l].retrigger(s->random, s->raw[lfoBase(l) + (LY_LFO1_PHASE - LY_LFO1_SHAPE)]);
+    // Oscillator C draws its numbers last, and only when it plays, so a
+    // patch without it hears the same random numbers it always did.
+    if (s->raw[LY_OSCC_BASE + LY_OSC_ON] > 0.5f) {
+        const float start = s->raw[LY_OSCC_BASE + LY_OSC_PHASE];
+        const float spread = s->raw[LY_OSCC_BASE + LY_OSC_RANDPHASE];
+        for (int j = 0; j < kMaxUnison; ++j) {
+            double ph = start + spread * s->random.unit();
+            v.phase[2][j] = ph - std::floor(ph);
+            v.uniRandom[2][j] = s->random.bipolar();
+        }
+        v.vintagePitch[2] = s->raw[LY_VINTAGE] > 0.0005f ? s->random.bipolar() : 0.f;
+    }
     if (!wasActive) {
         for (auto &filter : v.filter) for (auto &channel : filter) channel.reset();
         for (auto &insert : v.insert) insert.reset();
@@ -2091,6 +2625,8 @@ extern "C" {
 LYSynth *lysynth_create(double sampleRate) {
     auto *s = new LYSynth();
     s->sampleRate = sampleRate > 0 ? sampleRate : 44100;
+    s->voiceRate = s->sampleRate;
+    s->fft = vDSP_create_fftsetup(11, kFFTRadix2);
     setDefaults(s);
     buildSmoothing(s);
     for (int i = 0; i < LY_PARAM_COUNT; ++i) {
@@ -2104,10 +2640,14 @@ LYSynth *lysynth_create(double sampleRate) {
     for (auto &lfo : s->globalLFO) lfo.retrigger(s->random, 0);
     lysynth_use_factory_table(s, 0, LY_TABLE_BASIC);
     lysynth_use_factory_table(s, 1, LY_TABLE_BASIC);
+    lysynth_use_factory_table(s, 2, LY_TABLE_BASIC);
     return s;
 }
 
-void lysynth_destroy(LYSynth *s) { delete s; }
+void lysynth_destroy(LYSynth *s) {
+    if (s->fft) vDSP_destroy_fftsetup(s->fft);
+    delete s;
+}
 
 void lysynth_set_param(LYSynth *s, int id, float value) {
     if (id < 0 || id >= LY_PARAM_COUNT || !std::isfinite(value)) return;
@@ -2163,6 +2703,7 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
         s->raw[i] = target;
         s->smoothed[i] = s->smooths[i] ? s->smoothed[i] + (target - s->smoothed[i]) * 0.35f : target;
     }
+    setOversample(s, (int)std::lround(s->raw[LY_OVERSAMPLE]));
 
     // Move newly queued events into the time-ordered pending list.
     const uint32_t w = s->writeIndex.load(std::memory_order_acquire);
@@ -2251,6 +2792,11 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
         }
 
         float *outL = left + position, *outR = right + position;
+        const int oversample = s->oversample;
+        if (oversample > 1) {
+            std::memset(s->overL, 0, sizeof(float) * n * oversample);
+            std::memset(s->overR, 0, sizeof(float) * n * oversample);
+        }
         for (auto &v : s->voices) {
             if (!v.active) continue;
             const float *mod = v.modulation;
@@ -2277,10 +2823,20 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
                                  mode == LY_LFOMODE_ENV, 0.f);
             }
             v.elapsed += (double)n / s->sampleRate;
-            renderVoice(s, v, n);
-            for (int i = 0; i < n; ++i) { outL[i] += s->mixL[i]; outR[i] += s->mixR[i]; }
+            if (oversample == 1) {
+                renderVoice(s, v, n);
+                for (int i = 0; i < n; ++i) { outL[i] += s->mixL[i]; outR[i] += s->mixR[i]; }
+            } else {
+                // The chunk at the voice rate, a chunk's length at a time.
+                for (int k = 0; k < oversample; ++k) {
+                    renderVoice(s, v, n, oversample - k, k == 0);
+                    float *l = s->overL + k * n, *rr = s->overR + k * n;
+                    for (int i = 0; i < n; ++i) { l[i] += s->mixL[i]; rr[i] += s->mixR[i]; }
+                }
+            }
             if (v.envelope[0].stage == 0 && v.amp < 1e-5f) v.active = false;
         }
+        if (oversample > 1) comeDown(s, outL, outR, n);
 
         // Effects follow the newest voice's modulation, or the global
         // sources alone when nothing is playing.
@@ -2333,6 +2889,7 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
     const Voice &v = hasVoice ? s->voices[s->newestVoice] : s->idle;
     s->display[1].store(v.wavetablePosition[0], std::memory_order_relaxed);
     s->display[2].store(v.wavetablePosition[1], std::memory_order_relaxed);
+    s->display[kDisplayWavetableC].store(v.wavetablePosition[2], std::memory_order_relaxed);
     for (int k = 0; k < 4; ++k) s->display[3 + k].store(v.envelope[k].value, std::memory_order_relaxed);
     for (int l = 0; l < 4; ++l) {
         const int mode = (int)std::lround(s->raw[lfoBase(l) + (LY_LFO1_RETRIG - LY_LFO1_SHAPE)]);
@@ -2386,7 +2943,7 @@ void lysynth_set_transport(LYSynth *s, int playing, uint64_t hostTime, double be
 }
 
 void lysynth_set_wavetable(LYSynth *s, int oscillator, const float *frames, int frameCount) {
-    if (oscillator < 0 || oscillator > 1 || frames == nullptr || frameCount < 1) return;
+    if (oscillator < 0 || oscillator >= LY_OSC_COUNT || frames == nullptr || frameCount < 1) return;
     auto table = buildWavetable(frames, frameCount);
     std::lock_guard<std::mutex> guard(s->tableMutex);
     // The audio thread may still be reading the old table for this block, so
@@ -2397,8 +2954,25 @@ void lysynth_set_wavetable(LYSynth *s, int oscillator, const float *frames, int 
     s->live[oscillator].store(table.get(), std::memory_order_release);
 }
 
+void lysynth_set_sample(LYSynth *s, int oscillator, const float *samples, int frameCount, double sampleRate) {
+    if (oscillator < 0 || oscillator >= LY_OSC_COUNT) return;
+    std::shared_ptr<Sample> sample;
+    if (samples && frameCount > 0) {
+        sample = std::make_shared<Sample>();
+        sample->length = frameCount;
+        sample->rate = sampleRate > 0 ? sampleRate : 44100;
+        sample->data.assign(samples, samples + frameCount);
+        sample->data.resize((size_t)frameCount + 4, 0.f);
+    }
+    std::lock_guard<std::mutex> guard(s->tableMutex);
+    if (s->sampleOwned[oscillator]) s->sampleRetired.push_back(s->sampleOwned[oscillator]);
+    if (s->sampleRetired.size() > 4) s->sampleRetired.erase(s->sampleRetired.begin(), s->sampleRetired.end() - 4);
+    s->sampleOwned[oscillator] = sample;
+    s->sampleLive[oscillator].store(sample.get(), std::memory_order_release);
+}
+
 void lysynth_use_factory_table(LYSynth *s, int oscillator, int tableID) {
-    if (oscillator < 0 || oscillator > 1 || tableID < 0 || tableID >= LY_TABLE_FACTORY_COUNT) return;
+    if (oscillator < 0 || oscillator >= LY_OSC_COUNT || tableID < 0 || tableID >= LY_TABLE_FACTORY_COUNT) return;
     static std::mutex cacheMutex;
     static std::shared_ptr<Wavetable> cache[LY_TABLE_FACTORY_COUNT];
     std::shared_ptr<Wavetable> table;
@@ -2422,6 +2996,7 @@ void lysynth_get_display(const LYSynth *s, LYSynthDisplay *out) {
     out->activeVoices = (int)s->display[0].load(std::memory_order_relaxed);
     out->wavetablePosition[0] = s->display[1].load(std::memory_order_relaxed);
     out->wavetablePosition[1] = s->display[2].load(std::memory_order_relaxed);
+    out->wavetablePositionC = s->display[kDisplayWavetableC].load(std::memory_order_relaxed);
     for (int k = 0; k < 4; ++k) out->envelope[k] = s->display[3 + k].load(std::memory_order_relaxed);
     for (int l = 0; l < 4; ++l) {
         out->lfo[l] = s->display[7 + l].load(std::memory_order_relaxed);

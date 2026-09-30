@@ -182,6 +182,124 @@ final class LYWavetableLibrary: ObservableObject {
     }
 }
 
+// MARK: - Samples
+
+/// A mono sample at its own rate, for the SAMPLE and GRANULAR oscillator modes.
+struct LYSynthSample: Equatable {
+    var samples: [Float]
+    var rate: Double
+}
+
+/// The samples LUNATK's oscillators play, by name: imported ones, and those
+/// a project or preset carries. On disk they are mono 32-bit float WAVs at
+/// their own rate in ~/Library/Application Support/LYLLTH/Samples.
+@MainActor
+final class LYSampleLibrary: ObservableObject {
+    static let shared = LYSampleLibrary()
+    /// A minute at 48 kHz; longer files are cut.
+    static let maxFrames = 48_000 * 60
+
+    @Published private(set) var names: [String] = []
+    private var samples: [String: LYSynthSample] = [:]
+
+    static var folder: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let url = base.appendingPathComponent("LYLLTH/Samples", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private init() { reloadFolder() }
+
+    func reloadFolder() {
+        let files = (try? FileManager.default.contentsOfDirectory(at: Self.folder, includingPropertiesForKeys: nil)) ?? []
+        for file in files where ["wav", "wave", "aif", "aiff"].contains(file.pathExtension.lowercased()) {
+            let name = file.deletingPathExtension().lastPathComponent.uppercased()
+            if samples[name] == nil, let sample = try? Self.importSample(from: file) { samples[name] = sample }
+        }
+        names = samples.keys.sorted()
+    }
+
+    func sample(named name: String) -> LYSynthSample? { samples[name] }
+
+    /// Registers a sample, writes it to the user folder, and returns the name
+    /// it was stored under.
+    @discardableResult
+    func store(_ sample: LYSynthSample, named proposed: String, writeToFolder: Bool = true) -> String {
+        let trimmed = proposed.uppercased().trimmingCharacters(in: .whitespaces)
+        let name = trimmed.isEmpty ? "UNTITLED SAMPLE" : trimmed
+        samples[name] = sample
+        if writeToFolder { try? Self.writeWAV(sample, to: Self.folder.appendingPathComponent(name).appendingPathExtension("wav")) }
+        names = samples.keys.sorted()
+        return name
+    }
+
+    /// Samples a project or preset carries. Registered without writing to the
+    /// user folder.
+    func register(projectSamples: [String: Data]) {
+        for (name, data) in projectSamples where samples[name] == nil {
+            if let sample = Self.decode(data) { samples[name] = sample }
+        }
+        names = samples.keys.sorted()
+    }
+
+    /// Any audio file, mixed to mono, at its own rate.
+    static func importSample(from url: URL) throws -> LYSynthSample {
+        let file = try AVAudioFile(forReading: url)
+        let format = file.processingFormat
+        let total = min(Int(file.length), maxFrames)
+        let chunk: AVAudioFrameCount = 16_384
+        guard total > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let channelCount = Int(format.channelCount)
+        var mono: [Float] = []
+        mono.reserveCapacity(total)
+        while mono.count < total, file.framePosition < file.length {
+            buffer.frameLength = 0
+            try file.read(into: buffer, frameCount: min(chunk, AVAudioFrameCount(total - mono.count)))
+            let count = Int(buffer.frameLength)
+            guard count > 0, let channels = buffer.floatChannelData else { break }
+            for i in 0..<count {
+                var sum: Float = 0
+                for c in 0..<channelCount { sum += channels[c][i] }
+                mono.append(sum / Float(channelCount))
+            }
+        }
+        guard !mono.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+        return LYSynthSample(samples: mono, rate: format.sampleRate)
+    }
+
+    static func writeWAV(_ sample: LYSynthSample, to url: URL) throws {
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sample.rate, channels: 1, interleaved: false)!
+        let file = try AVAudioFile(forWriting: url, settings: format.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(sample.samples.count)) else { return }
+        buffer.frameLength = AVAudioFrameCount(sample.samples.count)
+        sample.samples.withUnsafeBufferPointer { source in
+            buffer.floatChannelData![0].update(from: source.baseAddress!, count: sample.samples.count)
+        }
+        try file.write(from: buffer)
+        if #available(macOS 15.0, *) { file.close() }
+    }
+
+    /// The form projects and presets embed: the rate as a Float64, then
+    /// little-endian Float32 samples.
+    static func data(_ sample: LYSynthSample) -> Data {
+        var rate = sample.rate
+        var data = Data(bytes: &rate, count: 8)
+        sample.samples.withUnsafeBufferPointer { data.append(Data(buffer: $0)) }
+        return data
+    }
+
+    static func decode(_ data: Data) -> LYSynthSample? {
+        guard data.count >= 12, (data.count - 8) % 4 == 0 else { return nil }
+        let rate = data.prefix(8).withUnsafeBytes { $0.loadUnaligned(as: Double.self) }
+        let samples: [Float] = data.dropFirst(8).withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        guard rate > 0, rate.isFinite else { return nil }
+        return LYSynthSample(samples: samples, rate: rate)
+    }
+}
+
 // MARK: - Presets
 
 /// A user preset on disk: the patch plus any custom wavetables it uses, so a
@@ -189,6 +307,33 @@ final class LYWavetableLibrary: ObservableObject {
 struct LYSynthPresetFile: Codable {
     var patch: LYSynthPatch
     var wavetables: [String: Data] = [:]
+    /// Samples the oscillators play (LYSampleLibrary.data). Optional so files
+    /// from before samples still load.
+    var samples: [String: Data]? = nil
+
+    /// The patch with every custom wavetable and sample it uses.
+    @MainActor
+    static func carrying(_ patch: LYSynthPatch) -> LYSynthPresetFile {
+        var file = LYSynthPresetFile(patch: patch)
+        for custom in [patch.customTableA, patch.customTableB, patch.customTableC].compactMap({ $0 }) {
+            if let frames = LYWavetableLibrary.shared.frames(named: custom) {
+                file.wavetables[custom] = LYWavetableLibrary.floatData(frames)
+            }
+        }
+        var samples: [String: Data] = [:]
+        for name in (0..<Int(LY_OSC_COUNT)).compactMap({ patch.sampleName($0) }) {
+            if let sample = LYSampleLibrary.shared.sample(named: name) { samples[name] = LYSampleLibrary.data(sample) }
+        }
+        file.samples = samples.isEmpty ? nil : samples
+        return file
+    }
+
+    /// Makes what the file carries available before its patch is applied.
+    @MainActor
+    func registerContents() {
+        LYWavetableLibrary.shared.register(projectTables: wavetables)
+        if let samples { LYSampleLibrary.shared.register(projectSamples: samples) }
+    }
 }
 
 @MainActor
@@ -212,7 +357,7 @@ final class LYSynthPresetStore: ObservableObject {
         for file in files where file.pathExtension == "lyllthsynth" {
             guard let data = try? Data(contentsOf: file),
                   let preset = try? JSONDecoder().decode(LYSynthPresetFile.self, from: data) else { continue }
-            LYWavetableLibrary.shared.register(projectTables: preset.wavetables)
+            preset.registerContents()
             loaded.append(preset.patch)
         }
         presets = loaded.sorted { $0.name < $1.name }
@@ -221,12 +366,7 @@ final class LYSynthPresetStore: ObservableObject {
     func save(_ patch: LYSynthPatch, as name: String) throws {
         var stored = patch
         stored.name = name.uppercased()
-        var file = LYSynthPresetFile(patch: stored)
-        for custom in [patch.customTableA, patch.customTableB].compactMap({ $0 }) {
-            if let frames = LYWavetableLibrary.shared.frames(named: custom) {
-                file.wavetables[custom] = LYWavetableLibrary.floatData(frames)
-            }
-        }
+        let file = LYSynthPresetFile.carrying(stored)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(file).write(to: url(for: stored.name), options: .atomic)

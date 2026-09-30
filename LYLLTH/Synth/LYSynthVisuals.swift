@@ -97,6 +97,44 @@ enum LYWavetableArt {
 
 /// The wavetable as a stack of frames receding in depth, the frame being
 /// played lit in the oscillator's colour and following modulation live.
+/// A sample's outline for SAMPLE and GRANULAR, with where START or
+/// POSITION sits. With no sample, an empty frame that says so.
+struct LYSampleView: View {
+    let sample: LYSynthSample?
+    let position: Float
+    let accent: Color
+
+    var body: some View {
+        Canvas { context, size in
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.5)))
+            let mid = size.height * 0.56, half = size.height * 0.36
+            if let samples = sample?.samples, !samples.isEmpty {
+                let columns = max(1, Int(size.width))
+                let step = max(1, samples.count / columns)
+                var outline = Path()
+                for column in 0..<columns {
+                    let start = min(samples.count - 1, column * samples.count / columns)
+                    let end = min(samples.count, start + step)
+                    var low: Float = 0, high: Float = 0
+                    for i in stride(from: start, to: end, by: max(1, step / 64)) { low = min(low, samples[i]); high = max(high, samples[i]) }
+                    let x = CGFloat(column) + 0.5
+                    outline.move(to: CGPoint(x: x, y: mid - CGFloat(high) * half))
+                    outline.addLine(to: CGPoint(x: x, y: mid - CGFloat(low) * half + 0.5))
+                }
+                context.stroke(outline, with: .color(accent.opacity(0.75)), lineWidth: 1)
+            } else {
+                var line = Path()
+                line.move(to: CGPoint(x: 8, y: mid)); line.addLine(to: CGPoint(x: size.width - 8, y: mid))
+                context.stroke(line, with: .color(accent.opacity(0.35)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
+            let x = CGFloat(min(max(position, 0), 1)) * size.width
+            var marker = Path()
+            marker.move(to: CGPoint(x: x, y: 18)); marker.addLine(to: CGPoint(x: x, y: size.height - 6))
+            context.stroke(marker, with: .color(accent), lineWidth: 1.5)
+        }
+    }
+}
+
 struct LYWavetableView: View {
     let table: Int
     var customName: String? = nil
@@ -111,7 +149,8 @@ struct LYWavetableView: View {
             guard !frames.isEmpty else { return }
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.5)))
             let livePosition: Float = {
-                let modulated = oscillator == 0 ? live.display.wavetablePosition.0 : live.display.wavetablePosition.1
+                let modulated = oscillator == 0 ? live.display.wavetablePosition.0
+                    : oscillator == 1 ? live.display.wavetablePosition.1 : live.display.wavetablePositionC
                 return live.display.activeVoices > 0 ? modulated : basePosition
             }()
             let layers = min(frames.count, 28)
