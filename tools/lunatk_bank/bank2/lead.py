@@ -383,9 +383,11 @@ def presets():
     # little drive, a touch of plate. Nothing moves.
     p.osc(0, level=0.62, wt=1.0)
     p.osc(1, level=0.1, wt=1.0, octave=1, fine=6)
-    p.sub(0.4, "SINE", octave=1, filtered=True)
+    # The sub sits an octave under the melody, right in the low mids for a
+    # C4-C5 line: kept low, and the high-pass clears the mud under it.
+    p.sub(0.1, "SINE", octave=1, filtered=True)
     p.filter("LP24", hz=7000, res=0.1, keytrack=0.3, env=0.0, drive=0.3)
-    p.filter2("HP12", hz=60)
+    p.filter2("HP12", hz=200)
     p.env(1, a=0.0, d=0.1, s=1.0, r=1.8)
     p.voice(voices=6, glide=0.0, vel=0.4, bend=2)
     velocity(p, 0.65, 0.08)
