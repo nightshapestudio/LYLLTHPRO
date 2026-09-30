@@ -11644,12 +11644,12 @@
    "name": "SQUARE HALO",
    "category": "LEAD",
    "info": {
-    "role": "A plain analog square stacked across two octaves: square, a detuned square an octave up and a square sub",
+    "role": "A plain analog square stacked across two octaves: square, a faint detuned square an octave up and a sine sub",
     "register": "C3\u2013C6",
     "genres": "Synth-pop, dark pop, synthwave, darkwave",
     "playing": "Lead melodies; an octave up for accents between vocal lines",
     "layer": "FOREGROUND",
-    "mix": "No attack; each note rings out for most of a second. SPACE up for more room"
+    "mix": "No attack and a long release; each note rings out. SPACE up for more room"
    },
    "patch": {
     "name": "SQUARE HALO",
@@ -11662,7 +11662,7 @@
      "a.wtpos": 1.0,
      "b.detune": 0.07,
      "b.fine": 6.0,
-     "b.level": 0.34,
+     "b.level": 0.1,
      "b.octave": 1.0,
      "b.on": 1.0,
      "b.unison": 3.0,
@@ -11676,7 +11676,7 @@
      "dist.tone": 0.5,
      "env1.a": 0.0,
      "env1.d": 0.535,
-     "env1.r": 0.75686,
+     "env1.r": 0.82685,
      "env1.s": 1.0,
      "filter.cutoff": 0.84802,
      "filter.drive": 0.3,
@@ -11701,7 +11701,7 @@
      "macro2": 0.0,
      "macro3": 0.5,
      "macro4": 0.0,
-     "master": 0.228,
+     "master": 0.2255,
      "mx0.amt": 0.08,
      "mx0.aux": 0.0,
      "mx0.bi": 0.0,
@@ -11744,7 +11744,7 @@
      "sub.octave": 1.0,
      "sub.on": 1.0,
      "sub.pan": 0.0,
-     "sub.shape": 2.0,
+     "sub.shape": 0.0,
      "velSens": 0.65,
      "voices": 6.0
     },
