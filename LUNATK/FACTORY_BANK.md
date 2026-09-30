@@ -1,6 +1,6 @@
 # LUNATK factory bank
 
-424 presets. Every one is rendered through the engine in a musical phrase and mixed against a reference arrangement, then gated on loudness, headroom, low end, top end, width, mono fold-down, tails, tuning, macro range, MOTION, velocity and CPU (`tools/lunatk_bank/build.py`).
+425 presets. Every one is rendered through the engine in a musical phrase and mixed against a reference arrangement, then gated on loudness, headroom, low end, top end, width, mono fold-down, tails, tuning, macro range, MOTION, velocity and CPU (`tools/lunatk_bank/build.py`).
 
 ## Macros (every preset)
 
@@ -82,7 +82,7 @@
 | **CRUSH LINE** | A root-octave bass: accents open the filter and bring in a crushed grindstone octave, so they hit harder without jumping in level | E0–E2 | FOREGROUND | Industrial pop, EBM, electro-rock | Root-octave eighths | Wheel: the octave layer comes all the way in, harder: the chorus version of the same line |
 | **BODY MACHINE** | The flagship industrial-pop bass: obsidian and grindstone tables moving against each other through a diode ladder loop, a punch that fights the kick without clicking | E0–E2 | FOREGROUND | Industrial pop, dark dance, electro-rock | Verse bass that becomes the chorus | Wheel: the grindstone opens, the fold and the loop dig in: a filthy chorus monster, still on pitch |
 
-## LEAD (74)
+## LEAD (75)
 
 | Preset | Role | Register | Layer | Contexts | Play | Sit it in a mix |
 |---|---|---|---|---|---|---|
@@ -102,6 +102,7 @@
 | **TENSION CABLE** | A slow, bowed metal voice that swells in with a ringing comb an octave up | C3–C5 | FOREGROUND | Film score, horror, ambient | Long notes that swell; let each one bloom | Slow attack: play early, or it lands late |
 | **ALARM ROOM** | A square alarm whose tritone ring switches on and off in eighths | C4–C6 | FOREGROUND | Industrial, horror, techno | Short, repeated figures | Dissonant by design: keep it to stabs and hooks, not the main melody |
 | **SPINE CRAWL** | A growling lead whose throat crawls through four shapes every half bar | C3–C5 | FOREGROUND | Industrial, bass music, EBM | Held notes; the growl moves in time | Mid-heavy growl: give it the space between vocal phrases |
+| **SQUARE HALO** | A plain analog square stacked across two octaves: square, a faint detuned square an octave up and a sine sub | C3–C6 | FOREGROUND | Synth-pop, dark pop, synthwave, darkwave | Lead melodies; an octave up for accents between vocal lines | No attack and a long release; each note rings out. SPACE up for more room |
 | **BROKEN NEON** | A chorus hook voice: a sync snap on every note, a thick centred saw and a slightly broken, crushed upper layer | C3–C5 | FOREGROUND | Dark pop, synth rock, alt-electronic | Hooks and chorus melodies | Not a supersaw: three voices, narrow; the width is the dimension stage, not detune |
 | **GLASS TEETH** | A smooth glass voice with a 45 ms metal bite hidden in the attack, and a dotted echo blooming behind it | C4–C6 | FOREGROUND | Dark pop, electronica, film | Melodies with space between notes | The bite is short enough to feel like articulation, not a click; the echo is high-passed |
 | **SIGNAL KNIFE** | A focused blade of upper-mid energy: pulse and saw through a band-pass blend, saturated, lifted at 2.2 kHz | C3–C5 | FOREGROUND | Industrial rock, alt-electronic, EBM | Riffs and hooks over loud drums | Cuts by focus, not brightness: the top octave is rolled off |

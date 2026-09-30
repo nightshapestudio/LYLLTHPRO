@@ -189,13 +189,15 @@ struct LYSynthEditor: View {
 
     private var header: some View {
         HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 5) {
                 LUNATKMark(size: 22)
+                // Under the name, not under the moon.
                 Text(trackName)
                     .font(LYLLTHTheme.label(7, weight: .bold))
                     .tracking(1.6)
                     .foregroundStyle(LYLLTHTheme.dim)
                     .lineLimit(1)
+                    .padding(.leading, LUNATKMark.nameInset(22))
             }
             .fixedSize()
 

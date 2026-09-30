@@ -912,9 +912,18 @@ struct LYTableBrowser: View {
 // MARK: - LUNATK mark
 
 /// LUNATK's mark: a crescent cut from a full moon, and the name in the
-/// NIGHTSHAPE outline face lit in moonlight. The one gradient LUNATK uses.
+/// NIGHTSHAPE outline face lit in moonlight. The crescent takes the colour the
+/// name ends on (the K's cyan), so it reads as a moon, not as a C before the L.
 struct LUNATKMark: View {
     var size: CGFloat = 26
+
+    /// Between the crescent and the name. The crescent opens toward the name,
+    /// so a small gap already reads as a wide one.
+    static func gap(_ size: CGFloat) -> CGFloat { size * 0.1 }
+
+    /// Where the name starts, from the crescent's left edge: for text set
+    /// under the name rather than under the moon.
+    static func nameInset(_ size: CGFloat) -> CGFloat { size + gap(size) }
 
     /// The cut's diameter, as a share of the moon's.
     private static let cutScale: CGFloat = 0.95
@@ -926,13 +935,17 @@ struct LUNATKMark: View {
         LinearGradient(colors: [LYLLTHTheme.chrome, LYLLTHTheme.lavender, LYLLTHTheme.teal], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
+    private var crescentLight: LinearGradient {
+        LinearGradient(colors: [Color(hex: 0x5ED8E0), LYLLTHTheme.teal], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
     var body: some View {
-        HStack(spacing: size * 0.35) {
+        HStack(spacing: Self.gap(size)) {
             // The NIGHTSHAPES crescent (Design/Icon/app-icon-moon.svg in that
             // game): a moon of radius R cut by a circle of 0.95 R whose centre
             // sits 0.25 R away, turned 15° clockwise.
             ZStack {
-                Circle().fill(moonlight)
+                Circle().fill(crescentLight)
                 Circle()
                     .fill(Color.black)
                     .frame(width: size * Self.cutScale, height: size * Self.cutScale)
@@ -941,7 +954,7 @@ struct LUNATKMark: View {
             }
             .compositingGroup()
             .frame(width: size, height: size)
-            .shadow(color: LYLLTHTheme.lavender.opacity(0.45), radius: 6)
+            .shadow(color: LYLLTHTheme.teal.opacity(0.45), radius: 6)
             Text("LUNATK")
                 .font(LYLLTHTheme.wordmark(size))
                 .tracking(size * 0.12)

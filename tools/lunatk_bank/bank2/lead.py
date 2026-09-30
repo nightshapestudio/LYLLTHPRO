@@ -374,4 +374,33 @@ def presets():
           "Mid-heavy growl: give it the space between vocal phrases")
     out.append(p)
 
+    p = L("SQUARE HALO", "BASIC", "BASIC")
+    # A plain analog square stack across two octaves: the square at the note,
+    # a second square an octave up a few cents sharp, and a sine sub an
+    # octave down. The upper square stays quiet: a square is odd harmonics
+    # only, and an octave-up square fills in the even ones (a sawtooth's);
+    # a square sub would too. No attack, a 1.8 s release, a static low-pass with a
+    # little drive, a touch of plate. Nothing moves.
+    p.osc(0, level=0.62, wt=1.0)
+    p.osc(1, level=0.1, wt=1.0, octave=1, fine=6)
+    # The sub sits an octave under the melody, right in the low mids for a
+    # C4-C5 line: kept low, and the high-pass clears the mud under it.
+    p.sub(0.1, "SINE", octave=1, filtered=True)
+    p.filter("LP24", hz=7000, res=0.1, keytrack=0.3, env=0.0, drive=0.3)
+    p.filter2("HP12", hz=200)
+    p.env(1, a=0.0, d=0.1, s=1.0, r=1.8)
+    p.voice(voices=6, glide=0.0, vel=0.4, bend=2)
+    velocity(p, 0.65, 0.08)
+    vibrato(p)
+    p.tone("CUTOFF", 0.2)
+    p.set("macro2", 0.0)
+    space(p, 0.1, mode="PLATE", decay=0.25)
+    grit(p, mode="TUBE", drive=0.35, tone=0.5, amount=0.35, base=0.0)
+    # A plain square on purpose: clean (one source of character) and still.
+    p.context(still=True, clean=True)
+    p.doc("A plain analog square stacked across two octaves: square, a faint detuned square an octave up and a sine sub",
+          "C3–C6", "Synth-pop, dark pop, synthwave, darkwave", "Lead melodies; an octave up for accents between vocal lines",
+          "FOREGROUND", "No attack and a long release; each note rings out. SPACE up for more room")
+    out.append(p)
+
     return out
