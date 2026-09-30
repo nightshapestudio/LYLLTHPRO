@@ -255,6 +255,11 @@ struct LYFXWindowHost: View {
             return AnyView(FlangerWindowView(targetName: targetName, state: rack.flanger ?? .neutral, bpm: bpm, isEngaged: engaged, isPlaying: isPlaying,
                                              onStateChange: { state in update(.flanger) { $0.flanger = state } }, onToggleEngaged: toggle(.flanger),
                                              onTransportTap: transportTap, onCancel: cancel, onDone: done))
+        case .phaser:
+            return AnyView(PhaserWindowView(targetName: targetName, state: rack.phaser ?? .neutral, bpm: bpm, isEngaged: engaged, isPlaying: isPlaying,
+                                            meter: { [engineIndex] in engine.phaserMeter(trackIndex: engineIndex) },
+                                            onStateChange: { state in update(.phaser) { $0.phaser = state } }, onToggleEngaged: toggle(.phaser),
+                                            onTransportTap: transportTap, onCancel: cancel, onDone: done))
         case .chorus:
             return AnyView(ChorusWindowView(targetName: targetName, state: rack.chorus ?? .neutral, isEngaged: engaged, isPlaying: isPlaying,
                                             onStateChange: { state in update(.chorus) { $0.chorus = state } }, onToggleEngaged: toggle(.chorus),

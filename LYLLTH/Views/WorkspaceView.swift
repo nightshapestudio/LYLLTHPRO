@@ -3157,6 +3157,7 @@ private struct LYNightshapeEffect: Hashable {
         .init(name: "SPLIT FIELD", detail: "WIDTH · MONO", category: "SPACE", accent: .teal),
         .init(name: "CHORUS", detail: "RATE · WIDTH", category: "MOTION", accent: .indigo),
         .init(name: "FLANGER", detail: "SWEEP · FEEDBACK", category: "MOTION", accent: .indigo),
+        .init(name: "PHASER", detail: "STAGES · SWIRL", category: "MOTION", accent: .purple),
         .init(name: "SONIC DECIMATOR", detail: "DESTROY · CRUSH", category: "DESTRUCTION", accent: .purple),
         .init(name: "FRACTURE", detail: "GLITCH · STUTTER", category: "DESTRUCTION", accent: .purple),
         .init(name: "DEADLOCK", detail: "CRUSH · CRUNCH", category: "DESTRUCTION", accent: .purple),
