@@ -377,14 +377,14 @@ def presets():
     p = L("SQUARE HALO", "BASIC", "BASIC")
     # A plain analog square stack across two octaves: the square at the note,
     # a second square an octave up a few cents sharp, and a square sub an
-    # octave down. No attack, a short release, a static low-pass with a
+    # octave down. No attack, a 0.9 s release, a static low-pass with a
     # little drive, a touch of plate. Nothing moves.
     p.osc(0, level=0.62, wt=1.0)
     p.osc(1, level=0.34, wt=1.0, octave=1, fine=6)
     p.sub(0.4, "SQUARE", octave=1, filtered=True)
     p.filter("LP24", hz=7000, res=0.1, keytrack=0.3, env=0.0, drive=0.3)
     p.filter2("HP12", hz=60)
-    p.env(1, a=0.0, d=0.1, s=1.0, r=0.25)
+    p.env(1, a=0.0, d=0.1, s=1.0, r=0.9)
     p.voice(voices=6, glide=0.0, vel=0.4, bend=2)
     velocity(p, 0.65, 0.08)
     vibrato(p)
@@ -396,7 +396,7 @@ def presets():
     p.context(still=True, clean=True)
     p.doc("A plain analog square stacked across two octaves: square, a detuned square an octave up and a square sub",
           "C3–C6", "Synth-pop, dark pop, synthwave, darkwave", "Lead melodies; an octave up for accents between vocal lines",
-          "FOREGROUND", "No attack and a short release: it speaks on the beat. SPACE up for more room")
+          "FOREGROUND", "No attack; each note rings out for most of a second. SPACE up for more room")
     out.append(p)
 
     return out

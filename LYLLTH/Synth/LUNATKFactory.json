@@ -11649,7 +11649,7 @@
     "genres": "Synth-pop, dark pop, synthwave, darkwave",
     "playing": "Lead melodies; an octave up for accents between vocal lines",
     "layer": "FOREGROUND",
-    "mix": "No attack and a short release: it speaks on the beat. SPACE up for more room"
+    "mix": "No attack; each note rings out for most of a second. SPACE up for more room"
    },
    "patch": {
     "name": "SQUARE HALO",
@@ -11676,7 +11676,7 @@
      "dist.tone": 0.5,
      "env1.a": 0.0,
      "env1.d": 0.535,
-     "env1.r": 0.62752,
+     "env1.r": 0.75686,
      "env1.s": 1.0,
      "filter.cutoff": 0.84802,
      "filter.drive": 0.3,
@@ -11701,7 +11701,7 @@
      "macro2": 0.0,
      "macro3": 0.5,
      "macro4": 0.0,
-     "master": 0.2462,
+     "master": 0.228,
      "mx0.amt": 0.08,
      "mx0.aux": 0.0,
      "mx0.bi": 0.0,
