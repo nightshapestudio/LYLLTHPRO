@@ -166,7 +166,8 @@ enum {
     LY_MATRIX_BASE,
 };
 
-enum { LY_MATRIX_SLOTS = 32, LY_MATRIX_STRIDE = 6 };
+enum { LY_LEGACY_MATRIX_SLOTS = 32, LY_MATRIX_SLOTS = 64, LY_MATRIX_STRIDE = 6 };
+enum { LY_FX_ROUTE_SLOTS = 15 };
 // Offsets inside one matrix slot.
 enum {
     LY_MX_SOURCE = 0,
@@ -176,9 +177,9 @@ enum {
     LY_MX_CURVE,        // -1…1, bends the source's response
     LY_MX_BIPOLAR,      // 0/1: a 0…1 source swings -1…1 instead
 };
-enum { LY_LFO_POINTS = 32 };
+enum { LY_LEGACY_LFO_COUNT = 4, LY_LFO_COUNT = 10, LY_LFO_POINTS = 32 };
 /// Drawn LFO shapes: 4 × LY_LFO_POINTS values, -1…1, after the matrix.
-enum { LY_LFO_POINTS_BASE = LY_MATRIX_BASE + LY_MATRIX_SLOTS * LY_MATRIX_STRIDE };
+enum { LY_LFO_POINTS_BASE = LY_MATRIX_BASE + LY_LEGACY_MATRIX_SLOTS * LY_MATRIX_STRIDE };
 
 // Added later. Everything from here on sits after the drawn LFO points so the
 // ids above (the plug-ins' host parameter addresses) never move.
@@ -287,9 +288,46 @@ enum {
     LY_DEC_STEP_ON_BASE,
     LY_DEC_STEP_X_BASE = LY_DEC_STEP_ON_BASE + 16,
     LY_DEC_STEP_Y_BASE = LY_DEC_STEP_X_BASE + 16,
-    LY_PARAM_COUNT = LY_DEC_STEP_Y_BASE + 16
+    // Appended so every existing plug-in host parameter address stays stable.
+    LY_RENDER_QUALITY = LY_DEC_STEP_Y_BASE + 16,
+
+    // LFOs 5–10. The first four remain in their original parameter range.
+    LY_EXTRA_LFO_BASE,
+    LY_EXTRA_LFO_POINTS_BASE = LY_EXTRA_LFO_BASE + (LY_LFO_COUNT - LY_LEGACY_LFO_COUNT) * LY_LFO_STRIDE,
+
+    // One curve per custom-LFO segment. Zero preserves the original cosine
+    // interpolation; negative and positive values bend the segment either way.
+    LY_LFO_CURVES_BASE = LY_EXTRA_LFO_POINTS_BASE + (LY_LFO_COUNT - LY_LEGACY_LFO_COUNT) * LY_LFO_POINTS,
+
+    // Matrix slots 33–64. Slots 1–32 retain their original addresses.
+    LY_EXTRA_MATRIX_BASE = LY_LFO_CURVES_BASE + LY_LFO_COUNT * LY_LFO_POINTS,
+
+    // Rack places 12–15, followed by a MAIN / AUX A / AUX B assignment for
+    // every processor. The original eleven order addresses stay untouched.
+    LY_FX_ORDER_EXTRA_BASE = LY_EXTRA_MATRIX_BASE + (LY_MATRIX_SLOTS - LY_LEGACY_MATRIX_SLOTS) * LY_MATRIX_STRIDE,
+    LY_FX_ROUTE_BASE = LY_FX_ORDER_EXTRA_BASE + 4,
+    LY_AUX_A_RETURN = LY_FX_ROUTE_BASE + LY_FX_ROUTE_SLOTS,
+    LY_AUX_B_RETURN,
+
+    // Additional rack processors.
+    LY_BODE_ON, LY_BODE_SHIFT, LY_BODE_FEEDBACK, LY_BODE_MIX,
+    LY_CONV_ON, LY_CONV_SIZE, LY_CONV_TONE, LY_CONV_MIX,
+    LY_SPLIT_ON, LY_SPLIT_LOW_X, LY_SPLIT_HIGH_X, LY_SPLIT_LOW, LY_SPLIT_MID, LY_SPLIT_HIGH, LY_SPLIT_MIX,
+    LY_UTIL_ON, LY_UTIL_GAIN, LY_UTIL_PAN, LY_UTIL_WIDTH, LY_UTIL_DC,
+
+    // Each oscillator can reinterpret its loaded material without changing
+    // the original wavetable controls or saved-patch addresses.
+    LY_OSC_ENGINE_A, LY_OSC_ENGINE_B,
+    LY_SAMPLE_ROOT_A, LY_SAMPLE_ROOT_B,
+    LY_SAMPLE_LOOP_A, LY_SAMPLE_LOOP_B,
+    LY_GRAIN_SIZE_A, LY_GRAIN_SIZE_B,
+    LY_GRAIN_DENSITY_A, LY_GRAIN_DENSITY_B,
+    LY_GRAIN_SPRAY_A, LY_GRAIN_SPRAY_B,
+    LY_SPECTRAL_TILT_A, LY_SPECTRAL_TILT_B,
+    LY_PARAM_COUNT
 };
 enum { LY_DEC_STEPS = 16 };
+enum { LY_QUALITY_DRAFT = 0, LY_QUALITY_HIGH, LY_QUALITY_ULTRA, LY_QUALITY_COUNT };
 enum { LY_DECOFF_DRY = 0, LY_DECOFF_HOLD, LY_DECOFF_COUNT };
 enum { LY_PRIORITY_LAST = 0, LY_PRIORITY_LOW, LY_PRIORITY_HIGH, LY_PRIORITY_COUNT };
 enum { LY_ARP_PATTERN_STEPS = 16 };
@@ -346,8 +384,12 @@ enum { LY_ARP_UP = 0, LY_ARP_DOWN, LY_ARP_UPDOWN, LY_ARP_PLAYED, LY_ARP_RANDOM, 
 
 enum {
     LY_FX_HYPER = 0, LY_FX_DIST, LY_FX_FLANGER, LY_FX_PHASER, LY_FX_CHORUS,
-    LY_FX_DELAY, LY_FX_COMP, LY_FX_EQ, LY_FX_FILTER, LY_FX_REVERB, LY_FX_DECIM, LY_FX_COUNT
+    LY_FX_DELAY, LY_FX_COMP, LY_FX_EQ, LY_FX_FILTER, LY_FX_REVERB, LY_FX_DECIM,
+    LY_FX_BODE, LY_FX_CONV, LY_FX_SPLITTER, LY_FX_UTILITY, LY_FX_COUNT
 };
+enum { LY_FX_ROUTE_MAIN = 0, LY_FX_ROUTE_A, LY_FX_ROUTE_B, LY_FX_ROUTE_COUNT };
+enum { LY_OSC_ENGINE_WAVETABLE = 0, LY_OSC_ENGINE_SAMPLE, LY_OSC_ENGINE_MULTISAMPLE,
+       LY_OSC_ENGINE_GRANULAR, LY_OSC_ENGINE_SPECTRAL, LY_OSC_ENGINE_COUNT };
 
 enum {
     LY_DIST_TUBE = 0, LY_DIST_SOFT, LY_DIST_HARD, LY_DIST_DIODE, LY_DIST_LINFOLD, LY_DIST_SINFOLD,
@@ -368,6 +410,7 @@ enum {
     LY_SRC_ENV4,
     LY_SRC_MACRO5, LY_SRC_MACRO6, LY_SRC_MACRO7, LY_SRC_MACRO8,
     LY_SRC_PERF1, LY_SRC_PERF2, LY_SRC_TRACK1, LY_SRC_TRACK2,
+    LY_SRC_LFO5, LY_SRC_LFO6, LY_SRC_LFO7, LY_SRC_LFO8, LY_SRC_LFO9, LY_SRC_LFO10,
     LY_SRC_COUNT
 };
 
@@ -402,6 +445,7 @@ enum {
     LY_DST_FSAT_DRIVE, LY_DST_VOC_MIX, LY_DST_VOC_SHIFT,
     LY_DST_MORPH, LY_DST_F2_MORPH,
     LY_DST_DEC_DESTROY, LY_DST_DEC_CRUSH, LY_DST_DEC_MIX,
+    LY_DST_LFO5_RATE, LY_DST_LFO6_RATE, LY_DST_LFO7_RATE, LY_DST_LFO8_RATE, LY_DST_LFO9_RATE, LY_DST_LFO10_RATE,
     LY_DST_COUNT
 };
 
@@ -420,8 +464,8 @@ typedef struct {
     int activeVoices;
     float wavetablePosition[2];   // modulated, of the newest voice
     float envelope[4];            // current level of the newest voice
-    float lfo[4];                 // -1…1
-    float lfoPhase[4];            // 0…1
+    float lfo[LY_LFO_COUNT];      // -1…1
+    float lfoPhase[LY_LFO_COUNT]; // 0…1
     float cutoffHz;               // modulated, of the newest voice
     float cutoff2Hz;              // second filter
     float compGain[3];            // compressor gain change per band, dB (single band uses [1])

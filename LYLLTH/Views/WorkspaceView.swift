@@ -279,6 +279,7 @@ struct WorkspaceView: View {
     /// The note clip open in the piano roll: (track, clip).
     @State private var pianoRollClip: (track: UUID, clip: UUID)?
     @State private var sirenClip: (track: UUID, clip: UUID)?
+    @State private var compClip: (track: UUID, clip: UUID)?
     @State private var drumTrackID: UUID?
     /// The DRUM SYNTH page is open; `drumTrackID` is where LOAD puts sounds.
     @State private var drumSynthOpen = false
@@ -455,6 +456,8 @@ struct WorkspaceView: View {
                     .zIndex(windowStack.zIndex("pianoroll"))
                 sirenOverlay
                     .zIndex(windowStack.zIndex("siren"))
+                takeCompOverlay
+                    .zIndex(windowStack.zIndex("takecomp"))
 
                 musicalTypingOverlay
                     .zIndex(windowStack.zIndex("typing"))
@@ -691,6 +694,10 @@ struct WorkspaceView: View {
                 selectedTrackID = trackID
                 withAnimation(LYLLTHTheme.settle) { sirenClip = (trackID, clipID) }
             },
+            openTakeComp: { trackID, clipID in
+                selectedTrackID = trackID
+                withAnimation(LYLLTHTheme.settle) { compClip = (trackID, clipID) }
+            },
             openAutomationMenu: { trackID, laneID in
                 presentMenu(.automation(trackID, laneID), from: laneID.map { "auto.\($0)" } ?? "auto.add.\(trackID)")
             },
@@ -707,7 +714,7 @@ struct WorkspaceView: View {
             acceptsRightClicks: {
                 // Nothing floating over the arrangement.
                 activeMenu == nil && fxRequest == nil && fxPickerTarget == nil && synthTrackID == nil
-                    && pianoRollClip == nil && sirenClip == nil && !drumSynthOpen
+                    && pianoRollClip == nil && sirenClip == nil && compClip == nil && !drumSynthOpen
                     && audioUnits.editor == nil && recoveryCandidate == nil && !showTyping
             },
             stepSound: { stepSound($0, by: $1) },
@@ -1214,7 +1221,35 @@ struct WorkspaceView: View {
 
                 var clip = document.session.tracks[firstTrackIndex].clips[firstClipIndex]
                 configureRecordedTakes(&clip, imported: imported, settings: settings)
-                document.session.tracks[firstTrackIndex].clips[firstClipIndex] = clip
+                let foldsIntoTakeFolder = settings.loopTakes
+                    && (document.session.isLoopActive || settings.punchRange != nil)
+                let existingIndex = foldsIntoTakeFolder
+                    ? document.session.tracks[firstTrackIndex].clips.indices.first { index in
+                        guard index != firstClipIndex else { return false }
+                        let existing = document.session.tracks[firstTrackIndex].clips[index]
+                        return existing.kind == .audio
+                            && (existing.takes?.isEmpty == false)
+                            && abs(existing.startBeat - clip.startBeat) < 0.001
+                            && abs(existing.lengthBeats - clip.lengthBeats) < 0.001
+                    }
+                    : nil
+                if let existingIndex {
+                    let merged = LYTakeLaneEditor.append(
+                        recorded: clip,
+                        to: document.session.tracks[firstTrackIndex].clips[existingIndex]
+                    )
+                    document.session.tracks[firstTrackIndex].clips[existingIndex] = merged
+                    document.session.tracks[firstTrackIndex].clips.remove(at: firstClipIndex)
+                    selectedTrackID = firstTrack
+                    compClip = (firstTrack, merged.id)
+                    notice = "ADDED TAKE " + String(format: "%02d", merged.takes?.count ?? 1)
+                } else {
+                    document.session.tracks[firstTrackIndex].clips[firstClipIndex] = clip
+                    if (clip.takes?.count ?? 0) > 1 {
+                        selectedTrackID = firstTrack
+                        compClip = (firstTrack, clip.id)
+                    }
+                }
                 return true
         } catch {
             audioImportError = error.localizedDescription
@@ -1261,11 +1296,19 @@ struct WorkspaceView: View {
         let count = settings.loopTakes ? max(1, Int(imported.duration / max(takeSeconds, 0.001))) : 1
         let path = clip.sourceRelativePath ?? imported.fileName
         clip.takes = (0..<count).map { index in
-            LYAudioTake(
+            let startSeconds = Double(index) * takeSeconds
+            let durationSeconds = min(takeSeconds, max(0.001, imported.duration - startSeconds))
+            return LYAudioTake(
                 name: "TAKE " + String(format: "%02d", index + 1),
                 sourceRelativePath: path,
-                sourceStartSeconds: Double(index) * takeSeconds,
-                durationSeconds: min(takeSeconds, max(0.001, imported.duration - Double(index) * takeSeconds))
+                sourceStartSeconds: startSeconds,
+                durationSeconds: durationSeconds,
+                waveformPeaks: takeWaveform(
+                    imported.waveformPeaks,
+                    startSeconds: startSeconds,
+                    durationSeconds: durationSeconds,
+                    fileDurationSeconds: imported.duration
+                )
             )
         }
         if let active = clip.takes?.last {
@@ -1285,6 +1328,18 @@ struct WorkspaceView: View {
             [LYCompSegment(startBeat: 0, lengthBeats: clip.lengthBeats, takeID: $0)]
         }
         clip.normalizeAudioEvent()
+    }
+
+    private func takeWaveform(
+        _ peaks: [Float],
+        startSeconds: Double,
+        durationSeconds: Double,
+        fileDurationSeconds: Double
+    ) -> [Float] {
+        guard !peaks.isEmpty, fileDurationSeconds > 0 else { return [] }
+        let start = min(max(Int((startSeconds / fileDurationSeconds) * Double(peaks.count)), 0), peaks.count - 1)
+        let end = min(max(Int(ceil(((startSeconds + durationSeconds) / fileDurationSeconds) * Double(peaks.count))), start + 1), peaks.count)
+        return Array(peaks[start..<end])
     }
 
     /// LUNATK or DRUM SYNTH clicked in the library: open it on the
@@ -1309,8 +1364,40 @@ struct WorkspaceView: View {
                 addTrack(kind: .drumkit)
                 if let id = selectedTrackID { openDrums(id) }
             }
+        case "SIREN":
+            openLatestVocalTool(wantsComp: false)
+        case "TAKE COMP":
+            openLatestVocalTool(wantsComp: true)
         default:
             break
+        }
+    }
+
+    private func openLatestVocalTool(wantsComp: Bool) {
+        let preferred = document.session.tracks.first { $0.id == selectedTrackID && $0.kind == .audio }
+        let track = preferred ?? document.session.tracks.first { track in
+            track.kind == .audio && track.clips.contains(where: { $0.kind == .audio })
+        }
+        guard let track else {
+            activeWorkspace = "SONG"
+            notice = "RECORD OR SELECT AN AUDIO EVENT FIRST"
+            return
+        }
+        let candidates = track.clips.filter { $0.kind == .audio }
+        let clip = wantsComp
+            ? candidates.last(where: { ($0.takes?.count ?? 0) > 1 })
+            : candidates.last
+        guard let clip else {
+            activeWorkspace = "SONG"
+            selectedTrackID = track.id
+            notice = wantsComp ? "RECORD AT LEAST TWO TAKES FIRST" : "SELECT AN AUDIO EVENT, THEN OPEN SIREN"
+            return
+        }
+        activeWorkspace = "SONG"
+        selectedTrackID = track.id
+        withAnimation(LYLLTHTheme.settle) {
+            if wantsComp { compClip = (track.id, clip.id) }
+            else { sirenClip = (track.id, clip.id) }
         }
     }
 
@@ -1502,6 +1589,47 @@ struct WorkspaceView: View {
                             songBeat: { [audio] in audio.isPlaying && audio.transportMode == .song ? audio.currentSongBeat() : nil }
                         ),
                         accent: accent
+                    )
+                }
+                .transition(.scale(scale: 0.97).combined(with: .opacity))
+            }
+        }
+    }
+
+    /// Logic-style take folder editor for one recorded audio event. The comp
+    /// remains part of the source event and is resolved before channel FX.
+    @ViewBuilder
+    private var takeCompOverlay: some View {
+        if let ref = compClip,
+           let trackIndex = document.session.tracks.firstIndex(where: { $0.id == ref.track }),
+           let clipIndex = document.session.tracks[trackIndex].clips.firstIndex(where: { $0.id == ref.clip }),
+           (document.session.tracks[trackIndex].clips[clipIndex].takes?.count ?? 0) > 1 {
+            let track = document.session.tracks[trackIndex]
+            let clip = track.clips[clipIndex]
+            let close = { withAnimation(LYLLTHTheme.snap) { compClip = nil } }
+            let position = document.session.tracks.firstIndex { $0.id == track.id } ?? 0
+            let accent = LYLLTHTheme.trackAccent(position: position)
+            GeometryReader { geo in
+                LYFloatingWindow(
+                    id: "takecomp",
+                    title: "TAKE FOLDER  ·  " + track.name + "  ·  " + clip.name.uppercased(),
+                    accent: accent,
+                    size: CGSize(width: min(geo.size.width - 32, 1080), height: min(geo.size.height - 56, 680)),
+                    close: close
+                ) {
+                    LYTakeLanePanel(
+                        clip: Binding(
+                            get: {
+                                document.session.tracks.first { $0.id == ref.track }?.clips.first { $0.id == ref.clip } ?? clip
+                            },
+                            set: { edited in
+                                guard let t = document.session.tracks.firstIndex(where: { $0.id == ref.track }),
+                                      let c = document.session.tracks[t].clips.firstIndex(where: { $0.id == ref.clip }) else { return }
+                                document.session.tracks[t].clips[c] = edited
+                            }
+                        ),
+                        close: close,
+                        showsHeader: false
                     )
                 }
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
@@ -2064,6 +2192,9 @@ struct WorkspaceView: View {
                     }
                 case .addTrack:
                     AddTrackPanel(
+                        selectedTrack: selectedTrackID.flatMap { id in
+                            document.session.tracks.first { $0.id == id }
+                        },
                         add: { kind in
                             addTrack(kind: kind)
                             dismissMenu()
@@ -2092,6 +2223,7 @@ struct WorkspaceView: View {
                             )
                             dismissMenu()
                         },
+                        deleteSelected: deleteSelectedTrack,
                         close: dismissMenu
                     )
                 case .export:
@@ -2193,6 +2325,43 @@ struct WorkspaceView: View {
         }
         selectedTrackID = track.id
         audio.syncSequencer(document.session)
+    }
+
+    private func deleteSelectedTrack() {
+        guard !recorder.isActive else {
+            notice = "STOP RECORDING BEFORE DELETING A TRACK"
+            dismissMenu()
+            return
+        }
+        guard let trackID = selectedTrackID,
+              let index = document.session.tracks.firstIndex(where: { $0.id == trackID }) else {
+            dismissMenu()
+            return
+        }
+
+        let trackName = document.session.tracks[index].name
+        let nextSelection: UUID? = {
+            if document.session.tracks.indices.contains(index + 1) {
+                return document.session.tracks[index + 1].id
+            }
+            if index > 0 { return document.session.tracks[index - 1].id }
+            return nil
+        }()
+
+        if fxRequest?.target == .track(trackID) { fxRequest = nil }
+        if fxPickerTarget == .track(trackID) { fxPickerTarget = nil; fxPickerSlot = nil }
+        if synthTrackID == trackID { synthTrackID = nil }
+        if pianoRollClip?.track == trackID { pianoRollClip = nil }
+        if sirenClip?.track == trackID { sirenClip = nil }
+        if compClip?.track == trackID { compClip = nil }
+        if drumTrackID == trackID { drumTrackID = nil; drumSynthOpen = false }
+
+        _ = document.session.removeTrack(id: trackID)
+        selectedTrackID = nextSelection
+        dismissMenu()
+        notice = trackName.uppercased() + " DELETED  ·  COMMAND-Z TO UNDO"
+        audio.syncSequencer(document.session)
+        audio.syncTimeline(document.session, media: document.audioMediaStore)
     }
 }
 
@@ -2719,9 +2888,11 @@ private struct KeyModeButton: View {
 }
 
 private struct AddTrackPanel: View {
+    let selectedTrack: LYTrack?
     let add: (LYTrackKind) -> Void
     let addFolder: () -> Void
     let addGroup: () -> Void
+    let deleteSelected: () -> Void
     let close: () -> Void
 
     var body: some View {
@@ -2777,6 +2948,18 @@ private struct AddTrackPanel: View {
                     accent: LYLLTHTheme.purple,
                     action: addGroup
                 )
+                if let selectedTrack {
+                    LYNightshapeMenuDivider()
+                        .padding(.vertical, 3)
+                    LYNightshapeMenuRow(
+                        icon: "trash",
+                        title: "DELETE " + selectedTrack.name,
+                        detail: "REMOVES THE TRACK + ITS REGIONS · COMMAND-Z TO UNDO",
+                        accent: LYLLTHTheme.record,
+                        action: deleteSelected
+                    )
+                    .help("Delete the selected track and all regions on it")
+                }
             }
             .padding(14)
         }
@@ -3321,6 +3504,14 @@ private struct BrowserPanel: View {
                     .simultaneousGesture(TapGesture().onEnded { onSound(name) })
                     .help(name == "LUNATK" ? "Open LUNATK on the selected synth track" : "Browse DrumKit drum sounds for the selected drum track")
             }
+            section("VOCAL")
+            ForEach(filter(["SIREN", "TAKE COMP"]), id: \.self) { name in
+                row(name, detail: soundDetail(name), color: LYLLTHTheme.purple, symbol: soundSymbol(name))
+                    .simultaneousGesture(TapGesture().onEnded { onSound(name) })
+                    .help(name == "SIREN"
+                          ? "Pitch-correct, time and align the latest event on the selected audio track"
+                          : "Open the take folder and build a composite from its recordings")
+            }
             ForEach(categories, id: \.self) { category in
                 let effects = LYNightshapeEffect.all.filter { $0.category == category && matches($0.name) }
                 if !effects.isEmpty {
@@ -3439,6 +3630,8 @@ private struct BrowserPanel: View {
         switch name {
         case "LUNATK": return "WAVETABLE SYNTH · OPEN"
         case "DRUM SYNTH": return "\(LYDrumSounds.presets.count) DRUMKIT SOUNDS · OPEN"
+        case "SIREN": return "PITCH · TIME · ALIGN"
+        case "TAKE COMP": return "TAKE FOLDER · BEST-OF EDIT"
         case "SOUND ORACLE": return "DESCRIBE A SOUND"
         default: return "KEY-AWARE CHORD LANES"
         }
@@ -3448,6 +3641,8 @@ private struct BrowserPanel: View {
         switch name {
         case "LUNATK": return "pianokeys"
         case "DRUM SYNTH": return "waveform.path"
+        case "SIREN": return "waveform.path.ecg"
+        case "TAKE COMP": return "square.stack.3d.up"
         case "SOUND ORACLE": return "wand.and.stars"
         default: return "pianokeys"
         }

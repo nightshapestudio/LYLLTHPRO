@@ -1,5 +1,15 @@
 import AVFoundation
 import Foundation
+import Accelerate
+
+enum LYWavetableImportMode: String, CaseIterable, Identifiable {
+    case automatic = "AUTO"
+    case fixedFrames = "FIXED FRAMES"
+    case pitchCycles = "PITCH CYCLES"
+    case spectral = "SPECTRAL"
+
+    var id: String { rawValue }
+}
 
 // MARK: - Wavetables
 
@@ -86,24 +96,131 @@ final class LYWavetableLibrary: ObservableObject {
     /// A Serum-layout file becomes its frames exactly. Anything else is
     /// treated as audio: 64 frames taken evenly through it, so a vocal or a
     /// drum loop turns into a scannable table.
-    static func importFrames(from url: URL) throws -> [Float] {
+    static func importFrames(from url: URL, mode: LYWavetableImportMode = .automatic,
+                             frameCount requestedFrames: Int = 64) throws -> [Float] {
         let samples = try decodeMono(from: url)
         guard !samples.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
-        if samples.count % frameSize == 0, samples.count / frameSize <= Int(LY_WT_MAX_FRAMES) {
+        let frameCount = min(max(requestedFrames, 1), Int(LY_WT_MAX_FRAMES))
+        if mode == .automatic, samples.count % frameSize == 0,
+           samples.count / frameSize <= Int(LY_WT_MAX_FRAMES) {
             return samples
         }
-        if samples.count <= frameSize * 2 {
+        if mode == .automatic, samples.count <= frameSize * 2 {
             return resample(samples, to: frameSize)
         }
-        let frameCount = 64
+
+        switch mode {
+        case .automatic:
+            if let cycles = pitchCycleFrames(samples, limit: frameCount), cycles.count >= 4 * frameSize {
+                return cycles
+            }
+            return spectralFrames(samples, count: frameCount)
+        case .fixedFrames:
+            return fixedFrames(samples, count: frameCount)
+        case .pitchCycles:
+            guard let cycles = pitchCycleFrames(samples, limit: frameCount) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            return cycles
+        case .spectral:
+            return spectralFrames(samples, count: frameCount)
+        }
+    }
+
+    private static func fixedFrames(_ samples: [Float], count: Int) -> [Float] {
         var frames: [Float] = []
-        frames.reserveCapacity(frameCount * frameSize)
-        let span = samples.count - frameSize
-        for f in 0..<frameCount {
-            let start = span * f / max(frameCount - 1, 1)
-            frames.append(contentsOf: samples[start..<(start + frameSize)])
+        frames.reserveCapacity(count * frameSize)
+        for frame in 0..<count {
+            let start = samples.count * frame / count
+            let end = max(start + 1, samples.count * (frame + 1) / count)
+            frames.append(contentsOf: resample(Array(samples[start..<min(end, samples.count)]), to: frameSize))
         }
         return frames
+    }
+
+    /// Pulls complete, phase-aligned cycles from pitched audio. The period is
+    /// found by normalized autocorrelation; weak/noisy material deliberately
+    /// fails so AUTO can fall back to spectral resynthesis.
+    private static func pitchCycleFrames(_ samples: [Float], limit: Int) -> [Float]? {
+        let analysisCount = min(samples.count, 16_384)
+        guard analysisCount >= 256 else { return nil }
+        var analysis = Array(samples.prefix(analysisCount))
+        let mean = analysis.reduce(0, +) / Float(analysis.count)
+        for i in analysis.indices { analysis[i] -= mean }
+        let maxLag = min(frameSize, analysis.count / 3)
+        var bestLag = 0, bestScore: Float = 0
+        for lag in 32...maxLag {
+            var cross: Float = 0, a2: Float = 0, b2: Float = 0
+            let count = analysis.count - lag
+            vDSP_dotpr(analysis, 1, Array(analysis[lag...]), 1, &cross, vDSP_Length(count))
+            vDSP_svesq(analysis, 1, &a2, vDSP_Length(count))
+            Array(analysis[lag...]).withUnsafeBufferPointer { p in
+                vDSP_svesq(p.baseAddress!, 1, &b2, vDSP_Length(count))
+            }
+            let score = cross / max(sqrt(a2 * b2), 0.000_001)
+            if score > bestScore { bestScore = score; bestLag = lag }
+        }
+        guard bestLag > 0, bestScore > 0.35 else { return nil }
+
+        var start = 1
+        let searchEnd = min(samples.count - 1, bestLag * 2)
+        if searchEnd > 1 {
+            for i in 1..<searchEnd where samples[i - 1] <= mean && samples[i] > mean { start = i; break }
+        }
+        let available = max(0, (samples.count - start) / bestLag)
+        let count = min(limit, available)
+        guard count > 0 else { return nil }
+        var result: [Float] = []
+        result.reserveCapacity(count * frameSize)
+        for frame in 0..<count {
+            let lo = start + frame * bestLag
+            result.append(contentsOf: resample(Array(samples[lo..<(lo + bestLag)]), to: frameSize))
+        }
+        return phaseAligned(result)
+    }
+
+    /// Converts arbitrary audio windows into periodic, phase-coherent frames.
+    /// Magnitudes come from each window while phases are reset, preventing the
+    /// discontinuities and random phase cancellation of a raw slice import.
+    private static func spectralFrames(_ samples: [Float], count: Int) -> [Float] {
+        let windowLength = min(max(frameSize, samples.count / max(count, 1)), min(samples.count, frameSize * 4))
+        var hann = [Float](repeating: 0, count: windowLength)
+        vDSP_hann_window(&hann, vDSP_Length(windowLength), Int32(vDSP_HANN_NORM))
+        let span = max(samples.count - windowLength, 0)
+        var result: [Float] = []
+        result.reserveCapacity(count * frameSize)
+        for frame in 0..<count {
+            let start = span * frame / max(count - 1, 1)
+            let windowed = zip(samples[start..<(start + windowLength)], hann).map(*)
+            let periodic = resample(windowed, to: frameSize)
+            var spectrum = LYWavetableEditor.spectrum(periodic)
+            spectrum.phases = spectrum.phases.map { _ in -.pi / 2 }
+            result.append(contentsOf: normalized(LYWavetableEditor.synthesize(spectrum)))
+        }
+        return phaseAligned(result)
+    }
+
+    private static func normalized(_ frame: [Float]) -> [Float] {
+        let peak = max(frame.map(abs).max() ?? 0, 0.000_001)
+        return frame.map { $0 / peak }
+    }
+
+    /// Rotates each frame to the offset most correlated with its predecessor.
+    static func phaseAligned(_ flatFrames: [Float]) -> [Float] {
+        let count = flatFrames.count / frameSize
+        guard count > 1 else { return flatFrames }
+        var frames = (0..<count).map { Array(flatFrames[($0 * frameSize)..<(($0 + 1) * frameSize)]) }
+        for f in 1..<frames.count {
+            let previous = frames[f - 1], current = frames[f]
+            var bestOffset = 0, bestScore = -Float.greatestFiniteMagnitude
+            for offset in stride(from: 0, to: frameSize, by: 8) {
+                var score: Float = 0
+                for i in stride(from: 0, to: frameSize, by: 8) { score += previous[i] * current[(i + offset) % frameSize] }
+                if score > bestScore { bestScore = score; bestOffset = offset }
+            }
+            frames[f] = (0..<frameSize).map { current[($0 + bestOffset) % frameSize] }
+        }
+        return frames.flatMap { $0 }
     }
 
     private static func decodeFrames(from url: URL) throws -> [Float] {

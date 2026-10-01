@@ -287,6 +287,11 @@ final class LUNATKFeatureTests: XCTestCase {
         XCTAssertTrue(LYSynthNames.destinations.allSatisfy { !$0.isEmpty })
         XCTAssertEqual(LYSynthNames.inserts.count, Int(LY_INS_COUNT))
         XCTAssertEqual(LYSynthNames.stepShapes.count, Int(LY_PSTEP_COUNT))
+        XCTAssertEqual(LYSynthNames.effects.count, Int(LY_FX_COUNT))
+        XCTAssertEqual(LYSynthFXPage.onIDs.count, Int(LY_FX_COUNT))
+        XCTAssertEqual(Int(LY_FX_ROUTE_SLOTS), Int(LY_FX_COUNT))
+        XCTAssertEqual(LYSynthNames.fxRoutes.count, Int(LY_FX_ROUTE_COUNT))
+        XCTAssertEqual(LYSynthNames.oscillatorEngines.count, Int(LY_OSC_ENGINE_COUNT))
     }
 }
 

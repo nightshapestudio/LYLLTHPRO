@@ -21,15 +21,19 @@ constexpr int kSize = LY_WT_SIZE;
 constexpr int kLevels = 11;          // octave mipmaps: 1023 harmonics down to 1
 constexpr int kMaxVoices = 16;
 constexpr int kMaxUnison = 16;
-constexpr int kChunk = 16;           // modulation is recomputed every 16 samples at most
+constexpr int kChunk = 16;           // control work is bounded; critical modulation ramps per sample
 // Display slots: the DECIMATOR's level, MOTION step and position follow the vocoder bands.
 constexpr int kDisplayDecimator = 40 + LY_DST_COUNT + 12 + LY_VOC_MAX_BANDS;
+constexpr int kDisplayExtraLFO = kDisplayDecimator + 4;
+constexpr int kDisplayExtraFX = kDisplayExtraLFO + 2 * (LY_LFO_COUNT - LY_LEGACY_LFO_COUNT);
 constexpr int kQueue = 1024;
 constexpr int kPending = 1024;
 constexpr int kScope = 2048;
 constexpr int kCombSize = 4096;      // voice comb filter: down to ~11 Hz at 44.1 kHz
 constexpr int kHeldNotes = 32;
 constexpr int kInsertComb = 2048;   // voice insert comb: down to ~22 Hz at 44.1 kHz
+constexpr int kOversamplingTaps = 129;
+constexpr double kParameterSmoothingSeconds = 0.005;
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 
 // MARK: - Small helpers
@@ -43,7 +47,25 @@ inline float fastTanh(float x) {
     return x * (27.f + x2) / (27.f + 9.f * x2);
 }
 inline double envelopeTime(float p) { return 0.0005 * std::pow(20000.0, (double)clamp01(p)); }
-inline int lfoBase(int l) { return LY_LFO1_SHAPE + l * LY_LFO_STRIDE; }
+inline int lfoBase(int l) {
+    return l < LY_LEGACY_LFO_COUNT
+        ? LY_LFO1_SHAPE + l * LY_LFO_STRIDE
+        : LY_EXTRA_LFO_BASE + (l - LY_LEGACY_LFO_COUNT) * LY_LFO_STRIDE;
+}
+inline int lfoPointBase(int l) {
+    return l < LY_LEGACY_LFO_COUNT
+        ? LY_LFO_POINTS_BASE + l * LY_LFO_POINTS
+        : LY_EXTRA_LFO_POINTS_BASE + (l - LY_LEGACY_LFO_COUNT) * LY_LFO_POINTS;
+}
+inline int lfoCurveBase(int l) { return LY_LFO_CURVES_BASE + l * LY_LFO_POINTS; }
+inline int matrixBase(int slot) {
+    return slot < LY_LEGACY_MATRIX_SLOTS
+        ? LY_MATRIX_BASE + slot * LY_MATRIX_STRIDE
+        : LY_EXTRA_MATRIX_BASE + (slot - LY_LEGACY_MATRIX_SLOTS) * LY_MATRIX_STRIDE;
+}
+inline int lfoRateDestination(int l) {
+    return l < LY_LEGACY_LFO_COUNT ? LY_DST_LFO1_RATE + l : LY_DST_LFO5_RATE + (l - LY_LEGACY_LFO_COUNT);
+}
 
 struct Random {
     uint32_t state = 0x9E3779B9u;
@@ -54,6 +76,35 @@ struct Random {
     inline float bipolar() { return (float)((int32_t)next()) / 2147483648.0f; }
     inline float unit() { return (float)(next() >> 8) / 16777216.0f; }
 };
+
+struct OversamplingFilter {
+    int count = 1;
+    float taps[kOversamplingTaps] = { 1.f };
+};
+
+/// Windowed-sinc reconstruction filter for oscillator downsampling. Built
+/// when the synth is created, never on the audio thread.
+OversamplingFilter makeOversamplingFilter(int factor) {
+    OversamplingFilter filter;
+    // HIGH keeps enough stop-band rejection for live use without overrunning
+    // the documented 16-voice × 16-unison ceiling. ULTRA spends the longer
+    // kernel during export.
+    filter.count = factor == 2 ? 49 : 129;
+    const int middle = (filter.count - 1) / 2;
+    const double cutoff = 0.45 / factor;
+    double sum = 0;
+    for (int i = 0; i < filter.count; ++i) {
+        const int offset = i - middle;
+        const double sinc = offset == 0 ? 2.0 * cutoff
+            : std::sin(kTwoPi * cutoff * offset) / (M_PI * offset);
+        const double window = 0.42 - 0.5 * std::cos(kTwoPi * i / (filter.count - 1))
+                                   + 0.08 * std::cos(2.0 * kTwoPi * i / (filter.count - 1));
+        filter.taps[i] = (float)(sinc * window);
+        sum += filter.taps[i];
+    }
+    for (int i = 0; i < filter.count; ++i) filter.taps[i] /= (float)sum;
+    return filter;
+}
 
 // Tempo divisions, in beats. The order is stored in patches: append only.
 const double kSyncBeats[] = { 16, 8, 4, 3, 2, 1.5, 1, 0.75, 0.5, 0.375, 0.25, 0.1875, 0.125, 1.0 / 12.0, 0.0625 };
@@ -68,6 +119,8 @@ inline double syncBeats(float normalized) {
 struct Wavetable {
     int frames = 1;
     std::vector<float> data;   // [level][frame][kSize + 1], last sample repeats the first
+    std::vector<float> raw;    // original frames end-to-end for sample and grain engines
+    std::vector<float> spectra; // first 64 harmonic magnitudes per frame
     inline const float *frame(int level, int f) const {
         return data.data() + ((size_t)level * frames + (size_t)f) * (kSize + 1);
     }
@@ -78,6 +131,8 @@ std::shared_ptr<Wavetable> buildWavetable(const float *source, int frameCount) {
     auto table = std::make_shared<Wavetable>();
     table->frames = frames;
     table->data.assign((size_t)kLevels * frames * (kSize + 1), 0.f);
+    table->raw.assign(source, source + (size_t)frames * kSize);
+    table->spectra.assign((size_t)frames * 64, 0.f);
 
     const vDSP_Length log2n = 11;
     FFTSetup setup = vDSP_create_fftsetup(log2n, kFFTRadix2);
@@ -87,6 +142,10 @@ std::shared_ptr<Wavetable> buildWavetable(const float *source, int frameCount) {
         DSPSplitComplex spectrum { re.data(), im.data() };
         vDSP_ctoz((const DSPComplex *)(source + (size_t)f * kSize), 2, &spectrum, 1, kSize / 2);
         vDSP_fft_zrip(setup, &spectrum, 1, log2n, kFFTDirection_Forward);
+        for (int harmonic = 1; harmonic <= 64; ++harmonic) {
+            table->spectra[(size_t)f * 64 + harmonic - 1] =
+                2.f * std::sqrt(re[harmonic] * re[harmonic] + im[harmonic] * im[harmonic]) / kSize;
+        }
 
         for (int level = 0; level < kLevels; ++level) {
             const int limit = (kSize / 2) >> level;   // keep harmonics below this
@@ -113,6 +172,8 @@ std::shared_ptr<Wavetable> buildWavetable(const float *source, int frameCount) {
     if (peak > 1e-6f) {
         const float gain = 1.f / peak;
         for (float &value : table->data) value *= gain;
+        for (float &value : table->raw) value *= gain;
+        for (float &value : table->spectra) value *= gain;
     }
     return table;
 }
@@ -183,7 +244,7 @@ struct LFOState {
         previous = next; next = random.bipolar(); held = next;
     }
     /// The shape at phase `p` (0…1).
-    inline float shapeAt(int shape, float p, const float *points, bool smooth) const {
+    inline float shapeAt(int shape, float p, const float *points, const float *curves, bool smooth) const {
         switch (shape) {
         case LY_LFO_SINE: return std::sin((float)kTwoPi * p);
         case LY_LFO_TRIANGLE: return 1.f - 4.f * std::fabs(p - 0.5f);
@@ -196,7 +257,10 @@ struct LFOState {
             const int i = std::min((int)position, LY_LFO_POINTS - 1);
             if (!smooth) return points[i];
             const float t = position - i;
-            const float eased = 0.5f - 0.5f * std::cos((float)M_PI * t);
+            float eased = 0.5f - 0.5f * std::cos((float)M_PI * t);
+            const float curve = clampf(curves ? curves[i] : 0.f, -1.f, 1.f);
+            if (curve > 0.001f) eased = std::pow(eased, 1.f + curve * 5.f);
+            else if (curve < -0.001f) eased = 1.f - std::pow(1.f - eased, 1.f - curve * 5.f);
             return points[i] + (points[(i + 1) % LY_LFO_POINTS] - points[i]) * eased;
         }
         default: {
@@ -205,7 +269,8 @@ struct LFOState {
         }
         }
     }
-    inline void advance(double increment, int shape, Random &random, const float *points, bool smooth, bool oneShot, float offset) {
+    inline void advance(double increment, int shape, Random &random, const float *points, const float *curves,
+                        bool smooth, bool oneShot, float offset) {
         if (!finished) {
             phase += increment;
             if (phase >= 1.0) {
@@ -218,7 +283,7 @@ struct LFOState {
         }
         float p = (float)(oneShot ? std::min(phase, 0.99999) : phase) + offset;
         p -= std::floor(p);
-        value = shapeAt(shape, p, points, smooth);
+        value = shapeAt(shape, p, points, curves, smooth);
     }
 };
 
@@ -254,7 +319,14 @@ FilterSetup makeFilter(int type, double hz, float res, float drive, float mix, d
     hz = std::min(std::max(hz, 10.0), sampleRate * 0.45);
     switch (type) {
     case LY_FILTER_LADDER:
-        f.ladderG = (float)(1.0 - std::exp(-kTwoPi * hz / sampleRate));
+        // Topology-preserving one-pole coefficient. The four cascaded stages
+        // are solved with their feedback in FilterChannel::process, so the
+        // resonance loop has no unit delay and the cutoff does not drift as
+        // it approaches Nyquist.
+        {
+            const double g = std::tan(M_PI * hz / sampleRate);
+            f.ladderG = (float)(g / (1.0 + g));
+        }
         // Two poles can't self-oscillate, so they take more feedback for the
         // same bite; BASS LOSS drops the make-up that keeps the lows up.
         f.ladderTwoPole = twoPole;
@@ -338,19 +410,36 @@ struct FilterChannel {
         float y;
         switch (f.type) {
         case LY_FILTER_LADDER: {
-            if (f.ladderTwoPole) {
-                const float in = fastTanh(x - f.ladderFeedback * ladder[1]);
-                ladder[0] = flushf(ladder[0] + f.ladderG * (in - fastTanh(ladder[0])));
-                ladder[1] = flushf(ladder[1] + f.ladderG * (fastTanh(ladder[0]) - fastTanh(ladder[1])));
-                y = ladder[1] * f.ladderMakeup;
-                break;
+            const int poles = f.ladderTwoPole ? 2 : 4;
+            const float G = f.ladderG;
+            float powers[5] = { 1, G, G * G, 0, 0 };
+            powers[3] = powers[2] * G;
+            powers[4] = powers[3] * G;
+
+            // For a TPT one-pole y = G*u + state. Expanding the cascade
+            // gives yN = G^N*u + S. Solve the nonlinear feedback input with
+            // two Newton steps; this keeps the zero-delay loop stable while
+            // retaining the ladder's input/feedback saturation.
+            float S = 0;
+            for (int stage = 0; stage < poles; ++stage)
+                S += powers[poles - 1 - stage] * ladder[stage];
+            S *= 1.f - G;
+            const float feedthrough = powers[poles];
+            float u = fastTanh(x - f.ladderFeedback * S);
+            for (int iteration = 0; iteration < 2; ++iteration) {
+                const float argument = x - f.ladderFeedback * (feedthrough * u + S);
+                const float saturated = fastTanh(argument);
+                const float derivative = 1.f + f.ladderFeedback * feedthrough * (1.f - saturated * saturated);
+                u -= (u - saturated) / std::max(derivative, 0.1f);
             }
-            const float in = fastTanh(x * (f.drive > 0.001f ? 1.f : 1.f) - f.ladderFeedback * ladder[3]);
-            ladder[0] = flushf(ladder[0] + f.ladderG * (in - fastTanh(ladder[0])));
-            ladder[1] = flushf(ladder[1] + f.ladderG * (fastTanh(ladder[0]) - fastTanh(ladder[1])));
-            ladder[2] = flushf(ladder[2] + f.ladderG * (fastTanh(ladder[1]) - fastTanh(ladder[2])));
-            ladder[3] = flushf(ladder[3] + f.ladderG * (fastTanh(ladder[2]) - fastTanh(ladder[3])));
-            y = ladder[3] * f.ladderMakeup;
+            float stageInput = u;
+            for (int stage = 0; stage < poles; ++stage) {
+                const float v = (stageInput - ladder[stage]) * G;
+                const float stageOutput = v + ladder[stage];
+                ladder[stage] = flushf(stageOutput + v);
+                stageInput = stageOutput;
+            }
+            y = stageInput * f.ladderMakeup;
             break;
         }
         case LY_FILTER_COMB_POS: case LY_FILTER_COMB_NEG: {
@@ -659,7 +748,15 @@ struct Voice {
     uint64_t age = 0;
     double frequency = 261.6;
     double targetFrequency = 261.6;
+    double renderFrequencyStart = 261.6;
     double phase[2][kMaxUnison] = {};
+    double samplePosition[2] = {};
+    double grainPhase[2] = {};
+    float oscillatorSemis[2] = {};
+    bool oscillatorPitchFresh[2] = {};
+    float warpHistory[2][kMaxUnison][kOversamplingTaps] = {};
+    int warpWrite[2][kMaxUnison] = {};
+    int warpOversampling[2] = { 1, 1 };
     float uniRandom[2][kMaxUnison] = {};
     double subPhase = 0;
     float lastA[kChunk] = {};            // oscillator A's last chunk, B's FM source
@@ -675,7 +772,7 @@ struct Voice {
     float amp = 0;
     double elapsed = 0;                  // seconds since the note began, for LFO delay and rise
     Envelope envelope[4];
-    LFOState lfo[4];
+    LFOState lfo[LY_LFO_COUNT];
     FilterChannel filter[2][2];          // [filter][channel]
     float modulation[LY_DST_COUNT] = {};
     float wavetablePosition[2] = {0, 0};
@@ -723,6 +820,7 @@ struct LYSynth {
     float smoothed[LY_PARAM_COUNT];
     float raw[LY_PARAM_COUNT];
     bool smooths[LY_PARAM_COUNT];
+    OversamplingFilter oversampling[2]; // 2× and 4× oscillator reconstruction
 
     // Wavetables: the audio thread reads `live`; `owned` keeps them alive.
     std::atomic<const Wavetable *> live[2] = { {nullptr}, {nullptr} };
@@ -745,7 +843,7 @@ struct LYSynth {
     uint64_t voiceClock = 0;
     int newestVoice = -1;
     double lastFrequency = 261.6;
-    LFOState globalLFO[4];
+    LFOState globalLFO[LY_LFO_COUNT];
     Random random;
 
     // MIDI state, audio thread only.
@@ -807,6 +905,10 @@ struct LYSynth {
     lyfx::FXFilter fxFilter;
     lyfx::Reverb reverb;
     lyfx::Decimator decimator;
+    lyfx::BodeShifter bode;
+    lyfx::Convolution convolution;
+    lyfx::Splitter splitter;
+    lyfx::Utility utility;
     lyfx::Vocoder vocoder;
     bool vocoderInput = false;
     bool vocoderWasOn = false;
@@ -823,10 +925,11 @@ struct LYSynth {
 
     float scope[kScope] = {};
     std::atomic<uint32_t> scopeWrite { 0 };
-    std::atomic<float> display[kDisplayDecimator + 4];
+    std::atomic<float> display[kDisplayExtraFX + (LY_FX_COUNT - 11)];
 
     float mixL[kChunk], mixR[kChunk];
     float busL[kChunk], busR[kChunk];
+    float fxAL[kChunk], fxAR[kChunk], fxBL[kChunk], fxBR[kChunk];
     float oscL[2][kChunk], oscR[2][kChunk], oscMono[2][kChunk];
 };
 
@@ -834,15 +937,20 @@ namespace {
 
 const int kDefaultFXOrder[LY_FX_COUNT] = {
     LY_FX_HYPER, LY_FX_DIST, LY_FX_FLANGER, LY_FX_PHASER, LY_FX_CHORUS,
-    LY_FX_DELAY, LY_FX_COMP, LY_FX_REVERB, LY_FX_EQ, LY_FX_FILTER, LY_FX_DECIM
+    LY_FX_DELAY, LY_FX_COMP, LY_FX_REVERB, LY_FX_EQ, LY_FX_FILTER, LY_FX_DECIM,
+    LY_FX_BODE, LY_FX_CONV, LY_FX_SPLITTER, LY_FX_UTILITY
 };
 
 /// The parameter holding the rack's `place`-th effect.
-inline int fxOrderParam(int place) { return place < 10 ? LY_FX_ORDER + place : LY_FX_ORDER_LAST; }
+inline int fxOrderParam(int place) {
+    return place < 10 ? LY_FX_ORDER + place : place == 10 ? LY_FX_ORDER_LAST : LY_FX_ORDER_EXTRA_BASE + place - 11;
+}
 
 /// The display slot carrying an effect's output level. The first ten sit
 /// at 20…29; the DECIMATOR's is after the vocoder bands.
-inline int fxLevelSlot(int fx) { return fx < 10 ? 20 + fx : kDisplayDecimator; }
+inline int fxLevelSlot(int fx) {
+    return fx < 10 ? 20 + fx : fx == LY_FX_DECIM ? kDisplayDecimator : kDisplayExtraFX + fx - LY_FX_BODE;
+}
 
 void setDefaults(LYSynth *s) {
     auto set = [s](int id, float v) { s->parameters[id].store(v, std::memory_order_relaxed); };
@@ -866,12 +974,12 @@ void setDefaults(LYSynth *s) {
     const float env[4][4] = { {0.05f, 0.4f, 0.8f, 0.35f}, {0.02f, 0.42f, 0.3f, 0.4f}, {0.02f, 0.42f, 0.3f, 0.4f}, {0.02f, 0.42f, 0.3f, 0.4f} };
     for (int e = 0; e < 4; ++e) for (int k = 0; k < 4; ++k) set(LY_ENV1_A + e * 4 + k, env[e][k]);
     for (int e = 0; e < 4; ++e) { set(LY_ENV1_DCURVE + e * 3, -0.55f); set(LY_ENV1_RCURVE + e * 3, -0.55f); }
-    for (int l = 0; l < 4; ++l) {
+    for (int l = 0; l < LY_LFO_COUNT; ++l) {
         const int b = lfoBase(l);
         set(b + (LY_LFO1_RATE - LY_LFO1_SHAPE), 0.4f);
         set(b + (LY_LFO1_SMOOTH - LY_LFO1_SHAPE), 1);
         for (int i = 0; i < LY_LFO_POINTS; ++i)
-            set(LY_LFO_POINTS_BASE + l * LY_LFO_POINTS + i, std::sin((float)kTwoPi * i / (float)LY_LFO_POINTS));
+            set(lfoPointBase(l) + i, std::sin((float)kTwoPi * i / (float)LY_LFO_POINTS));
     }
     set(LY_VOICES, 8); set(LY_MASTER, 0.8f); set(LY_BPM, 120);
     set(LY_GLIDE_ALWAYS, 1); set(LY_VEL_SENS, 0.8f);
@@ -928,6 +1036,16 @@ void setDefaults(LYSynth *s) {
     set(LY_REVERB_PREDELAY, 0.1f); set(LY_REVERB_MIX, 0.3f);
     set(LY_DEC_DESTROY, 0.35f); set(LY_DEC_CRUSH, 0.2f); set(LY_DEC_MIX, 1);
     set(LY_DEC_MOTION_RATE, 8.f / 14.f); set(LY_DEC_MOTION_LENGTH, 8);
+    set(LY_RENDER_QUALITY, LY_QUALITY_HIGH);
+    set(LY_AUX_A_RETURN, 0.5f); set(LY_AUX_B_RETURN, 0.5f);
+    set(LY_BODE_MIX, 0.5f); set(LY_CONV_SIZE, 0.4f); set(LY_CONV_TONE, 0.7f); set(LY_CONV_MIX, 0.35f);
+    set(LY_SPLIT_LOW_X, 0.35f); set(LY_SPLIT_HIGH_X, 0.55f);
+    set(LY_SPLIT_LOW, 0.5f); set(LY_SPLIT_MID, 0.5f); set(LY_SPLIT_HIGH, 0.5f); set(LY_SPLIT_MIX, 1.f);
+    set(LY_UTIL_GAIN, 0.5f); set(LY_UTIL_WIDTH, 0.5f); set(LY_UTIL_DC, 1.f);
+    for (int o = 0; o < 2; ++o) {
+        set(LY_SAMPLE_ROOT_A + o, 60); set(LY_SAMPLE_LOOP_A + o, 1);
+        set(LY_GRAIN_SIZE_A + o, 0.45f); set(LY_GRAIN_DENSITY_A + o, 0.4f); set(LY_GRAIN_SPRAY_A + o, 0.15f);
+    }
 }
 
 /// Which parameters glide between blocks: the continuous ones. Switches,
@@ -948,24 +1066,61 @@ void buildSmoothing(LYSynth *s) {
                     (int)LY_FB_AMOUNT, (int)LY_FB_DRIVE, (int)LY_FB_TONE, (int)LY_CHORUS_WIDTH,
                     (int)LY_FSAT_DRIVE, (int)LY_FSAT_MIX, (int)LY_PUNCH, (int)LY_VOC_ATTACK, (int)LY_VOC_RELEASE,
                     (int)LY_VOC_SHIFT, (int)LY_VOC_Q, (int)LY_VOC_HIGHS, (int)LY_VOC_GAIN, (int)LY_VOC_MIX,
-                    (int)LY_FILTER_MORPH_POS, (int)LY_F2_MORPH, (int)LY_LADDER_BASS }) on(id);
+                    (int)LY_FILTER_MORPH_POS, (int)LY_F2_MORPH, (int)LY_LADDER_BASS,
+                    (int)LY_AUX_A_RETURN, (int)LY_AUX_B_RETURN, (int)LY_BODE_SHIFT, (int)LY_BODE_FEEDBACK, (int)LY_BODE_MIX,
+                    (int)LY_CONV_SIZE, (int)LY_CONV_TONE, (int)LY_CONV_MIX, (int)LY_SPLIT_LOW_X, (int)LY_SPLIT_HIGH_X,
+                    (int)LY_SPLIT_LOW, (int)LY_SPLIT_MID, (int)LY_SPLIT_HIGH, (int)LY_SPLIT_MIX,
+                    (int)LY_UTIL_GAIN, (int)LY_UTIL_PAN, (int)LY_UTIL_WIDTH,
+                    (int)LY_GRAIN_SIZE_A, (int)LY_GRAIN_SIZE_B, (int)LY_GRAIN_DENSITY_A, (int)LY_GRAIN_DENSITY_B,
+                    (int)LY_GRAIN_SPRAY_A, (int)LY_GRAIN_SPRAY_B, (int)LY_SPECTRAL_TILT_A, (int)LY_SPECTRAL_TILT_B }) on(id);
     for (int k = 0; k < 2; ++k) {
         const int b = LY_INS1_TYPE + k * LY_INS_STRIDE;
         for (int f : { LY_INS1_AMOUNT, LY_INS1_FREQ, LY_INS1_MIX }) on(b + (f - LY_INS1_TYPE));
     }
-    for (int l = 0; l < 4; ++l) on(lfoBase(l) + (LY_LFO1_RATE - LY_LFO1_SHAPE));
+    for (int l = 0; l < LY_LFO_COUNT; ++l) on(lfoBase(l) + (LY_LFO1_RATE - LY_LFO1_SHAPE));
     for (int id = LY_HYPER_ON; id < LY_MATRIX_BASE; ++id) on(id);
     for (int id : { LY_HYPER_ON, LY_DIST_ON, LY_DIST_MODE, LY_FLANGER_ON, LY_PHASER_ON, LY_CHORUS_ON, LY_DELAY_ON,
                     LY_DELAY_TIME, LY_DELAY_PINGPONG, LY_COMP_ON, LY_COMP_MODE, LY_EQ_ON, LY_FXF_ON, LY_FXF_TYPE,
                     LY_REVERB_ON, LY_REVERB_MODE }) s->smooths[id] = false;
-    for (int slot = 0; slot < LY_MATRIX_SLOTS; ++slot) on(LY_MATRIX_BASE + slot * LY_MATRIX_STRIDE + LY_MX_AMOUNT);
+    for (int id : std::array<int, 5> { LY_BODE_ON, LY_CONV_ON, LY_SPLIT_ON, LY_UTIL_ON, LY_UTIL_DC }) s->smooths[id] = false;
+    for (int id : std::array<int, 6> { LY_OSC_ENGINE_A, LY_OSC_ENGINE_B, LY_SAMPLE_ROOT_A, LY_SAMPLE_ROOT_B,
+                                       LY_SAMPLE_LOOP_A, LY_SAMPLE_LOOP_B }) s->smooths[id] = false;
+    for (int slot = 0; slot < LY_MATRIX_SLOTS; ++slot) on(matrixBase(slot) + LY_MX_AMOUNT);
 }
 
 inline float readWavetable(const float *table, double phase) {
     const double index = phase * kSize;
     const int i = (int)index;
     const float frac = (float)(index - i);
-    return table[i] + (table[i + 1] - table[i]) * frac;
+    const float y0 = table[(i - 1) & (kSize - 1)];
+    const float y1 = table[i];
+    const float y2 = table[(i + 1) & (kSize - 1)];
+    const float y3 = table[(i + 2) & (kSize - 1)];
+    // Four-point Catmull-Rom interpolation. It preserves exact table samples
+    // while lowering the interpolation floor between them.
+    const float a = 0.5f * (y2 - y0);
+    const float b = y0 - 2.5f * y1 + 2.f * y2 - 0.5f * y3;
+    const float c = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+    return ((c * frac + b) * frac + a) * frac + y1;
+}
+
+inline int oscillatorOversampling(const LYSynth *s, int mode1, float amount1, int mode2, float amount2) {
+    const bool active = (mode1 != LY_WARP_OFF && amount1 > 0.001f) || (mode2 != LY_WARP_OFF && amount2 > 0.001f);
+    if (!active) return 1;
+    const int quality = std::max((int)LY_QUALITY_DRAFT,
+                                 std::min((int)LY_QUALITY_ULTRA, (int)std::lround(s->raw[LY_RENDER_QUALITY])));
+    return quality == LY_QUALITY_DRAFT ? 1 : quality == LY_QUALITY_HIGH ? 2 : 4;
+}
+
+inline float readLinear(const std::vector<float> &samples, double position, int start, int length, bool loop) {
+    if (length < 2) return 0;
+    double local = position;
+    if (loop) { local -= std::floor(local / length) * length; }
+    if (local < 0 || local >= length - 1) return 0;
+    const int i = (int)local;
+    const float fraction = (float)(local - i);
+    const int a = start + i, b = start + (loop ? (i + 1) % length : i + 1);
+    return samples[a] + (samples[b] - samples[a]) * fraction;
 }
 
 inline bool isPhaseWarp(int mode) {
@@ -1062,9 +1217,93 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
         + (p[b + LY_OSC_FINE] + m[LY_DST_A_FINE + d2] * 100.f) / 100.f + p[LY_TUNE] / 100.f
         + m[LY_DST_A_PITCH + dOffset] * 24.f + m[LY_DST_PITCH] * 24.f + v.bendSemis
         + clamp01(s->raw[LY_VINTAGE]) * (v.vintagePitch[o] * 0.06f + v.drift() * 0.04f);
+    const bool oscillatorFresh = !v.oscillatorPitchFresh[o];
+    const float startSemis = oscillatorFresh ? semis : v.oscillatorSemis[o];
+    v.oscillatorSemis[o] = semis;
+    v.oscillatorPitchFresh[o] = true;
     const double frequency = v.frequency * std::pow(2.0, semis / 12.0);
     const double baseIncrement = frequency / s->sampleRate;
     if (baseIncrement >= 0.5) return;
+
+    const int engine = std::max((int)LY_OSC_ENGINE_WAVETABLE, std::min((int)LY_OSC_ENGINE_SPECTRAL,
+                                (int)std::lround(s->raw[LY_OSC_ENGINE_A + o])));
+    if (engine != LY_OSC_ENGINE_WAVETABLE) {
+        const float angle = (pan + 1.f) * 0.25f * (float)M_PI;
+        const float panL = std::cos(angle), panR = std::sin(angle);
+        const int root = std::max(0, std::min(127, (int)std::lround(s->raw[LY_SAMPLE_ROOT_A + o])));
+        const double rootHz = 440.0 * std::pow(2.0, (root - 69) / 12.0);
+        const double playbackRate = frequency / std::max(rootHz, 1.0);
+        const bool loop = s->raw[LY_SAMPLE_LOOP_A + o] > 0.5f;
+        const int rawCount = (int)table->raw.size();
+        if (oscillatorFresh) {
+            v.samplePosition[o] = position * std::max(rawCount - 1, 0);
+            v.grainPhase[o] = 0;
+        }
+        if (engine == LY_OSC_ENGINE_SPECTRAL) {
+            const double framePosition = position * (table->frames - 1);
+            const int f0 = (int)framePosition, f1 = std::min(table->frames - 1, f0 + 1);
+            const float blendFrame = (float)(framePosition - f0);
+            const float tilt = clampf(s->smoothed[LY_SPECTRAL_TILT_A + o], -1.f, 1.f);
+            for (int i = 0; i < n; ++i) {
+                v.phase[o][0] += baseIncrement;
+                v.phase[o][0] -= std::floor(v.phase[o][0]);
+                float value = 0, energy = 0;
+                for (int harmonic = 1; harmonic <= 32; ++harmonic) {
+                    float magnitude = table->spectra[(size_t)f0 * 64 + harmonic - 1];
+                    magnitude += (table->spectra[(size_t)f1 * 64 + harmonic - 1] - magnitude) * blendFrame;
+                    magnitude *= std::pow((float)harmonic, tilt * 1.5f);
+                    value += magnitude * std::sin((float)(kTwoPi * v.phase[o][0] * harmonic));
+                    energy += magnitude;
+                }
+                value /= std::max(energy * 0.35f, 1.f);
+                outL[i] = value * level * panL; outR[i] = value * level * panR; mono[i] = value;
+            }
+            return;
+        }
+        if (engine == LY_OSC_ENGINE_MULTISAMPLE) {
+            const int zone = std::max(0, std::min(table->frames - 1, v.note - root + table->frames / 2));
+            const int zoneRoot = root + zone - table->frames / 2;
+            const double zoneHz = 440.0 * std::pow(2.0, (zoneRoot - 69) / 12.0);
+            const double step = frequency / std::max(zoneHz, 1.0);
+            if (oscillatorFresh) v.samplePosition[o] = position * (kSize - 1);
+            for (int i = 0; i < n; ++i) {
+                const float value = readLinear(table->raw, v.samplePosition[o], zone * kSize, kSize, loop);
+                v.samplePosition[o] += step;
+                outL[i] = value * level * panL; outR[i] = value * level * panR; mono[i] = value;
+            }
+            return;
+        }
+        if (engine == LY_OSC_ENGINE_GRANULAR) {
+            const float grainSize = 32.f * std::pow(128.f, clamp01(s->smoothed[LY_GRAIN_SIZE_A + o]));
+            const int grains = 1 + (int)std::lround(clamp01(s->smoothed[LY_GRAIN_DENSITY_A + o]) * 7.f);
+            const float spray = clamp01(s->smoothed[LY_GRAIN_SPRAY_A + o]) * rawCount * 0.25f;
+            for (int i = 0; i < n; ++i) {
+                float value = 0, weight = 0;
+                for (int grain = 0; grain < grains; ++grain) {
+                    double gp = v.grainPhase[o] + (double)grain / grains;
+                    gp -= std::floor(gp);
+                    const float window = std::sin((float)M_PI * (float)gp);
+                    const double offset = ((grain * 0.61803398875) - std::floor(grain * 0.61803398875) - 0.5) * spray;
+                    const double read = v.samplePosition[o] + offset + gp * grainSize;
+                    value += readLinear(table->raw, read, 0, rawCount, true) * window * window;
+                    weight += window * window;
+                }
+                value /= std::max(weight, 0.001f);
+                v.grainPhase[o] += (0.5 + s->smoothed[LY_GRAIN_DENSITY_A + o] * 12.0) / s->sampleRate;
+                v.grainPhase[o] -= std::floor(v.grainPhase[o]);
+                v.samplePosition[o] += playbackRate * 0.2;
+                if (loop) v.samplePosition[o] -= std::floor(v.samplePosition[o] / rawCount) * rawCount;
+                outL[i] = value * level * panL; outR[i] = value * level * panR; mono[i] = value;
+            }
+            return;
+        }
+        for (int i = 0; i < n; ++i) {
+            const float value = readLinear(table->raw, v.samplePosition[o], 0, rawCount, loop);
+            v.samplePosition[o] += playbackRate;
+            outL[i] = value * level * panL; outR[i] = value * level * panR; mono[i] = value;
+        }
+        return;
+    }
 
     const double framePosition = position * (table->frames - 1);
     const int f0 = (int)framePosition;
@@ -1072,8 +1311,10 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
     const float ff = (float)(framePosition - f0);
 
     float gainL[kMaxUnison], gainR[kMaxUnison];
-    double increment[kMaxUnison];
-    const float *t0[kMaxUnison], *t1[kMaxUnison];
+    double increment[kMaxUnison], detuneRatio[kMaxUnison];
+    const float *t00[kMaxUnison], *t01[kMaxUnison];
+    const float *t10[kMaxUnison], *t11[kMaxUnison];
+    float mipMix[kMaxUnison];
     float gainSum = 0;
     for (int j = 0; j < unison; ++j) {
         const float t = unison == 1 ? 0.f : -1.f + 2.f * j / (unison - 1);
@@ -1086,12 +1327,17 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
         }
         const float stackSemis = unison > 1 ? kStacks[stack][j % kStackLength[stack]] : 0.f;
         const float cents = spread * detune * detune * 100.f + stackSemis * 100.f;
-        increment[j] = baseIncrement * std::pow(2.0, cents / 1200.0);
+        detuneRatio[j] = std::pow(2.0, cents / 1200.0);
+        increment[j] = baseIncrement * detuneRatio[j];
         if (increment[j] >= 0.5) increment[j] = 0;
-        int level = (int)std::ceil(std::log2(std::max(1.0, increment[j] * kSize)));
-        level = std::max(0, std::min(kLevels - 1, level));
-        t0[j] = table->frame(level, f0);
-        t1[j] = table->frame(level, f1);
+        const float mip = clampf((float)std::log2(std::max(1.0, increment[j] * kSize)), 0.f, (float)(kLevels - 1));
+        const int level0 = std::max(0, std::min(kLevels - 1, (int)std::floor(mip)));
+        const int level1 = std::min(kLevels - 1, level0 + 1);
+        mipMix[j] = mip - level0;
+        t00[j] = table->frame(level0, f0);
+        t01[j] = table->frame(level0, f1);
+        t10[j] = table->frame(level1, f0);
+        t11[j] = table->frame(level1, f1);
         const float g = unison == 1 ? 1.f : 1.f + ((0.15f + 0.85f * blend) - 1.f) * std::fabs(t);
         const float voicePan = clampf(pan + t * width, -1, 1);
         const float angle = (voicePan + 1.f) * 0.25f * (float)M_PI;
@@ -1101,22 +1347,59 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
     }
     const float normal = level / std::sqrt(std::max(gainSum, 1e-6f));
     const bool phase1 = isPhaseWarp(mode1), phase2 = isPhaseWarp(mode2);
+    const int oversampling = oscillatorOversampling(s, mode1, warp1, mode2, warp2);
+    if (v.warpOversampling[o] != oversampling) {
+        std::memset(v.warpHistory[o], 0, sizeof(v.warpHistory[o]));
+        std::memset(v.warpWrite[o], 0, sizeof(v.warpWrite[o]));
+        v.warpOversampling[o] = oversampling;
+    }
+    const OversamplingFilter *reconstruction = oversampling > 1 ? &s->oversampling[oversampling == 2 ? 0 : 1] : nullptr;
 
     for (int i = 0; i < n; ++i) {
         float sumL = 0, sumR = 0, sumMono = 0;
         const float mod = modulator ? modulator[i] : 0.f;
+        const double ramp = (double)(i + 1) / n;
+        const double frequencyAtSample = v.renderFrequencyStart + (v.frequency - v.renderFrequencyStart) * ramp;
+        const double semisAtSample = startSemis + (semis - startSemis) * ramp;
+        const double sampleBaseIncrement = frequencyAtSample * std::pow(2.0, semisAtSample / 12.0) / s->sampleRate;
         for (int j = 0; j < unison; ++j) {
-            double ph = v.phase[o][j] + increment[j];
-            ph -= std::floor(ph);
+            const double sampleIncrement = sampleBaseIncrement * detuneRatio[j];
+            if (sampleIncrement >= 0.5) continue;
+            double ph = v.phase[o][j];
+            const double subIncrement = sampleIncrement / oversampling;
+            float value = 0;
+            for (int sub = 0; sub < oversampling; ++sub) {
+                ph += subIncrement;
+                ph -= std::floor(ph);
+                double read = ph;
+                if (phase1) read = warpPhase(mode1, read, warp1, mod);
+                if (phase2) read = warpPhase(mode2, read, warp2, mod);
+                read = std::min(std::max(read, 0.0), 0.9999999);
+                float low = readWavetable(t00[j], read);
+                float high = readWavetable(t10[j], read);
+                if (f1 != f0) {
+                    low += (readWavetable(t01[j], read) - low) * ff;
+                    high += (readWavetable(t11[j], read) - high) * ff;
+                }
+                float sample = low + (high - low) * mipMix[j];
+                if (!phase1) sample = warpSample(mode1, sample, warp1, mod, ph);
+                if (!phase2) sample = warpSample(mode2, sample, warp2, mod, ph);
+                if (reconstruction) {
+                    int &write = v.warpWrite[o][j];
+                    v.warpHistory[o][j][write] = sample;
+                    write = (write + 1) % reconstruction->count;
+                } else {
+                    value = sample;
+                }
+            }
             v.phase[o][j] = ph;
-            double read = ph;
-            if (phase1) read = warpPhase(mode1, read, warp1, mod);
-            if (phase2) read = warpPhase(mode2, read, warp2, mod);
-            read = std::min(std::max(read, 0.0), 0.9999999);
-            float value = readWavetable(t0[j], read);
-            if (f1 != f0) value += (readWavetable(t1[j], read) - value) * ff;
-            if (!phase1) value = warpSample(mode1, value, warp1, mod, ph);
-            if (!phase2) value = warpSample(mode2, value, warp2, mod, ph);
+            if (reconstruction) {
+                int read = v.warpWrite[o][j];
+                for (int tap = 0; tap < reconstruction->count; ++tap) {
+                    if (--read < 0) read = reconstruction->count - 1;
+                    value += reconstruction->taps[tap] * v.warpHistory[o][j][read];
+                }
+            }
             sumL += value * gainL[j];
             sumR += value * gainR[j];
             sumMono += value;
@@ -1130,6 +1413,7 @@ void renderOscillator(LYSynth *s, Voice &v, int o, int n, const float *m, const 
 inline bool isUnipolar(int source) {
     switch (source) {
     case LY_SRC_LFO1: case LY_SRC_LFO2: case LY_SRC_LFO3: case LY_SRC_LFO4:
+    case LY_SRC_LFO5: case LY_SRC_LFO6: case LY_SRC_LFO7: case LY_SRC_LFO8: case LY_SRC_LFO9: case LY_SRC_LFO10:
     case LY_SRC_NOTE: case LY_SRC_RANDOM: case LY_SRC_PITCHBEND:
     case LY_SRC_PERF1: case LY_SRC_PERF2: case LY_SRC_TRACK1: case LY_SRC_TRACK2:
         return false;
@@ -1214,6 +1498,8 @@ inline float sourceValue(const LYSynth *s, const Voice &v, int source) {
     case LY_SRC_ENV4: return v.envelope[3].value;
     case LY_SRC_LFO1: case LY_SRC_LFO2: case LY_SRC_LFO3: case LY_SRC_LFO4:
         return lfoValue(s, v, source - LY_SRC_LFO1);
+    case LY_SRC_LFO5: case LY_SRC_LFO6: case LY_SRC_LFO7: case LY_SRC_LFO8: case LY_SRC_LFO9: case LY_SRC_LFO10:
+        return lfoValue(s, v, LY_LEGACY_LFO_COUNT + source - LY_SRC_LFO5);
     case LY_SRC_VELOCITY: return v.velocity;
     case LY_SRC_NOTE: return (v.note - 60) / 60.f;
     case LY_SRC_MODWHEEL: return s->smoothed[LY_MODWHEEL];
@@ -1241,7 +1527,7 @@ void evaluateMatrix(const LYSynth *s, const Voice &v, float *m) {
     std::memset(m, 0, sizeof(float) * LY_DST_COUNT);
     const float *r = s->raw;
     for (int slot = 0; slot < LY_MATRIX_SLOTS; ++slot) {
-        const int base = LY_MATRIX_BASE + slot * LY_MATRIX_STRIDE;
+        const int base = matrixBase(slot);
         const int source = (int)std::lround(r[base + LY_MX_SOURCE]);
         const int destination = (int)std::lround(r[base + LY_MX_DEST]);
         if (source <= LY_SRC_NONE || source >= LY_SRC_COUNT || destination <= LY_DST_NONE || destination >= LY_DST_COUNT) continue;
@@ -1266,7 +1552,7 @@ double lfoIncrement(const LYSynth *s, int l, const float *m, int n) {
     } else {
         hz = 0.02 * std::pow(1500.0, (double)s->smoothed[b + (LY_LFO1_RATE - LY_LFO1_SHAPE)]);
     }
-    if (m) hz *= std::pow(4.0, (double)m[LY_DST_LFO1_RATE + l]);
+    if (m) hz *= std::pow(4.0, (double)m[lfoRateDestination(l)]);
     return hz * n / s->sampleRate;
 }
 
@@ -1283,6 +1569,7 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
     if (mpe) v.pressure = s->channelPressure[v.channel & 15];
 
     // Glide.
+    const double frequencyStart = v.frequency;
     const float glide = r[LY_GLIDE];
     if (glide > 0.001f) {
         const double k = std::exp(-(double)n / (glide * s->sampleRate * 0.25));
@@ -1290,6 +1577,7 @@ void renderVoice(LYSynth *s, Voice &v, int n) {
     } else {
         v.frequency = v.targetFrequency;
     }
+    v.renderFrequencyStart = frequencyStart;
 
     // B first so A can use it as its FM / ring / AM source; B uses A's
     // previous chunk, one chunk late, which FM cannot hear.
@@ -1590,6 +1878,12 @@ void startVoice(LYSynth *s, const Event &e, bool fromArp = false) {
         const int b = o == 0 ? LY_OSCA_BASE : LY_OSCB_BASE;
         const float start = s->raw[b + LY_OSC_PHASE];
         const float spread = s->raw[b + LY_OSC_RANDPHASE];
+        std::memset(v.warpHistory[o], 0, sizeof(v.warpHistory[o]));
+        std::memset(v.warpWrite[o], 0, sizeof(v.warpWrite[o]));
+        v.warpOversampling[o] = 1;
+        v.oscillatorPitchFresh[o] = false;
+        v.samplePosition[o] = 0;
+        v.grainPhase[o] = 0;
         for (int j = 0; j < kMaxUnison; ++j) {
             double ph = start + spread * s->random.unit();
             v.phase[o][j] = ph - std::floor(ph);
@@ -1598,7 +1892,7 @@ void startVoice(LYSynth *s, const Event &e, bool fromArp = false) {
     }
     v.subPhase = 0;
     for (int k = 0; k < 4; ++k) v.envelope[k].gateOn();
-    for (int l = 0; l < 4; ++l) v.lfo[l].retrigger(s->random, s->raw[lfoBase(l) + (LY_LFO1_PHASE - LY_LFO1_SHAPE)]);
+    for (int l = 0; l < LY_LFO_COUNT; ++l) v.lfo[l].retrigger(s->random, s->raw[lfoBase(l) + (LY_LFO1_PHASE - LY_LFO1_SHAPE)]);
     if (!wasActive) {
         for (auto &filter : v.filter) for (auto &channel : filter) channel.reset();
         for (auto &insert : v.insert) insert.reset();
@@ -1914,6 +2208,7 @@ void prepareEffects(LYSynth *s) {
     s->hyper.prepare(sr); s->distortion.prepare(sr); s->flanger.prepare(sr); s->phaser.prepare(sr);
     s->chorus.prepare(sr); s->junoChorus.prepare(sr); s->delay.prepare(sr); s->compressor.prepare(sr); s->eq.prepare(sr);
     s->fxFilter.prepare(sr); s->reverb.prepare(sr); s->decimator.prepare(sr); s->vocoder.prepare(sr);
+    s->bode.prepare(sr); s->convolution.prepare(sr); s->splitter.prepare(sr); s->utility.prepare(sr);
 }
 
 void clearEffect(LYSynth *s, int fx) {
@@ -1928,13 +2223,18 @@ void clearEffect(LYSynth *s, int fx) {
     case LY_FX_EQ: s->eq.clear(); break;
     case LY_FX_FILTER: s->fxFilter.clear(); break;
     case LY_FX_DECIM: s->decimator.clear(); s->decimatorMotionPrimed = false; s->decimatorStep = -1; break;
-    default: s->reverb.clear(); break;
+    case LY_FX_REVERB: s->reverb.clear(); break;
+    case LY_FX_BODE: s->bode.clear(); break;
+    case LY_FX_CONV: s->convolution.clear(); break;
+    case LY_FX_SPLITTER: s->splitter.clear(); break;
+    default: s->utility.clear(); break;
     }
 }
 
 bool effectOn(const LYSynth *s, int fx) {
     static const int onIDs[LY_FX_COUNT] = { LY_HYPER_ON, LY_DIST_ON, LY_FLANGER_ON, LY_PHASER_ON, LY_CHORUS_ON,
-                                            LY_DELAY_ON, LY_COMP_ON, LY_EQ_ON, LY_FXF_ON, LY_REVERB_ON, LY_DEC_ON };
+                                            LY_DELAY_ON, LY_COMP_ON, LY_EQ_ON, LY_FXF_ON, LY_REVERB_ON, LY_DEC_ON,
+                                            LY_BODE_ON, LY_CONV_ON, LY_SPLIT_ON, LY_UTIL_ON };
     return s->raw[onIDs[fx]] > 0.5f;
 }
 
@@ -2010,6 +2310,9 @@ void processEffects(LYSynth *s, float *L, float *R, int n) {
     auto P = [&](int id, int dst = LY_DST_NONE) { return clamp01(p[id] + (dst != LY_DST_NONE ? m[dst] : 0.f)); };
     int order[LY_FX_COUNT];
     effectOrder(s, order);
+    std::copy(L, L + n, s->fxAL); std::copy(R, R + n, s->fxAR);
+    std::copy(L, L + n, s->fxBL); std::copy(R, R + n, s->fxBR);
+    bool auxAUsed = false, auxBUsed = false;
     for (int k = 0; k < LY_FX_COUNT; ++k) {
         const int fx = order[k];
         const bool on = effectOn(s, fx);
@@ -2021,64 +2324,90 @@ void processEffects(LYSynth *s, float *L, float *R, int n) {
         }
         s->fxWasOn[fx] = true;
         if (fx == LY_FX_DECIM && decimatorAfterMaster(s)) continue;   // runs after MASTER instead
+        const int route = std::max((int)LY_FX_ROUTE_MAIN, std::min((int)LY_FX_ROUTE_B,
+                                   (int)std::lround(s->raw[LY_FX_ROUTE_BASE + fx])));
+        float *workL = route == LY_FX_ROUTE_A ? s->fxAL : route == LY_FX_ROUTE_B ? s->fxBL : L;
+        float *workR = route == LY_FX_ROUTE_A ? s->fxAR : route == LY_FX_ROUTE_B ? s->fxBR : R;
+        if (route == LY_FX_ROUTE_A) auxAUsed = true;
+        if (route == LY_FX_ROUTE_B) auxBUsed = true;
         switch (fx) {
         case LY_FX_HYPER:
-            s->hyper.process(L, R, n, P(LY_HYPER_RATE), P(LY_HYPER_DETUNE, LY_DST_HYPER_DETUNE), P(LY_HYPER_VOICES),
+            s->hyper.process(workL, workR, n, P(LY_HYPER_RATE), P(LY_HYPER_DETUNE, LY_DST_HYPER_DETUNE), P(LY_HYPER_VOICES),
                              P(LY_HYPER_MIX, LY_DST_HYPER_MIX), P(LY_HYPER_DIM_SIZE), P(LY_HYPER_DIM_MIX, LY_DST_DIM_MIX));
             break;
         case LY_FX_DIST:
-            s->distortion.process(L, R, n, (int)std::lround(s->raw[LY_DIST_MODE]), P(LY_DIST_DRIVE, LY_DST_DIST_DRIVE),
+            s->distortion.process(workL, workR, n, (int)std::lround(s->raw[LY_DIST_MODE]), P(LY_DIST_DRIVE, LY_DST_DIST_DRIVE),
                                   P(LY_DIST_TONE), P(LY_DIST_MIX, LY_DST_DIST_MIX));
             break;
         case LY_FX_FLANGER:
-            s->flanger.process(L, R, n, P(LY_FLANGER_RATE), P(LY_FLANGER_DEPTH, LY_DST_FLANGER_DEPTH),
+            s->flanger.process(workL, workR, n, P(LY_FLANGER_RATE), P(LY_FLANGER_DEPTH, LY_DST_FLANGER_DEPTH),
                                P(LY_FLANGER_FEEDBACK), P(LY_FLANGER_MIX, LY_DST_FLANGER_MIX));
             break;
         case LY_FX_PHASER:
-            s->phaser.process(L, R, n, P(LY_PHASER_RATE), P(LY_PHASER_DEPTH), P(LY_PHASER_FREQ, LY_DST_PHASER_FREQ),
+            s->phaser.process(workL, workR, n, P(LY_PHASER_RATE), P(LY_PHASER_DEPTH), P(LY_PHASER_FREQ, LY_DST_PHASER_FREQ),
                               P(LY_PHASER_FEEDBACK), P(LY_PHASER_MIX, LY_DST_PHASER_MIX));
             break;
         case LY_FX_CHORUS: {
             const int mode = (int)std::lround(s->raw[LY_CHORUS_MODE]);
             if (mode > LY_CHORUS_CLASSIC && mode < LY_CHORUS_MODE_COUNT) {
-                s->junoChorus.process(L, R, n, mode, 0.05f * std::pow(70.f, P(LY_CHORUS_RATE)), P(LY_CHORUS_DEPTH, LY_DST_CHORUS_DEPTH),
+                s->junoChorus.process(workL, workR, n, mode, 0.05f * std::pow(70.f, P(LY_CHORUS_RATE)), P(LY_CHORUS_DEPTH, LY_DST_CHORUS_DEPTH),
                                       P(LY_CHORUS_WIDTH), P(LY_CHORUS_MIX, LY_DST_CHORUS_MIX));
             } else {
-                s->chorus.process(L, R, n, P(LY_CHORUS_RATE), P(LY_CHORUS_DELAY), P(LY_CHORUS_DEPTH, LY_DST_CHORUS_DEPTH),
+                s->chorus.process(workL, workR, n, P(LY_CHORUS_RATE), P(LY_CHORUS_DELAY), P(LY_CHORUS_DEPTH, LY_DST_CHORUS_DEPTH),
                                   P(LY_CHORUS_FEEDBACK), P(LY_CHORUS_TONE), P(LY_CHORUS_MIX, LY_DST_CHORUS_MIX));
             }
             break;
         }
         case LY_FX_DELAY: {
             const double seconds = syncBeats(s->raw[LY_DELAY_TIME]) * 60.0 / std::max(20.f, s->raw[LY_BPM]);
-            s->delay.process(L, R, n, (float)seconds, P(LY_DELAY_FEEDBACK, LY_DST_DELAY_FEEDBACK), s->raw[LY_DELAY_PINGPONG] > 0.5f,
+            s->delay.process(workL, workR, n, (float)seconds, P(LY_DELAY_FEEDBACK, LY_DST_DELAY_FEEDBACK), s->raw[LY_DELAY_PINGPONG] > 0.5f,
                              P(LY_DELAY_WIDTH), P(LY_DELAY_LOWCUT), P(LY_DELAY_HIGHCUT), P(LY_DELAY_MIX, LY_DST_DELAY_MIX));
             break;
         }
         case LY_FX_COMP:
-            s->compressor.process(L, R, n, (int)std::lround(s->raw[LY_COMP_MODE]), P(LY_COMP_THRESHOLD), P(LY_COMP_RATIO),
+            s->compressor.process(workL, workR, n, (int)std::lround(s->raw[LY_COMP_MODE]), P(LY_COMP_THRESHOLD), P(LY_COMP_RATIO),
                                   P(LY_COMP_ATTACK), P(LY_COMP_RELEASE), P(LY_COMP_GAIN), P(LY_COMP_DEPTH, LY_DST_COMP_DEPTH),
                                   P(LY_COMP_MIX, LY_DST_COMP_MIX));
             break;
         case LY_FX_EQ:
-            s->eq.process(L, R, n, P(LY_EQ_LOW_FREQ), clampf(p[LY_EQ_LOW_GAIN] + m[LY_DST_EQ_LOW], -1, 1),
+            s->eq.process(workL, workR, n, P(LY_EQ_LOW_FREQ), clampf(p[LY_EQ_LOW_GAIN] + m[LY_DST_EQ_LOW], -1, 1),
                           P(LY_EQ_MID_FREQ), clampf(p[LY_EQ_MID_GAIN] + m[LY_DST_EQ_MID], -1, 1), P(LY_EQ_MID_Q),
                           P(LY_EQ_HIGH_FREQ), clampf(p[LY_EQ_HIGH_GAIN] + m[LY_DST_EQ_HIGH], -1, 1));
             break;
         case LY_FX_FILTER:
-            s->fxFilter.process(L, R, n, (int)std::lround(s->raw[LY_FXF_TYPE]), P(LY_FXF_CUTOFF, LY_DST_FXF_CUTOFF),
+            s->fxFilter.process(workL, workR, n, (int)std::lround(s->raw[LY_FXF_TYPE]), P(LY_FXF_CUTOFF, LY_DST_FXF_CUTOFF),
                                 P(LY_FXF_RES, LY_DST_FXF_RES), P(LY_FXF_DRIVE), P(LY_FXF_MIX, LY_DST_FXF_MIX));
             break;
         case LY_FX_DECIM:
-            runDecimator(s, L, R, n);
+            runDecimator(s, workL, workR, n);
             break;
-        default:
-            s->reverb.process(L, R, n, (int)std::lround(s->raw[LY_REVERB_MODE]), P(LY_REVERB_SIZE, LY_DST_REVERB_SIZE),
+        case LY_FX_REVERB:
+            s->reverb.process(workL, workR, n, (int)std::lround(s->raw[LY_REVERB_MODE]), P(LY_REVERB_SIZE, LY_DST_REVERB_SIZE),
                               P(LY_REVERB_DECAY, LY_DST_REVERB_DECAY), P(LY_REVERB_DAMP), P(LY_REVERB_WIDTH),
                               P(LY_REVERB_PREDELAY), P(LY_REVERB_MIX, LY_DST_REVERB_MIX));
             break;
+        case LY_FX_BODE:
+            s->bode.process(workL, workR, n, clampf(p[LY_BODE_SHIFT], -1, 1), P(LY_BODE_FEEDBACK), P(LY_BODE_MIX));
+            break;
+        case LY_FX_CONV:
+            s->convolution.process(workL, workR, n, P(LY_CONV_SIZE), P(LY_CONV_TONE), P(LY_CONV_MIX));
+            break;
+        case LY_FX_SPLITTER:
+            s->splitter.process(workL, workR, n, P(LY_SPLIT_LOW_X), P(LY_SPLIT_HIGH_X), P(LY_SPLIT_LOW),
+                                P(LY_SPLIT_MID), P(LY_SPLIT_HIGH), P(LY_SPLIT_MIX));
+            break;
+        default:
+            s->utility.process(workL, workR, n, P(LY_UTIL_GAIN), clampf(p[LY_UTIL_PAN], -1, 1), P(LY_UTIL_WIDTH),
+                               s->raw[LY_UTIL_DC] > 0.5f);
+            break;
         }
-        s->meters[fx].chunk(L, R, n);
+        s->meters[fx].chunk(workL, workR, n);
+    }
+    const float returnA = auxAUsed ? clamp01(p[LY_AUX_A_RETURN]) : 0.f;
+    const float returnB = auxBUsed ? clamp01(p[LY_AUX_B_RETURN]) : 0.f;
+    for (int i = 0; i < n; ++i) {
+        L[i] += s->fxAL[i] * returnA + s->fxBL[i] * returnB;
+        R[i] += s->fxAR[i] * returnA + s->fxBR[i] * returnB;
     }
 }
 
@@ -2091,6 +2420,8 @@ extern "C" {
 LYSynth *lysynth_create(double sampleRate) {
     auto *s = new LYSynth();
     s->sampleRate = sampleRate > 0 ? sampleRate : 44100;
+    s->oversampling[0] = makeOversamplingFilter(2);
+    s->oversampling[1] = makeOversamplingFilter(4);
     setDefaults(s);
     buildSmoothing(s);
     for (int i = 0; i < LY_PARAM_COUNT; ++i) {
@@ -2157,11 +2488,13 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
     std::memset(left, 0, sizeof(float) * frames);
     std::memset(right, 0, sizeof(float) * frames);
 
-    // Pick up parameters once per block; smooth the continuous ones.
+    // Pick up atomics once per host block. Continuous parameters are advanced
+    // below from elapsed samples, not from host-block count, so a 64-frame
+    // live render and a 512-frame offline render follow the same trajectory.
     for (int i = 0; i < LY_PARAM_COUNT; ++i) {
         const float target = s->parameters[i].load(std::memory_order_relaxed);
         s->raw[i] = target;
-        s->smoothed[i] = s->smooths[i] ? s->smoothed[i] + (target - s->smoothed[i]) * 0.35f : target;
+        if (!s->smooths[i]) s->smoothed[i] = target;
     }
 
     // Move newly queued events into the time-ordered pending list.
@@ -2231,9 +2564,13 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
         }
         const int n = std::min(kChunk, std::min(frames - position, std::max(1, next - position)));
 
+        const float smoothing = 1.f - (float)std::exp(-(double)n / (kParameterSmoothingSeconds * s->sampleRate));
+        for (int i = 0; i < LY_PARAM_COUNT; ++i)
+            if (s->smooths[i]) s->smoothed[i] += (s->raw[i] - s->smoothed[i]) * smoothing;
+
         arpAdvance(s, n);
 
-        for (int l = 0; l < 4; ++l) {
+        for (int l = 0; l < LY_LFO_COUNT; ++l) {
             const int b = lfoBase(l);
             double increment = lfoIncrement(s, l, nullptr, n);
             // Synced and FREE while a transport drives the song: the phase is
@@ -2246,7 +2583,8 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
                 increment -= std::floor(increment);
             }
             s->globalLFO[l].advance(increment, (int)std::lround(s->raw[b]), s->random,
-                                    s->raw + LY_LFO_POINTS_BASE + l * LY_LFO_POINTS, s->raw[b + (LY_LFO1_SMOOTH - LY_LFO1_SHAPE)] > 0.5f,
+                                    s->raw + lfoPointBase(l), s->raw + lfoCurveBase(l),
+                                    s->raw[b + (LY_LFO1_SMOOTH - LY_LFO1_SHAPE)] > 0.5f,
                                     false, s->raw[b + (LY_LFO1_PHASE - LY_LFO1_SHAPE)]);
         }
 
@@ -2269,11 +2607,12 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
                 v.envelope[k].advance(n, s->sampleRate, clamp01(a), s->raw[LY_ENV1_H + k], clamp01(d), s->raw[b + 2], clamp01(rel),
                                       s->raw[c], s->raw[c + 1], s->raw[c + 2], clampf(s->raw[LY_ENV1_SLOPE + k], -1.f, 1.f));
             }
-            for (int l = 0; l < 4; ++l) {
+            for (int l = 0; l < LY_LFO_COUNT; ++l) {
                 const int b = lfoBase(l);
                 const int mode = (int)std::lround(s->raw[b + (LY_LFO1_RETRIG - LY_LFO1_SHAPE)]);
                 v.lfo[l].advance(lfoIncrement(s, l, v.modulation, n), (int)std::lround(s->raw[b]), s->random,
-                                 s->raw + LY_LFO_POINTS_BASE + l * LY_LFO_POINTS, s->raw[b + (LY_LFO1_SMOOTH - LY_LFO1_SHAPE)] > 0.5f,
+                                 s->raw + lfoPointBase(l), s->raw + lfoCurveBase(l),
+                                 s->raw[b + (LY_LFO1_SMOOTH - LY_LFO1_SHAPE)] > 0.5f,
                                  mode == LY_LFOMODE_ENV, 0.f);
             }
             v.elapsed += (double)n / s->sampleRate;
@@ -2334,14 +2673,16 @@ void lysynth_render_input(LYSynth *s, float *left, float *right, const float *in
     s->display[1].store(v.wavetablePosition[0], std::memory_order_relaxed);
     s->display[2].store(v.wavetablePosition[1], std::memory_order_relaxed);
     for (int k = 0; k < 4; ++k) s->display[3 + k].store(v.envelope[k].value, std::memory_order_relaxed);
-    for (int l = 0; l < 4; ++l) {
+    for (int l = 0; l < LY_LFO_COUNT; ++l) {
         const int mode = (int)std::lround(s->raw[lfoBase(l) + (LY_LFO1_RETRIG - LY_LFO1_SHAPE)]);
         const bool perVoice = hasVoice && v.active && mode != LY_LFOMODE_FREE;
         const LFOState &state = perVoice ? v.lfo[l] : s->globalLFO[l];
-        s->display[7 + l].store(hasVoice && v.active ? lfoValue(s, v, l) : state.value, std::memory_order_relaxed);
+        const int valueSlot = l < LY_LEGACY_LFO_COUNT ? 7 + l : kDisplayExtraLFO + (l - LY_LEGACY_LFO_COUNT) * 2;
+        const int phaseSlot = l < LY_LEGACY_LFO_COUNT ? 11 + l : valueSlot + 1;
+        s->display[valueSlot].store(hasVoice && v.active ? lfoValue(s, v, l) : state.value, std::memory_order_relaxed);
         float phase = (float)state.phase;
         if (!perVoice) { phase += s->raw[lfoBase(l) + (LY_LFO1_PHASE - LY_LFO1_SHAPE)]; phase -= std::floor(phase); }
-        s->display[11 + l].store(phase, std::memory_order_relaxed);
+        s->display[phaseSlot].store(phase, std::memory_order_relaxed);
     }
     s->display[15].store(v.cutoffHz, std::memory_order_relaxed);
     s->display[16].store(v.cutoff2Hz, std::memory_order_relaxed);
@@ -2423,9 +2764,11 @@ void lysynth_get_display(const LYSynth *s, LYSynthDisplay *out) {
     out->wavetablePosition[0] = s->display[1].load(std::memory_order_relaxed);
     out->wavetablePosition[1] = s->display[2].load(std::memory_order_relaxed);
     for (int k = 0; k < 4; ++k) out->envelope[k] = s->display[3 + k].load(std::memory_order_relaxed);
-    for (int l = 0; l < 4; ++l) {
-        out->lfo[l] = s->display[7 + l].load(std::memory_order_relaxed);
-        out->lfoPhase[l] = s->display[11 + l].load(std::memory_order_relaxed);
+    for (int l = 0; l < LY_LFO_COUNT; ++l) {
+        const int valueSlot = l < LY_LEGACY_LFO_COUNT ? 7 + l : kDisplayExtraLFO + (l - LY_LEGACY_LFO_COUNT) * 2;
+        const int phaseSlot = l < LY_LEGACY_LFO_COUNT ? 11 + l : valueSlot + 1;
+        out->lfo[l] = s->display[valueSlot].load(std::memory_order_relaxed);
+        out->lfoPhase[l] = s->display[phaseSlot].load(std::memory_order_relaxed);
     }
     out->cutoffHz = s->display[15].load(std::memory_order_relaxed);
     out->cutoff2Hz = s->display[16].load(std::memory_order_relaxed);

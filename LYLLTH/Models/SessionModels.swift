@@ -156,6 +156,9 @@ struct LYAudioTake: Codable, Identifiable, Equatable {
     var sourceRelativePath: String
     var sourceStartSeconds: Double
     var durationSeconds: Double
+    /// A compact overview of this take only. Older projects simply draw an
+    /// empty lane until the take is recorded or imported again.
+    var waveformPeaks: [Float]? = nil
     var recordedAt = Date()
 }
 
@@ -208,6 +211,35 @@ enum LYTakeLaneEditor {
         promote(takeID: takeID, from: 0, to: source.lengthBeats, in: source)
     }
 
+    /// Adds another recording pass to an existing take folder. A simple
+    /// whole-take audition follows the newest pass, while a real edited comp
+    /// is preserved when the singer records another option later.
+    static func append(recorded incoming: LYClip, to source: LYClip) -> LYClip {
+        guard source.kind == .audio, incoming.kind == .audio,
+              let added = incoming.takes, !added.isEmpty else { return source }
+        var clip = source
+        var takes = clip.takes ?? []
+        let hadEditedComp = Set((clip.compSegments ?? []).map(\.takeID)).count > 1
+            || (clip.compSegments?.count ?? 0) > 1
+        takes.append(contentsOf: added)
+        for index in takes.indices {
+            takes[index].name = "TAKE " + String(format: "%02d", index + 1)
+        }
+        clip.takes = takes
+
+        if !hadEditedComp, let newest = takes.last {
+            clip.activeTakeID = newest.id
+            clip.sourceRelativePath = newest.sourceRelativePath
+            clip.sourceStartSeconds = newest.sourceStartSeconds
+            clip.sourceDurationSeconds = newest.durationSeconds
+            clip.waveformPeaks = newest.waveformPeaks
+            clip.compSegments = [LYCompSegment(startBeat: 0, lengthBeats: clip.lengthBeats, takeID: newest.id)]
+            clip.vocal = nil
+        }
+        clip.normalizeAudioEvent()
+        return clip
+    }
+
     /// Fade at each cut inside a comp, so switching takes never clicks.
     static let compSeamSeconds = 0.005
 
@@ -236,6 +268,7 @@ enum LYTakeLaneEditor {
             piece.sourceRelativePath = take.sourceRelativePath
             piece.sourceStartSeconds = take.sourceStartSeconds + trim
             piece.sourceDurationSeconds = clip.sourceDurationSeconds
+            piece.waveformPeaks = take.waveformPeaks ?? clip.waveformPeaks
             piece.loopOffsetBeats = clip.loopOffsetBeats + segment.startBeat
             piece.fadeInSeconds = index == 0 ? clip.fadeInSeconds : compSeamSeconds
             piece.fadeOutSeconds = index == ordered.count - 1 ? clip.fadeOutSeconds : compSeamSeconds
@@ -1677,6 +1710,59 @@ extension LYLLTHSession {
         groups.append(group)
         mixGroups = groups
         return group.id
+    }
+
+    /// Removes one track and every project-level reference that would become
+    /// invalid with it. Audio files are intentionally retained as unused media
+    /// so deleting a track never destroys the source recording.
+    @discardableResult
+    mutating func removeTrack(id trackID: UUID) -> LYTrack? {
+        guard let index = tracks.firstIndex(where: { $0.id == trackID }) else { return nil }
+        let removed = tracks.remove(at: index)
+
+        trackFolders = trackFolders?.compactMap { folder in
+            var cleaned = folder
+            cleaned.trackIDs.removeAll { $0 == trackID }
+            return cleaned.trackIDs.isEmpty ? nil : cleaned
+        }
+        if trackFolders?.isEmpty == true { trackFolders = nil }
+
+        mixGroups = mixGroups?.compactMap { group in
+            var cleaned = group
+            cleaned.trackIDs.removeAll { $0 == trackID }
+            return cleaned.trackIDs.isEmpty ? nil : cleaned
+        }
+        if mixGroups?.isEmpty == true { mixGroups = nil }
+
+        songFX?.removeAll { $0.trackID == trackID }
+        if songFX?.isEmpty == true { songFX = nil }
+
+        if reverb?.duckSourceID == trackID { reverb?.duckSourceID = nil }
+        mainFX?.removeSourceReferences(to: trackID)
+
+        for trackIndex in tracks.indices {
+            if tracks[trackIndex].outputBusID == trackID {
+                tracks[trackIndex].outputBusID = nil
+            }
+            tracks[trackIndex].sends?.removeAll { $0.busID == trackID }
+            if tracks[trackIndex].sends?.isEmpty == true { tracks[trackIndex].sends = nil }
+            tracks[trackIndex].automation?.removeAll { lane in
+                if case .send(let busID) = lane.target { return busID == trackID }
+                return false
+            }
+            if tracks[trackIndex].automation?.isEmpty == true {
+                tracks[trackIndex].automation = nil
+                tracks[trackIndex].showsAutomation = false
+            }
+            tracks[trackIndex].fx?.removeSourceReferences(to: trackID)
+            tracks[trackIndex].frozenState?.fx?.removeSourceReferences(to: trackID)
+            tracks[trackIndex].frozenState?.automation?.removeAll { lane in
+                if case .send(let busID) = lane.target { return busID == trackID }
+                return false
+            }
+        }
+
+        return removed
     }
 
     func effectiveVolumeDB(for track: LYTrack) -> Double {

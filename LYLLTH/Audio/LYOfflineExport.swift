@@ -454,6 +454,7 @@ struct LYOfflineExport {
     private func lunatkStream(_ track: LYTrack, index: Int) -> OfflineStreamSource.Render {
         let instrument = LYSynthInstrument(sampleRate: sampleRate)
         instrument.apply(track.synth ?? .initPatch, bpm: session.bpm)
+        lysynth_set_param(instrument.core, Int32(LY_RENDER_QUALITY), Float(LY_QUALITY_ULTRA))
         let core = instrument.core
         var events = noteEvents(for: track, index: index)
         let lanes = (track.automation ?? []).filter(\.isActive).compactMap { lane -> (Int32, LYAutomationLane)? in

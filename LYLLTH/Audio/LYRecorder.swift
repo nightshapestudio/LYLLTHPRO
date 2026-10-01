@@ -128,7 +128,7 @@ final class LYRecorder: ObservableObject {
         transportStartHost = preRollBeats > 0 ? countStart + AVAudioTime.hostTime(forSeconds: beat * Double(preRollBeats)) : countStart
         self.projectID = projectID
         self.audioTargets = audioTargets
-        measuredLatencySeconds = engine.inputConfiguration()?.measuredLatencySeconds ?? 0
+        measuredLatencySeconds = 0
 
         LYMIDIInput.shared.recordHandler = { [weak self] status, data1, data2, host in
             Task { @MainActor in self?.capture(status: status, data1: data1, data2: data2, host: host) }
@@ -146,6 +146,12 @@ final class LYRecorder: ObservableObject {
                     NightshapeAudioEngine.InputRecordingTarget(id: $0.0.trackID, url: $0.1,
                                                                channel: $0.0.inputChannel)
                 })
+                // Query only after the input graph has been established. The
+                // first input-node access can make macOS replace the
+                // output-only device with an input/output aggregate; doing it
+                // before `beginInputRecording` used to stop I/O underneath the
+                // still-running player graph.
+                measuredLatencySeconds = engine.inputConfiguration()?.measuredLatencySeconds ?? 0
                 LYRecordingJournal.begin(projectID: projectID, targets: targets)
                 recordingAudio = true
             } catch {

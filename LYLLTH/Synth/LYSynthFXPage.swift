@@ -9,20 +9,21 @@ struct LYSynthFXPage: View {
     @State private var dropTarget: Int?
 
     static let onIDs: [Int] = [LY_HYPER_ON, LY_DIST_ON, LY_FLANGER_ON, LY_PHASER_ON, LY_CHORUS_ON,
-                               LY_DELAY_ON, LY_COMP_ON, LY_EQ_ON, LY_FXF_ON, LY_REVERB_ON, LY_DEC_ON].map { Int($0) }
+                               LY_DELAY_ON, LY_COMP_ON, LY_EQ_ON, LY_FXF_ON, LY_REVERB_ON, LY_DEC_ON,
+                               LY_BODE_ON, LY_CONV_ON, LY_SPLIT_ON, LY_UTIL_ON].map { Int($0) }
 
     static func accent(_ fx: Int) -> Color {
         switch fx {
-        case LY_FX_HYPER, LY_FX_CHORUS, LY_FX_EQ: return LYLLTHTheme.teal
-        case LY_FX_DIST, LY_FX_COMP, LY_FX_FILTER: return LYLLTHTheme.indigo
-        case LY_FX_FLANGER, LY_FX_PHASER, LY_FX_DECIM: return LYLLTHTheme.purple
+        case LY_FX_HYPER, LY_FX_CHORUS, LY_FX_EQ, LY_FX_SPLITTER: return LYLLTHTheme.teal
+        case LY_FX_DIST, LY_FX_COMP, LY_FX_FILTER, LY_FX_UTILITY: return LYLLTHTheme.indigo
+        case LY_FX_FLANGER, LY_FX_PHASER, LY_FX_DECIM, LY_FX_BODE: return LYLLTHTheme.purple
         default: return LYLLTHTheme.lavender
         }
     }
 
     static let details = ["UNISON + DIMENSION", "10 CHARACTERS", "COMB SWEEP", "6-STAGE SWEEP", "2-VOICE ENSEMBLE",
                           "TEMPO · PING-PONG", "SINGLE OR MULTIBAND", "SHELF · PEAK · SHELF", "LP · HP · BP · COMB", "PLATE OR HALL",
-                          "DESTROY · CRUSH · MOTION"]
+                          "DESTROY · CRUSH · MOTION", "SINGLE-SIDEBAND SHIFT", "FIR SPACE / CABINET", "THREE-BAND PARALLEL", "GAIN · PAN · WIDTH · DC"]
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -47,6 +48,10 @@ struct LYSynthFXPage: View {
             VStack(spacing: 4) {
                 ForEach(Array(order.enumerated()), id: \.element) { position, fx in
                     rackRow(fx: fx, position: position, order: order)
+                }
+                HStack(spacing: 8) {
+                    context.knob(LY_AUX_A_RETURN, accent: LYLLTHTheme.teal, diameter: 25, label: "A RETURN")
+                    context.knob(LY_AUX_B_RETURN, accent: LYLLTHTheme.purple, diameter: 25, label: "B RETURN")
                 }
                 Spacer(minLength: 0)
                 Text("SIGNAL RUNS TOP TO BOTTOM\nDRAG A ROW OR USE THE ARROWS TO REORDER")
@@ -102,6 +107,16 @@ struct LYSynthFXPage: View {
                     .frame(height: 2)
             }
             Spacer(minLength: 0)
+            let route = min(max(Int(context.value(LY_FX_ROUTE_BASE + fx)), 0), Int(LY_FX_ROUTE_COUNT) - 1)
+            Button { context.set(LY_FX_ROUTE_BASE + fx, Float((route + 1) % Int(LY_FX_ROUTE_COUNT))) } label: {
+                Text(["M", "A", "B"][route])
+                    .font(LYLLTHTheme.value(7.5))
+                    .foregroundStyle(route == 0 ? LYLLTHTheme.dim : accent)
+                    .frame(width: 18, height: 18)
+                    .overlay(Rectangle().stroke(route == 0 ? LYLLTHTheme.line : accent, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .help("Signal bus: \(LYSynthNames.fxRoutes[route]). Click to change")
             VStack(spacing: 0) {
                 arrow("chevron.up", enabled: position > 0) { move(order, from: position, to: position - 1) }
                 arrow("chevron.down", enabled: position < order.count - 1) { move(order, from: position, to: position + 1) }
@@ -275,6 +290,30 @@ struct LYSynthFXPage: View {
                 c.knob(LY_FXF_RES, LY_DST_FXF_RES, accent: accent, diameter: 34)
                 c.knob(LY_FXF_DRIVE, accent: accent, diameter: 34)
                 c.knob(LY_FXF_MIX, LY_DST_FXF_MIX, accent: accent, diameter: 38)
+            case LY_FX_BODE:
+                c.knob(LY_BODE_SHIFT, accent: accent, diameter: 42, format: { value in
+                    let hz = (value < 0 ? -1 : 1) * (pow(80, abs(value)) - 1) * 65
+                    return String(format: "%+.0f HZ", hz)
+                })
+                c.knob(LY_BODE_FEEDBACK, accent: accent, diameter: 36, format: pct)
+                c.knob(LY_BODE_MIX, accent: accent, diameter: 40, format: pct)
+            case LY_FX_CONV:
+                c.knob(LY_CONV_SIZE, accent: accent, diameter: 42, format: pct)
+                c.knob(LY_CONV_TONE, accent: accent, diameter: 36, format: pct)
+                c.knob(LY_CONV_MIX, accent: accent, diameter: 40, format: pct)
+            case LY_FX_SPLITTER:
+                c.knob(LY_SPLIT_LOW_X, accent: LYLLTHTheme.teal, diameter: 30, label: "LOW X", format: LYSynthContext.hz)
+                c.knob(LY_SPLIT_HIGH_X, accent: LYLLTHTheme.purple, diameter: 30, label: "HIGH X", format: LYSynthContext.hz)
+                divider
+                c.knob(LY_SPLIT_LOW, accent: LYLLTHTheme.teal, diameter: 34, label: "LOW", format: { String(format: "%+.0f DB", ($0 - 0.5) * 24) })
+                c.knob(LY_SPLIT_MID, accent: LYLLTHTheme.indigo, diameter: 34, label: "MID", format: { String(format: "%+.0f DB", ($0 - 0.5) * 24) })
+                c.knob(LY_SPLIT_HIGH, accent: LYLLTHTheme.purple, diameter: 34, label: "HIGH", format: { String(format: "%+.0f DB", ($0 - 0.5) * 24) })
+                c.knob(LY_SPLIT_MIX, accent: accent, diameter: 38, format: pct)
+            case LY_FX_UTILITY:
+                c.knob(LY_UTIL_GAIN, accent: accent, diameter: 42, format: { String(format: "%+.1f DB", ($0 - 0.5) * 48) })
+                c.knob(LY_UTIL_PAN, accent: accent, diameter: 38, format: LYSynthContext.pan)
+                c.knob(LY_UTIL_WIDTH, accent: accent, diameter: 38, format: { String(format: "%.0f%%", $0 * 200) })
+                LYSynthToggle(title: "REMOVE DC", isOn: c.isOn(LY_UTIL_DC), accent: accent) { c.toggle(LY_UTIL_DC) }
             default:
                 let hall = c.isOn(LY_REVERB_MODE)
                 HStack(spacing: 3) {
@@ -543,6 +582,55 @@ struct LYFXVisual: View {
             fill.addLine(to: CGPoint(x: size.width, y: size.height)); fill.addLine(to: CGPoint(x: 0, y: size.height)); fill.closeSubpath()
             context.fill(fill, with: .color(accent.opacity(0.1)))
             stroke(&context, curve)
+        case LY_FX_BODE:
+            grid(&context, size, logFrequency: false)
+            let shift = p(LY_BODE_SHIFT)
+            for line in 0..<3 {
+                var wave = Path()
+                for i in 0...Int(size.width / 2) {
+                    let x = Double(i * 2) / Double(size.width)
+                    let cycles = 2 + Double(line) * 1.7 + shift * 3
+                    let y = size.height * CGFloat(0.25 + Double(line) * 0.25 + sin(x * cycles * 2 * .pi) * 0.09)
+                    if i == 0 { wave.move(to: CGPoint(x: CGFloat(x) * size.width, y: y)) }
+                    else { wave.addLine(to: CGPoint(x: CGFloat(x) * size.width, y: y)) }
+                }
+                stroke(&context, wave, color: accent.opacity(0.9 - Double(line) * 0.2), width: 1.4)
+            }
+            label(&context, size, shift < 0 ? "SHIFT DOWN" : "SHIFT UP", at: size.width - 46, y: 14)
+        case LY_FX_CONV:
+            grid(&context, size, logFrequency: false)
+            let sizeValue = p(LY_CONV_SIZE), tone = p(LY_CONV_TONE)
+            for tap in 0..<48 {
+                let x = size.width * CGFloat(tap + 1) / 49
+                let envelope = pow(0.89 + sizeValue * 0.095, Double(tap))
+                let value = sin(Double(tap) * (0.63 + sizeValue * 0.41)) * envelope * (0.25 + tone * 0.75)
+                context.fill(Path(CGRect(x: x, y: size.height / 2 - CGFloat(max(value, 0)) * size.height * 0.38,
+                                         width: 1.5, height: CGFloat(abs(value)) * size.height * 0.38)),
+                             with: .color(accent.opacity(0.35 + 0.5 * envelope)))
+            }
+            label(&context, size, "IMPULSE", at: 34, y: 14)
+        case LY_FX_SPLITTER:
+            grid(&context, size, logFrequency: true)
+            let values = [p(LY_SPLIT_LOW), p(LY_SPLIT_MID), p(LY_SPLIT_HIGH)]
+            let colors = [LYLLTHTheme.teal, LYLLTHTheme.indigo, LYLLTHTheme.purple]
+            for band in 0..<3 {
+                let width = size.width / 3
+                let height = size.height * CGFloat(0.15 + values[band] * 0.7)
+                let rect = CGRect(x: CGFloat(band) * width + 4, y: (size.height - height) / 2, width: width - 8, height: height)
+                context.fill(Path(rect), with: .color(colors[band].opacity(0.16)))
+                context.stroke(Path(rect), with: .color(colors[band]), lineWidth: 1.2)
+            }
+        case LY_FX_UTILITY:
+            grid(&context, size, logFrequency: false)
+            let pan = p(LY_UTIL_PAN), width = p(LY_UTIL_WIDTH) * 2
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            var left = Path(), right = Path()
+            left.move(to: center); right.move(to: center)
+            left.addLine(to: CGPoint(x: center.x - size.width * CGFloat(width) * 0.22, y: size.height * CGFloat(0.25 + pan * 0.15)))
+            right.addLine(to: CGPoint(x: center.x + size.width * CGFloat(width) * 0.22, y: size.height * CGFloat(0.75 + pan * 0.15)))
+            stroke(&context, left, color: LYLLTHTheme.teal, width: 2)
+            stroke(&context, right, color: LYLLTHTheme.purple, width: 2)
+            context.fill(Path(ellipseIn: CGRect(x: center.x - 5, y: center.y - 5, width: 10, height: 10)), with: .color(accent))
         default:
             let hall = patch.value(LY_REVERB_MODE) > 0.5
             let decay = (hall ? 0.6 : 0.3) + p(LY_REVERB_DECAY) * p(LY_REVERB_DECAY) * (hall ? 18 : 8)

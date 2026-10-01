@@ -60,3 +60,89 @@ optional DC blocker and reverb low cut. (The voice inserts now have their own DC
 Every new parameter sits after the drawn LFO points, so the plug-ins' host
 parameter ids for older parameters did not move. All 176 factory presets render
 bit-for-bit the same as before these were added.
+
+## Warp render quality
+
+LUNATK now renders every active phase and sample warp through a selectable
+oversampled path. DRAFT is the original native-rate path, HIGH is the default
+2× path with a realtime-budgeted reconstruction filter, and ULTRA is a 4× path
+with a longer reconstruction filter. The filters are designed when an
+instrument is created; rendering remains allocation-free and lock-free.
+
+The QUALITY choice lives on the GLOBAL page and is appended after every older
+parameter id. Existing presets therefore load as HIGH without moving any AU or
+VST3 host address. Faster-than-realtime LYLLTH exports force ULTRA without
+changing the saved preset.
+
+The high-register hard-sync quality test currently measures approximately
+−18 dB non-harmonic energy in DRAFT, −26 dB in HIGH, and −30 dB in ULTRA. HIGH
+also stays faster than realtime at the documented 16-voice × 16-unison maximum
+on the development machine. This closes the targeted-oversampling step, but
+does not claim the final −60 dB alias floor: arbitrary non-integer hard-sync
+resets still need a band-limited discontinuity algorithm beyond 4× rendering.
+
+## Wavetable interpolation and mip transitions
+
+Wavetable reads now use four-point Catmull–Rom interpolation instead of a
+two-sample linear read. Mipmap selection is continuous: the oscillator derives
+a fractional level from its phase increment and crossfades between the two
+adjacent band-limited tables. Frame-position interpolation remains independent,
+so moving through a multi-frame wavetable and moving through its mip levels are
+both smooth.
+
+The regression test straddles the 64-harmonic/32-harmonic boundary by 0.02 cent
+and currently measures a −47 dB null between the two renders. This removes the
+old octave-sized partial change at an exact mip boundary.
+
+## Ladder topology and modulation timing
+
+The two- and four-pole LADDER modes now use topology-preserving one-pole stages
+inside a zero-delay feedback solve. Two Newton iterations solve the saturated
+feedback input without adding a sample of delay. A noise-excited resonance test
+currently measures requested 440 Hz and 1,760 Hz cutoffs at about 435 Hz and
+1,744 Hz, while also checking finite, bounded output at maximum resonance.
+
+Continuous parameter smoothing now uses a 5 ms time constant derived from the
+sample rate instead of a fixed amount per host render call. Control work remains
+bounded to 16-sample chunks, while oscillator pitch/glide and amplitude move on
+per-sample ramps; audio-rate FM continues to be evaluated per sample. The same
+automated master move rendered in 64- and 512-frame host blocks currently nulls
+at approximately −230 dB, so live and offline block sizes no longer change the
+automation trajectory.
+
+## Expanded modulation
+
+LUNATK now exposes ten LFOs and sixty-four modulation-matrix slots. The six
+additional LFOs, the additional matrix slots, and each LFO's thirty-two segment
+curve values all use append-only parameter addresses, so existing patch keys and
+host automation addresses remain intact. The drawn LFO editor can shape each
+breakpoint transition independently rather than storing only point heights.
+
+## Wavetable construction
+
+Audio import now supports fixed windows, detected pitch cycles, and spectral
+resynthesis in addition to automatic Serum-table preservation. Imported cycles
+are normalized and phase-aligned before they become table frames. The editor
+also provides edge fading, phase alignment, a compact frame-stack overview, and
+a bounded formula parser that generates complete tables from expressions using
+cycle position `x` and normalized frame position `f`.
+
+## Parallel effects rack
+
+The rack contains fifteen processors and retains its append-only order slots.
+Every processor can run on the main path, AUX A, or AUX B, with independent
+return levels. Four processors were added: a single-sideband Bode shifter, a
+fixed-allocation FIR convolution space/cabinet, a three-band splitter, and a
+gain/pan/width/DC utility. All impulse and delay storage is prepared outside the
+render callback; selecting or routing an effect does not allocate on the audio
+thread.
+
+## Hybrid oscillator material
+
+Each main oscillator can interpret imported material as a wavetable, one-shot
+or looping sample, frame-zoned multisample, granular source, or additive
+spectral source. Sample roots and looping are patch parameters; granular size,
+density, and spray and spectral tilt are independently saved per oscillator.
+The multisample mode deliberately treats imported table frames as adjacent key
+zones. It is a playable mapped-sample engine, not an SFZ/EXS instrument parser
+or a disk-streaming sampler.

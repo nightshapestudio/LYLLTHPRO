@@ -772,6 +772,125 @@ struct Reverb {
     }
 };
 
+// MARK: - BODE SHIFTER, CONVOLUTION, SPLITTER, UTILITY
+
+/// A compact single-sideband shifter. A short Hilbert-style quadrature path
+/// and a complex oscillator move every partial by the same number of hertz.
+struct BodeShifter {
+    float sampleRate = 44100, phase = 0, previous[2] = {}, feedback[2] = {};
+    void prepare(float sr) { sampleRate = sr; clear(); }
+    void clear() { phase = 0; previous[0] = previous[1] = feedback[0] = feedback[1] = 0; }
+    void process(float *L, float *R, int n, float shift, float feedbackAmount, float mix) {
+        const float hz = (shift < 0 ? -1.f : 1.f) * (std::pow(80.f, std::fabs(shift)) - 1.f) * 65.f;
+        const float fb = feedbackAmount * 0.88f;
+        float *io[2] = { L, R };
+        for (int i = 0; i < n; ++i) {
+            phase += hz / sampleRate;
+            phase -= std::floor(phase);
+            const float c = std::cos(kTwoPi * phase), s = std::sin(kTwoPi * phase);
+            for (int ch = 0; ch < 2; ++ch) {
+                const float dry = io[ch][i];
+                const float input = dry + feedback[ch] * fb;
+                // The difference path leads the direct path and provides a
+                // stable, bounded quadrature approximation without latency.
+                const float quadrature = (input - previous[ch]) * 2.2f;
+                previous[ch] = input;
+                const float wet = softclip(input * c - quadrature * s);
+                feedback[ch] = flush(wet);
+                io[ch][i] = dry + (wet - dry) * mix;
+            }
+        }
+    }
+};
+
+/// Bounded FIR convolution with a generated room/cabinet impulse. The taps
+/// are rebuilt once per control chunk on the stack; the audio thread never
+/// allocates and the history is fixed-size.
+struct Convolution {
+    static constexpr int kTaps = 96;
+    float history[2][kTaps] = {}, sampleRate = 44100;
+    int write = 0;
+    void prepare(float sr) { sampleRate = sr; clear(); }
+    void clear() { std::memset(history, 0, sizeof(history)); write = 0; }
+    void process(float *L, float *R, int n, float size, float tone, float mix) {
+        float impulse[kTaps];
+        const float decay = 0.89f + size * 0.095f;
+        const float dark = 0.25f + tone * 0.75f;
+        float norm = 0;
+        for (int tap = 0; tap < kTaps; ++tap) {
+            const float envelope = std::pow(decay, (float)tap);
+            const float reflection = tap == 0 ? 1.f : std::sin(tap * (0.63f + size * 0.41f)) * envelope * dark;
+            impulse[tap] = reflection;
+            norm += std::fabs(reflection);
+        }
+        norm = std::max(norm * 0.32f, 1.f);
+        float *io[2] = { L, R };
+        for (int i = 0; i < n; ++i) {
+            for (int ch = 0; ch < 2; ++ch) history[ch][write] = io[ch][i];
+            for (int ch = 0; ch < 2; ++ch) {
+                float wet = 0;
+                int read = write;
+                for (int tap = 0; tap < kTaps; ++tap) {
+                    wet += history[ch][read] * impulse[tap];
+                    if (--read < 0) read = kTaps - 1;
+                }
+                const float dry = io[ch][i];
+                io[ch][i] = dry + (wet / norm - dry) * mix;
+            }
+            if (++write == kTaps) write = 0;
+        }
+    }
+};
+
+/// Three-band parallel splitter/recombiner. LOW, MID and HIGH are trims,
+/// making the block useful for tonal balancing before later rack effects.
+struct Splitter {
+    float lowState[2] = {}, highState[2] = {}, sampleRate = 44100;
+    void prepare(float sr) { sampleRate = sr; clear(); }
+    void clear() { lowState[0] = lowState[1] = highState[0] = highState[1] = 0; }
+    void process(float *L, float *R, int n, float lowX, float highX,
+                 float lowGain, float midGain, float highGain, float mix) {
+        const float lowHz = 80.f * std::pow(25.f, lowX);
+        const float highHz = std::max(lowHz * 1.3f, 1200.f * std::pow(12.f, highX));
+        const float aLow = 1.f - std::exp(-kTwoPi * lowHz / sampleRate);
+        const float aHigh = 1.f - std::exp(-kTwoPi * highHz / sampleRate);
+        const float gains[3] = { dbToGain((lowGain - 0.5f) * 24.f), dbToGain((midGain - 0.5f) * 24.f), dbToGain((highGain - 0.5f) * 24.f) };
+        float *io[2] = { L, R };
+        for (int i = 0; i < n; ++i) for (int ch = 0; ch < 2; ++ch) {
+            const float dry = io[ch][i];
+            lowState[ch] += (dry - lowState[ch]) * aLow;
+            highState[ch] += (dry - highState[ch]) * aHigh;
+            const float low = lowState[ch], high = dry - highState[ch], mid = dry - low - high;
+            const float wet = low * gains[0] + mid * gains[1] + high * gains[2];
+            io[ch][i] = dry + (wet - dry) * mix;
+        }
+    }
+};
+
+struct Utility {
+    float dcIn[2] = {}, dcOut[2] = {};
+    void prepare(float) { clear(); }
+    void clear() { dcIn[0] = dcIn[1] = dcOut[0] = dcOut[1] = 0; }
+    void process(float *L, float *R, int n, float gain, float pan, float width, bool removeDC) {
+        const float outputGain = dbToGain((gain - 0.5f) * 48.f);
+        const float leftPan = std::cos((pan + 1.f) * kPi * 0.25f) * 1.41421356f;
+        const float rightPan = std::sin((pan + 1.f) * kPi * 0.25f) * 1.41421356f;
+        for (int i = 0; i < n; ++i) {
+            const float mid = 0.5f * (L[i] + R[i]);
+            const float side = 0.5f * (L[i] - R[i]) * width * 2.f;
+            float l = (mid + side) * outputGain * leftPan;
+            float r = (mid - side) * outputGain * rightPan;
+            if (removeDC) {
+                const float il = l, ir = r;
+                l = l - dcIn[0] + 0.9975f * dcOut[0];
+                r = r - dcIn[1] + 0.9975f * dcOut[1];
+                dcIn[0] = il; dcIn[1] = ir; dcOut[0] = flush(l); dcOut[1] = flush(r);
+            }
+            L[i] = l; R[i] = r;
+        }
+    }
+};
+
 // MARK: - SONIC DECIMATOR
 
 /// The NIGHTSHAPE Sonic Decimator, ported sample for sample from DrumKit's

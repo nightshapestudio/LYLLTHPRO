@@ -40,6 +40,27 @@ final class LUNATKTests: XCTestCase {
         }
     }
 
+    func testEffectsCanRunOnParallelAuxBuses() {
+        var patch = LYSynthPatch.initPatch
+        patch.set(LY_DIST_ON, 1)
+        patch.set(LY_DIST_DRIVE, 0.9)
+        patch.set(LY_DIST_MIX, 1)
+        patch.set(LY_FX_ROUTE_BASE + Int(LY_FX_DIST), Float(LY_FX_ROUTE_A))
+        patch.set(LY_AUX_A_RETURN, 0)
+        let dry = LYSynthInstrument()
+        dry.apply(patch, bpm: 120)
+        dry.noteOn(48, velocity: 110, atHostTime: 0, cutoff: 1, resonance: 0)
+        let dryLevel = render(dry, seconds: 0.5).rms
+
+        patch.set(LY_AUX_A_RETURN, 0.8)
+        let returned = LYSynthInstrument()
+        returned.apply(patch, bpm: 120)
+        returned.noteOn(48, velocity: 110, atHostTime: 0, cutoff: 1, resonance: 0)
+        let returnedLevel = render(returned, seconds: 0.5).rms
+        XCTAssertGreaterThan(abs(returnedLevel - dryLevel), 0.01)
+        XCTAssertEqual(patch.value(LY_FX_ROUTE_BASE + Int(LY_FX_DIST)), Float(LY_FX_ROUTE_A))
+    }
+
     func testArpeggiatorPlaysStepsInTime() {
         var patch = LYSynthPatch.initPatch
         patch.set(LY_ARP_ON, 1)
@@ -68,13 +89,17 @@ final class LUNATKTests: XCTestCase {
         XCTAssertEqual(patch.value(LY_DELAY_ON), 0)
     }
 
-    func testMatrixHasThirtyTwoSlotsWithAuxCurveAndBipolar() {
+    func testMatrixHasSixtyFourSlotsWithAuxCurveAndBipolar() {
         var patch = LYSynthPatch.initPatch
-        for slot in 0..<32 { XCTAssertNotNil(patch.route(source: LY_SRC_LFO1 + slot % 4, destination: 1 + slot, amount: 0.1)) }
+        for slot in 0..<Int(LY_MATRIX_SLOTS) {
+            XCTAssertNotNil(patch.route(source: LY_SRC_LFO1 + slot % Int(LY_LFO_COUNT),
+                                        destination: 1 + slot,
+                                        amount: 0.1))
+        }
         XCTAssertNil(patch.route(source: LY_SRC_MACRO1, destination: LY_DST_MASTER, amount: 0.1))
-        XCTAssertEqual(patch.usedMatrixSlots.count, 32)
+        XCTAssertEqual(patch.usedMatrixSlots.count, Int(LY_MATRIX_SLOTS))
         patch.clearRoute(5)
-        XCTAssertEqual(patch.usedMatrixSlots.count, 31)
+        XCTAssertEqual(patch.usedMatrixSlots.count, Int(LY_MATRIX_SLOTS) - 1)
         let data = try! JSONEncoder().encode(patch)
         XCTAssertEqual(try! JSONDecoder().decode(LYSynthPatch.self, from: data), patch)
     }

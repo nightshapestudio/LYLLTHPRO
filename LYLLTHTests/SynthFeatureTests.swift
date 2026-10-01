@@ -62,6 +62,57 @@ final class SynthFeatureTests: XCTestCase {
         XCTAssertEqual(try LYWavetableLibrary.importFrames(from: audio).count, 64 * size)
     }
 
+    func testAdvancedWavetableImportModesProduceCompleteFiniteFrames() throws {
+        let size = LYWavetableLibrary.frameSize
+        let audio = FileManager.default.temporaryDirectory.appendingPathComponent("lyllth-import-modes.wav")
+        let source = (0..<65_536).map { i -> Float in
+            let phase = Double(i) * 2 * .pi / 101
+            return Float(sin(phase) * 0.75 + sin(phase * 3) * 0.2)
+        }
+        try LYWavetableLibrary.writeWAV(source, to: audio)
+        for mode in [LYWavetableImportMode.fixedFrames, .pitchCycles, .spectral] {
+            let frames = try LYWavetableLibrary.importFrames(from: audio, mode: mode, frameCount: 16)
+            XCTAssertEqual(frames.count, 16 * size, mode.rawValue)
+            XCTAssertTrue(frames.allSatisfy(\.isFinite), mode.rawValue)
+            XCTAssertGreaterThan(frames.map(abs).max() ?? 0, 0.1, mode.rawValue)
+        }
+    }
+
+    func testFormulaGeneratorUsesCycleAndFrameVariables() throws {
+        let size = LYWavetableLibrary.frameSize
+        let frames = try LYWavetableEditor.formulaFrames("sin(2*pi*x) + f*sin(6*pi*x)", frameCount: 8)
+        XCTAssertEqual(frames.count, 8 * size)
+        XCTAssertTrue(frames.allSatisfy(\.isFinite))
+        XCTAssertNotEqual(Array(frames.prefix(size)), Array(frames.suffix(size)))
+        XCTAssertThrowsError(try LYWavetableEditor.formulaFrames("sin(", frameCount: 8))
+    }
+
+    func testHybridOscillatorEnginesRenderImportedMaterial() {
+        let size = LYWavetableLibrary.frameSize
+        let frames = (0..<(16 * size)).map { i -> Float in
+            let frame = i / size
+            let phase = Double(i % size) / Double(size) * 2 * .pi
+            return Float(sin(phase) * 0.7 + sin(phase * Double(2 + frame % 7)) * 0.2)
+        }
+        let name = LYWavetableLibrary.shared.store(frames, named: "LYLLTH HYBRID TEST", writeToFolder: false)
+        var levels: [Float] = []
+        for engine in [LY_OSC_ENGINE_SAMPLE, LY_OSC_ENGINE_MULTISAMPLE, LY_OSC_ENGINE_GRANULAR, LY_OSC_ENGINE_SPECTRAL] {
+            var patch = LYSynthPatch.initPatch
+            patch.customTableA = name
+            patch.set(LY_OSC_ENGINE_A, Float(engine))
+            patch.set(LY_SAMPLE_LOOP_A, 1)
+            patch.set(LY_FILTER_ON, 0)
+            let synth = LYSynthInstrument()
+            synth.apply(patch, bpm: 120)
+            synth.noteOn(60, velocity: 110, atHostTime: 0, cutoff: 1, resonance: 0)
+            let level = rms(synth, seconds: 0.25)
+            XCTAssertTrue(level.isFinite, "engine \(engine)")
+            XCTAssertGreaterThan(level, 0.001, "engine \(engine) is silent")
+            levels.append(level)
+        }
+        XCTAssertGreaterThan(Set(levels.map { Int($0 * 10_000) }).count, 1, "all hybrid engines produced the same output level")
+    }
+
     func testHarmonicEditorRoundTripsAFrame() {
         let size = LYWavetableLibrary.frameSize
         let frame = (0..<size).map { i -> Float in
@@ -201,7 +252,7 @@ final class SynthFeatureTests: XCTestCase {
         var patch = LYSynthPatch(name: "OLD")
         let old = LYSynthPatch.defaultEffectOrder.prefix(10).reversed().map { $0 }
         for (place, fx) in old.enumerated() { patch.values["fx.order\(place)"] = Float(fx) }
-        XCTAssertEqual(patch.effectOrder, old + [Int(LY_FX_DECIM)])
+        XCTAssertEqual(patch.effectOrder, old + LYSynthPatch.defaultEffectOrder.suffix(5))
     }
 }
 

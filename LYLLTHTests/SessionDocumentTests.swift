@@ -189,6 +189,66 @@ final class SessionDocumentTests: XCTestCase {
         XCTAssertEqual(comp.takes, clip.takes, "comping never rewrites source takes")
     }
 
+    func testTwentyRecordingPassesAppendToOneTakeFolder() throws {
+        let first = LYAudioTake(
+            name: "TAKE 01", sourceRelativePath: "first.caf",
+            sourceStartSeconds: 0, durationSeconds: 4, waveformPeaks: [0.2, 0.7]
+        )
+        var folder = LYClip(
+            name: "LEAD VOX", kind: .audio, startBeat: 8, lengthBeats: 8,
+            sourceRelativePath: first.sourceRelativePath,
+            sourceStartSeconds: 0, sourceDurationSeconds: 4
+        )
+        folder.takes = [first]
+        folder.activeTakeID = first.id
+        folder.compSegments = [LYCompSegment(startBeat: 0, lengthBeats: 8, takeID: first.id)]
+
+        for pass in 2...20 {
+            let take = LYAudioTake(
+                name: "TAKE 01", sourceRelativePath: "pass-\(pass).caf",
+                sourceStartSeconds: 0, durationSeconds: 4,
+                waveformPeaks: [Float(pass) / 20]
+            )
+            var incoming = folder
+            incoming.id = UUID()
+            incoming.sourceRelativePath = take.sourceRelativePath
+            incoming.takes = [take]
+            incoming.activeTakeID = take.id
+            incoming.compSegments = [LYCompSegment(startBeat: 0, lengthBeats: 8, takeID: take.id)]
+            folder = LYTakeLaneEditor.append(recorded: incoming, to: folder)
+        }
+
+        XCTAssertEqual(folder.takes?.count, 20)
+        XCTAssertEqual(folder.takes?.last?.name, "TAKE 20")
+        let lastID = try XCTUnwrap(folder.takes?.last?.id)
+        XCTAssertEqual(folder.activeTakeID, lastID)
+        XCTAssertEqual(folder.compSegments?.map(\.takeID), [lastID])
+        XCTAssertEqual(folder.waveformPeaks, [1])
+    }
+
+    func testNewRecordingPreservesAnEditedComposite() throws {
+        let first = LYAudioTake(name: "TAKE 01", sourceRelativePath: "one.caf", sourceStartSeconds: 0, durationSeconds: 4)
+        let second = LYAudioTake(name: "TAKE 02", sourceRelativePath: "two.caf", sourceStartSeconds: 0, durationSeconds: 4)
+        var folder = LYClip(name: "LEAD", kind: .audio, startBeat: 0, lengthBeats: 8, sourceRelativePath: "one.caf")
+        folder.takes = [first, second]
+        folder.activeTakeID = first.id
+        folder.compSegments = [
+            LYCompSegment(startBeat: 0, lengthBeats: 4, takeID: first.id),
+            LYCompSegment(startBeat: 4, lengthBeats: 4, takeID: second.id)
+        ]
+        let third = LYAudioTake(name: "TAKE 01", sourceRelativePath: "three.caf", sourceStartSeconds: 0, durationSeconds: 4)
+        var incoming = folder
+        incoming.takes = [third]
+        incoming.activeTakeID = third.id
+
+        let appended = LYTakeLaneEditor.append(recorded: incoming, to: folder)
+
+        XCTAssertEqual(appended.takes?.count, 3)
+        XCTAssertEqual(appended.takes?.last?.name, "TAKE 03")
+        XCTAssertEqual(appended.compSegments, folder.compSegments)
+        XCTAssertEqual(appended.activeTakeID, first.id)
+    }
+
     func testPerTrackAudioInputsRoundTrip() throws {
         var session = LYLLTHSession.starter()
         let audio = try XCTUnwrap(session.tracks.firstIndex(where: { $0.kind == .audio }))
@@ -573,13 +633,13 @@ final class SessionDocumentTests: XCTestCase {
     func testFoldersAndMixGroupsSurviveMigrationAndAffectGain() throws {
         var session = LYLLTHSession.blank()
         let ids = Array(session.tracks.prefix(2).map(\.id))
-        _ = session.createFolder(name: "DRUMS", trackIDs: ids)
-        _ = session.createMixGroup(name: "DRUM BUS", trackIDs: ids)
+        let folderID = session.createFolder(name: "DRUMS", trackIDs: ids)
+        let mixGroupID = session.createMixGroup(name: "DRUM BUS", trackIDs: ids)
         session.mixGroups?[0].volumeOffsetDB = -3
         XCTAssertEqual(session.effectiveVolumeDB(for: session.tracks[0]), session.tracks[0].volumeDB - 3)
         let decoded = try JSONDecoder().decode(LYLLTHSession.self, from: JSONEncoder().encode(session)).migratedToCurrentSchema()
-        XCTAssertEqual(decoded.trackFolders?.first?.trackIDs, ids)
-        XCTAssertEqual(decoded.mixGroups?.first?.trackIDs, ids)
+        XCTAssertEqual(decoded.trackFolders?.first(where: { $0.id == folderID })?.trackIDs, ids)
+        XCTAssertEqual(decoded.mixGroups?.first(where: { $0.id == mixGroupID })?.trackIDs, ids)
     }
 
     func testImportedAudioIsStoredInsideProjectPackage() throws {

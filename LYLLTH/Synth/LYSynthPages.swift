@@ -496,12 +496,15 @@ struct LYSynthGlobalPage: View {
                     LUNATKMark(size: 30)
                     Text("WAVETABLE SYNTHESIZER BY NIGHTSHAPE")
                         .font(LYLLTHTheme.label(8, weight: .bold)).tracking(1.4).foregroundStyle(LYLLTHTheme.text)
+                    c.choice(LY_RENDER_QUALITY, label: "RENDER QUALITY", names: LYSynthNames.renderQualities,
+                             accent: LYLLTHTheme.lavender, columns: 3, width: 250, anchor: "renderQuality")
+                        .help("DRAFT uses native-rate warps, HIGH uses 2×, and ULTRA uses 4×. LYLLTH offline exports use ULTRA.")
                     VStack(alignment: .leading, spacing: 6) {
-                        fact("OSCILLATORS", "2 WAVETABLE · 16 UNISON · DUAL WARP · STACK")
+                        fact("OSCILLATORS", "2 HYBRID · WAVETABLE / SAMPLE / MULTISAMPLE / GRANULAR / SPECTRAL")
                         fact("SUB + NOISE", "4 SHAPES · 8 NOISE TYPES")
                         fact("FILTERS", "2 · SERIAL, PARALLEL OR SPLIT · \(LY_FILTER_COUNT) TYPES · SATURATION · FEEDBACK")
                         fact("VOICE FX", "2 INSERTS PER NOTE · \(LY_INS_COUNT - 1) TYPES")
-                        fact("MODULATION", "4 ENV · 4 LFO · 8 MACROS · \(LY_MATRIX_SLOTS)-SLOT MATRIX")
+                        fact("MODULATION", "4 ENV · \(LY_LFO_COUNT) LFO · 8 MACROS · \(LY_MATRIX_SLOTS)-SLOT MATRIX")
                         fact("PERFORM", "2 PERFORMERS · 2 TRACKERS · SWITCH KEYS")
                         fact("FX", "\(LY_FX_COUNT) EFFECTS · ANY ORDER")
                         fact("PLAY", "16 VOICES · PATTERN ARP ON THE BAR · MPE · VOCODER")

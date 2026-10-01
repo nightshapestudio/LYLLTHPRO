@@ -150,6 +150,16 @@ struct LYFXRack: Codable, Equatable {
             }
         }
     }
+
+    /// Clears sidechain/follower assignments that pointed at a deleted track.
+    /// Keeping the effect itself preserves the user's sound; only the now
+    /// impossible key source falls back to SELF/NONE.
+    mutating func removeSourceReferences(to trackID: UUID) {
+        if compressor?.sidechainSourceID == trackID { compressor?.sidechainSourceID = nil }
+        if voidGate?.keySourceID == trackID { voidGate?.keySourceID = nil }
+        if filter?.followSourceID == trackID { filter?.followSourceID = nil }
+        if pump?.keySourceID == trackID { pump?.keySourceID = nil }
+    }
 }
 
 /// Where each NIGHTSHAPE effect lives in the engine. The same calls DrumKit's

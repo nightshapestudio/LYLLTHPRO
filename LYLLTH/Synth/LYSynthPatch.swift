@@ -28,11 +28,28 @@ enum LYSynthParameters {
     }
 
     static func lfo(_ index: Int, _ field: Int) -> Int {
-        LY_LFO1_SHAPE + index * Int(LY_LFO_STRIDE) + (field - LY_LFO1_SHAPE)
+        let base = index < Int(LY_LEGACY_LFO_COUNT)
+            ? LY_LFO1_SHAPE + index * Int(LY_LFO_STRIDE)
+            : LY_EXTRA_LFO_BASE + (index - Int(LY_LEGACY_LFO_COUNT)) * Int(LY_LFO_STRIDE)
+        return base + (field - LY_LFO1_SHAPE)
+    }
+
+    static func lfoPoint(_ index: Int, _ point: Int) -> Int {
+        let base = index < Int(LY_LEGACY_LFO_COUNT)
+            ? LY_LFO_POINTS_BASE + index * Int(LY_LFO_POINTS)
+            : LY_EXTRA_LFO_POINTS_BASE + (index - Int(LY_LEGACY_LFO_COUNT)) * Int(LY_LFO_POINTS)
+        return base + point
+    }
+
+    static func lfoCurve(_ index: Int, _ segment: Int) -> Int {
+        LY_LFO_CURVES_BASE + index * Int(LY_LFO_POINTS) + segment
     }
 
     static func matrix(_ slot: Int, _ field: Int) -> Int {
-        LY_MATRIX_BASE + slot * Int(LY_MATRIX_STRIDE) + field
+        let base = slot < Int(LY_LEGACY_MATRIX_SLOTS)
+            ? LY_MATRIX_BASE + slot * Int(LY_MATRIX_STRIDE)
+            : LY_EXTRA_MATRIX_BASE + (slot - Int(LY_LEGACY_MATRIX_SLOTS)) * Int(LY_MATRIX_STRIDE)
+        return base + field
     }
 
     static func insert(_ index: Int, _ field: Int) -> Int {
@@ -55,10 +72,9 @@ enum LYSynthParameters {
         LY_TRACK_POINTS_BASE + index * Int(LY_TRACK_POINTS) + point
     }
 
-    /// The parameter holding the rack's `place`-th effect: ten at
-    /// LY_FX_ORDER, the eleventh (added with the DECIMATOR) after them all.
+    /// The original ten, DECIMATOR's append-only slot, then later additions.
     static func effectOrder(_ place: Int) -> Int {
-        place < 10 ? LY_FX_ORDER + place : LY_FX_ORDER_LAST
+        place < 10 ? LY_FX_ORDER + place : (place == 10 ? LY_FX_ORDER_LAST : LY_FX_ORDER_EXTRA_BASE + place - 11)
     }
 
     /// A DECIMATOR MOTION step's on switch, DESTROY (x) or CRUSH (y).
@@ -136,7 +152,7 @@ enum LYSynthParameters {
             add(LY_ENV1_DCURVE + e * 3, "env\(e + 1).dcurve", "D CURVE", -1...1)
             add(LY_ENV1_RCURVE + e * 3, "env\(e + 1).rcurve", "R CURVE", -1...1)
         }
-        for l in 0..<4 {
+        for l in 0..<Int(LY_LFO_COUNT) {
             let n = "lfo\(l + 1)"
             add(lfo(l, LY_LFO1_SHAPE), "\(n).shape", "SHAPE", 0...Float(LY_LFO_SHAPE_COUNT - 1), stepped: true)
             add(lfo(l, LY_LFO1_RATE), "\(n).rate", "RATE", 0...1)
@@ -147,7 +163,8 @@ enum LYSynthParameters {
             add(lfo(l, LY_LFO1_DELAY), "\(n).delay", "DELAY", 0...1)
             add(lfo(l, LY_LFO1_RISE), "\(n).rise", "RISE", 0...1)
             for i in 0..<Int(LY_LFO_POINTS) {
-                add(LY_LFO_POINTS_BASE + l * Int(LY_LFO_POINTS) + i, "\(n).p\(i)", "POINT", -1...1)
+                add(lfoPoint(l, i), "\(n).p\(i)", "POINT", -1...1)
+                add(lfoCurve(l, i), "\(n).curve\(i)", "CURVE", -1...1)
             }
         }
         for m in 0..<4 { add(LY_MACRO1 + m, "macro\(m + 1)", "MACRO \(m + 1)", 0...1) }
@@ -303,6 +320,36 @@ enum LYSynthParameters {
             add(decimatorStep(i, LY_DEC_STEP_X_BASE), "decim.step\(i).x", "STEP \(i + 1) DESTROY", 0...1)
             add(decimatorStep(i, LY_DEC_STEP_Y_BASE), "decim.step\(i).y", "STEP \(i + 1) CRUSH", 0...1)
         }
+        add(LY_RENDER_QUALITY, "render.quality", "QUALITY", 0...Float(LY_QUALITY_COUNT - 1), stepped: true)
+        for fx in 0..<Int(LY_FX_COUNT) {
+            add(LY_FX_ROUTE_BASE + fx, "fx.route\(fx)", "BUS", 0...Float(LY_FX_ROUTE_COUNT - 1), stepped: true)
+        }
+        add(LY_AUX_A_RETURN, "fx.auxA.return", "A RETURN", 0...1)
+        add(LY_AUX_B_RETURN, "fx.auxB.return", "B RETURN", 0...1)
+        let extraFX: [(Int, String, String, ClosedRange<Float>, Bool)] = [
+            (LY_BODE_ON, "bode.on", "ON", 0...1, true), (LY_BODE_SHIFT, "bode.shift", "SHIFT", -1...1, false),
+            (LY_BODE_FEEDBACK, "bode.feedback", "FEEDBACK", 0...1, false), (LY_BODE_MIX, "bode.mix", "MIX", 0...1, false),
+            (LY_CONV_ON, "conv.on", "ON", 0...1, true), (LY_CONV_SIZE, "conv.size", "SIZE", 0...1, false),
+            (LY_CONV_TONE, "conv.tone", "TONE", 0...1, false), (LY_CONV_MIX, "conv.mix", "MIX", 0...1, false),
+            (LY_SPLIT_ON, "split.on", "ON", 0...1, true), (LY_SPLIT_LOW_X, "split.lowX", "LOW X", 0...1, false),
+            (LY_SPLIT_HIGH_X, "split.highX", "HIGH X", 0...1, false), (LY_SPLIT_LOW, "split.low", "LOW", 0...1, false),
+            (LY_SPLIT_MID, "split.mid", "MID", 0...1, false), (LY_SPLIT_HIGH, "split.high", "HIGH", 0...1, false),
+            (LY_SPLIT_MIX, "split.mix", "MIX", 0...1, false),
+            (LY_UTIL_ON, "utility.on", "ON", 0...1, true), (LY_UTIL_GAIN, "utility.gain", "GAIN", 0...1, false),
+            (LY_UTIL_PAN, "utility.pan", "PAN", -1...1, false), (LY_UTIL_WIDTH, "utility.width", "WIDTH", 0...1, false),
+            (LY_UTIL_DC, "utility.dc", "REMOVE DC", 0...1, true),
+        ]
+        for item in extraFX { add(item.0, item.1, item.2, item.3, stepped: item.4) }
+        for o in 0..<2 {
+            let name = o == 0 ? "a" : "b"
+            add(LY_OSC_ENGINE_A + o, "\(name).engine", "ENGINE", 0...Float(LY_OSC_ENGINE_COUNT - 1), stepped: true)
+            add(LY_SAMPLE_ROOT_A + o, "\(name).sample.root", "ROOT", 0...127, stepped: true)
+            add(LY_SAMPLE_LOOP_A + o, "\(name).sample.loop", "LOOP", 0...1, stepped: true)
+            add(LY_GRAIN_SIZE_A + o, "\(name).grain.size", "SIZE", 0...1)
+            add(LY_GRAIN_DENSITY_A + o, "\(name).grain.density", "DENSITY", 0...1)
+            add(LY_GRAIN_SPRAY_A + o, "\(name).grain.spray", "SPRAY", 0...1)
+            add(LY_SPECTRAL_TILT_A + o, "\(name).spectral.tilt", "TILT", -1...1)
+        }
         return list
     }()
 
@@ -351,9 +398,12 @@ enum LYSynthNames {
     static let performerModes = ["SONG", "NOTE"]
     static let stepShapes = ["HOLD", "RAMP UP", "RAMP DOWN", "TRIANGLE", "DECAY", "RISE", "PULSE", "GLIDE"]
     static let effects = ["HYPER", "DISTORTION", "FLANGER", "PHASER", "CHORUS", "DELAY", "COMPRESSOR", "EQ", "FILTER", "REVERB",
-                          "DECIMATOR"]
+                          "DECIMATOR", "BODE SHIFTER", "CONVOLUTION", "SPLITTER", "UTILITY"]
+    static let fxRoutes = ["MAIN", "AUX A", "AUX B"]
+    static let oscillatorEngines = ["WAVETABLE", "SAMPLE", "MULTISAMPLE", "GRANULAR", "SPECTRAL"]
     static let decimatorOffModes = ["DRY", "HOLD"]
     static let decimatorPlaces = ["IN RACK", "AFTER MASTER"]
+    static let renderQualities = ["DRAFT", "HIGH", "ULTRA"]
     static let distortionModes = ["TUBE", "SOFT", "HARD", "DIODE", "LIN FOLD", "SIN FOLD", "ZERO-SQ", "DOWNSAMPLE", "BITCRUSH", "RECTIFY"]
     static let compModes = ["SINGLE", "MULTIBAND"]
     static let reverbModes = ["PLATE", "HALL"]
@@ -363,9 +413,11 @@ enum LYSynthNames {
     static let sources = ["—", "ENV 1", "ENV 2", "ENV 3", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "VELOCITY", "NOTE",
                           "MOD WHEEL", "MACRO 1", "MACRO 2", "MACRO 3", "MACRO 4", "RANDOM", "STEP CUTOFF", "STEP RES",
                           "PRESSURE", "TIMBRE", "PITCH BEND", "ENV 4",
-                          "MACRO 5", "MACRO 6", "MACRO 7", "MACRO 8", "PERFORMER 1", "PERFORMER 2", "TRACKER 1", "TRACKER 2"]
+                          "MACRO 5", "MACRO 6", "MACRO 7", "MACRO 8", "PERFORMER 1", "PERFORMER 2", "TRACKER 1", "TRACKER 2",
+                          "LFO 5", "LFO 6", "LFO 7", "LFO 8", "LFO 9", "LFO 10"]
     static let sourceOrder = [LY_SRC_NONE, LY_SRC_ENV1, LY_SRC_ENV2, LY_SRC_ENV3, LY_SRC_ENV4,
                               LY_SRC_LFO1, LY_SRC_LFO2, LY_SRC_LFO3, LY_SRC_LFO4,
+                              LY_SRC_LFO5, LY_SRC_LFO6, LY_SRC_LFO7, LY_SRC_LFO8, LY_SRC_LFO9, LY_SRC_LFO10,
                               LY_SRC_MACRO1, LY_SRC_MACRO2, LY_SRC_MACRO3, LY_SRC_MACRO4,
                               LY_SRC_MACRO5, LY_SRC_MACRO6, LY_SRC_MACRO7, LY_SRC_MACRO8,
                               LY_SRC_PERF1, LY_SRC_PERF2, LY_SRC_TRACK1, LY_SRC_TRACK2,
@@ -398,7 +450,9 @@ enum LYSynthNames {
                    (LY_DST_ENV1_ATTACK, "ENV 1 ATTACK"), (LY_DST_ENV1_DECAY, "ENV 1 DECAY"), (LY_DST_ENV1_RELEASE, "ENV 1 RELEASE"),
                    (LY_DST_ENV2_ATTACK, "ENV 2 ATTACK"), (LY_DST_ENV2_DECAY, "ENV 2 DECAY"), (LY_DST_ENV2_RELEASE, "ENV 2 RELEASE"),
                    (LY_DST_LFO1_RATE, "LFO 1 RATE"), (LY_DST_LFO2_RATE, "LFO 2 RATE"), (LY_DST_LFO3_RATE, "LFO 3 RATE"),
-                   (LY_DST_LFO4_RATE, "LFO 4 RATE")].map { (Int($0.0), $0.1) }),
+                   (LY_DST_LFO4_RATE, "LFO 4 RATE"), (LY_DST_LFO5_RATE, "LFO 5 RATE"), (LY_DST_LFO6_RATE, "LFO 6 RATE"),
+                   (LY_DST_LFO7_RATE, "LFO 7 RATE"), (LY_DST_LFO8_RATE, "LFO 8 RATE"), (LY_DST_LFO9_RATE, "LFO 9 RATE"),
+                   (LY_DST_LFO10_RATE, "LFO 10 RATE")].map { (Int($0.0), $0.1) }),
         ("FX", [(LY_DST_HYPER_MIX, "HYPER MIX"), (LY_DST_HYPER_DETUNE, "HYPER DETUNE"), (LY_DST_DIM_MIX, "DIMENSION"),
                 (LY_DST_DIST_DRIVE, "DIST DRIVE"), (LY_DST_DIST_MIX, "DIST MIX"),
                 (LY_DST_FLANGER_DEPTH, "FLANGER DEPTH"), (LY_DST_FLANGER_MIX, "FLANGER MIX"),
@@ -507,7 +561,8 @@ struct LYSynthPatch: Codable, Equatable {
     }
 
     static let defaultEffectOrder = [LY_FX_HYPER, LY_FX_DIST, LY_FX_FLANGER, LY_FX_PHASER, LY_FX_CHORUS,
-                                     LY_FX_DELAY, LY_FX_COMP, LY_FX_REVERB, LY_FX_EQ, LY_FX_FILTER, LY_FX_DECIM].map { Int($0) }
+                                     LY_FX_DELAY, LY_FX_COMP, LY_FX_REVERB, LY_FX_EQ, LY_FX_FILTER, LY_FX_DECIM,
+                                     LY_FX_BODE, LY_FX_CONV, LY_FX_SPLITTER, LY_FX_UTILITY].map { Int($0) }
 
     mutating func setEffectOrder(_ order: [Int]) {
         for (index, fx) in order.enumerated() { set(LYSynthParameters.effectOrder(index), Float(fx)) }

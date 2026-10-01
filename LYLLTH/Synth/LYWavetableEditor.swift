@@ -17,6 +17,8 @@ struct LYWavetableEditor: View {
     @State private var harmonics: [Float] = []
     @State private var morphFrom = 0
     @State private var morphTo = 0
+    @State private var formula = "sin(2*pi*x) + 0.3*sin(6*pi*x + f*pi)"
+    @State private var formulaError: String?
 
     private static let size = LYWavetableLibrary.frameSize
     private static let harmonicCount = 48
@@ -49,6 +51,7 @@ struct LYWavetableEditor: View {
             HStack(alignment: .top, spacing: 10) {
                 frameStrip.frame(width: 120)
                 VStack(spacing: 10) {
+                    tableStack.frame(height: 105)
                     drawingCanvas
                     harmonicEditor.frame(height: 150)
                 }
@@ -68,6 +71,38 @@ struct LYWavetableEditor: View {
             morphTo = frames.count - 1
             refreshHarmonics()
         }
+    }
+
+    /// A compact perspective overview of the whole table. The selected frame
+    /// stays bright while surrounding frames form a restrained 3D stack.
+    private var tableStack: some View {
+        Canvas { context, size in
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(0.55)))
+            guard !frames.isEmpty else { return }
+            let shown = min(frames.count, 24)
+            for row in (0..<shown).reversed() {
+                let frameIndex = shown == 1 ? 0 : row * (frames.count - 1) / (shown - 1)
+                let samples = frames[frameIndex]
+                let depth = CGFloat(row) / CGFloat(max(shown - 1, 1))
+                let xInset = (1 - depth) * size.width * 0.13
+                let baseline = 13 + depth * (size.height - 23)
+                var path = Path()
+                for point in 0..<128 {
+                    let sample = samples[point * samples.count / 128]
+                    let x = xInset + (size.width - xInset * 2) * CGFloat(point) / 127
+                    let y = baseline - CGFloat(sample) * 13
+                    if point == 0 { path.move(to: CGPoint(x: x, y: y)) }
+                    else { path.addLine(to: CGPoint(x: x, y: y)) }
+                }
+                let isSelected = abs(frameIndex - selected) <= max(1, frames.count / shown / 2)
+                context.stroke(path, with: .color(isSelected ? accent : accent.opacity(0.12 + 0.3 * Double(depth))),
+                               lineWidth: isSelected ? 1.5 : 0.8)
+            }
+            context.draw(Text("TABLE STACK · \(frames.count) FRAMES")
+                .font(LYLLTHTheme.label(7, weight: .bold)).foregroundColor(LYLLTHTheme.dim),
+                         at: CGPoint(x: 82, y: 9))
+        }
+        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
     }
 
     // MARK: Frames
@@ -306,6 +341,14 @@ struct LYWavetableEditor: View {
                 let mean = frame.reduce(0, +) / Float(frame.count)
                 return frame.map { $0 - mean }
             } }
+            tool("FADE EDGES") { edit { frame in
+                let edge = max(8, frame.count / 32)
+                return frame.enumerated().map { index, sample in
+                    let distance = min(index, frame.count - 1 - index)
+                    let gain = distance >= edge ? Float(1) : Float(distance) / Float(edge)
+                    return sample * gain
+                }
+            } }
 
             section("TABLE")
             HStack(spacing: 4) {
@@ -314,8 +357,31 @@ struct LYWavetableEditor: View {
             }
             tool("CROSSFADE BETWEEN") { morph(spectral: false) }
             tool("SPECTRAL MORPH") { morph(spectral: true) }
+            tool("ALIGN PHASE") {
+                let aligned = LYWavetableLibrary.phaseAligned(frames.flatMap { $0 })
+                frames = stride(from: 0, to: aligned.count, by: Self.size).map {
+                    Array(aligned[$0..<min($0 + Self.size, aligned.count)])
+                }
+                refreshHarmonics()
+            }
             tool("RESIZE TO 64") { resize(64) }
             tool("RESIZE TO 256") { resize(256) }
+
+            section("FORMULA · X CYCLE · F FRAME")
+            TextField("FORMULA", text: $formula)
+                .textFieldStyle(.plain)
+                .font(LYLLTHTheme.value(8))
+                .foregroundStyle(LYLLTHTheme.text)
+                .padding(.horizontal, 6)
+                .frame(height: 28)
+                .overlay(Rectangle().stroke(formulaError == nil ? LYLLTHTheme.lineStrong : LYLLTHTheme.record, lineWidth: 1))
+            if let formulaError {
+                Text(formulaError.uppercased())
+                    .font(LYLLTHTheme.label(6.5, weight: .bold))
+                    .foregroundStyle(LYLLTHTheme.record)
+                    .lineLimit(2)
+            }
+            tool("GENERATE 64") { generateFormula() }
             Spacer()
         }
     }
@@ -382,6 +448,173 @@ struct LYWavetableEditor: View {
         morphTo = frames.count - 1
         refreshHarmonics()
     }
+
+    private func generateFormula() {
+        do {
+            let flat = try Self.formulaFrames(formula, frameCount: 64)
+            frames = stride(from: 0, to: flat.count, by: Self.size).map { Array(flat[$0..<($0 + Self.size)]) }
+            selected = 0
+            morphFrom = 0
+            morphTo = frames.count - 1
+            formulaError = nil
+            refreshHarmonics()
+        } catch {
+            formulaError = error.localizedDescription
+        }
+    }
+
+    static func formulaFrames(_ expression: String, frameCount: Int) throws -> [Float] {
+        var parser = LYWaveFormulaParser(expression)
+        let node = try parser.parse()
+        let count = min(max(frameCount, 1), Int(LY_WT_MAX_FRAMES))
+        var result: [Float] = []
+        result.reserveCapacity(count * size)
+        for frame in 0..<count {
+            let f = count == 1 ? 0 : Double(frame) / Double(count - 1)
+            var values = (0..<size).map { sample -> Float in
+                let x = Double(sample) / Double(size)
+                let value = node.evaluate(x: x, f: f)
+                return value.isFinite ? Float(min(max(value, -16), 16)) : 0
+            }
+            let mean = values.reduce(0, +) / Float(values.count)
+            values = values.map { $0 - mean }
+            let peak = max(values.map(abs).max() ?? 0, 0.000_001)
+            result.append(contentsOf: values.map { $0 / peak })
+        }
+        return result
+    }
+}
+
+private indirect enum LYWaveFormulaNode {
+    case number(Double), x, f
+    case add(Self, Self), subtract(Self, Self), multiply(Self, Self), divide(Self, Self), power(Self, Self)
+    case negative(Self), function(String, [Self])
+
+    func evaluate(x: Double, f: Double) -> Double {
+        switch self {
+        case .number(let value): return value
+        case .x: return x
+        case .f: return f
+        case .add(let a, let b): return a.evaluate(x: x, f: f) + b.evaluate(x: x, f: f)
+        case .subtract(let a, let b): return a.evaluate(x: x, f: f) - b.evaluate(x: x, f: f)
+        case .multiply(let a, let b): return a.evaluate(x: x, f: f) * b.evaluate(x: x, f: f)
+        case .divide(let a, let b):
+            let divisor = b.evaluate(x: x, f: f)
+            return abs(divisor) < 1e-12 ? 0 : a.evaluate(x: x, f: f) / divisor
+        case .power(let a, let b): return pow(abs(a.evaluate(x: x, f: f)), b.evaluate(x: x, f: f))
+        case .negative(let value): return -value.evaluate(x: x, f: f)
+        case .function(let name, let args):
+            let values = args.map { $0.evaluate(x: x, f: f) }
+            switch name {
+            case "sin": return sin(values[0])
+            case "cos": return cos(values[0])
+            case "tan": return tan(values[0])
+            case "abs": return abs(values[0])
+            case "sqrt": return sqrt(abs(values[0]))
+            case "floor": return floor(values[0])
+            case "min": return min(values[0], values[1])
+            case "max": return max(values[0], values[1])
+            default: return 0
+            }
+        }
+    }
+}
+
+private struct LYWaveFormulaParser {
+    enum FormulaError: LocalizedError {
+        case invalid(String)
+        var errorDescription: String? {
+            switch self { case .invalid(let message): return message }
+        }
+    }
+
+    private let characters: [Character]
+    private var index = 0
+
+    init(_ source: String) { characters = Array(source.lowercased().filter { !$0.isWhitespace }) }
+
+    mutating func parse() throws -> LYWaveFormulaNode {
+        guard !characters.isEmpty else { throw FormulaError.invalid("Formula is empty") }
+        let node = try expression()
+        guard index == characters.count else { throw FormulaError.invalid("Unexpected character at \(index + 1)") }
+        return node
+    }
+
+    private mutating func expression() throws -> LYWaveFormulaNode {
+        var node = try term()
+        while let token = peek(), token == "+" || token == "-" {
+            index += 1
+            let rhs = try term()
+            node = token == "+" ? .add(node, rhs) : .subtract(node, rhs)
+        }
+        return node
+    }
+
+    private mutating func term() throws -> LYWaveFormulaNode {
+        var node = try power()
+        while let token = peek(), token == "*" || token == "/" {
+            index += 1
+            let rhs = try power()
+            node = token == "*" ? .multiply(node, rhs) : .divide(node, rhs)
+        }
+        return node
+    }
+
+    private mutating func power() throws -> LYWaveFormulaNode {
+        var node = try unary()
+        if peek() == "^" { index += 1; node = .power(node, try power()) }
+        return node
+    }
+
+    private mutating func unary() throws -> LYWaveFormulaNode {
+        if peek() == "-" { index += 1; return .negative(try unary()) }
+        return try primary()
+    }
+
+    private mutating func primary() throws -> LYWaveFormulaNode {
+        if peek() == "(" {
+            index += 1
+            let node = try expression()
+            try consume(")")
+            return node
+        }
+        if peek()?.isNumber == true || peek() == "." { return try number() }
+        let name = identifier()
+        switch name {
+        case "x": return .x
+        case "f": return .f
+        case "pi": return .number(.pi)
+        case "sin", "cos", "tan", "abs", "sqrt", "floor", "min", "max":
+            try consume("(")
+            var args = [try expression()]
+            if peek() == "," { index += 1; args.append(try expression()) }
+            try consume(")")
+            let needed = name == "min" || name == "max" ? 2 : 1
+            guard args.count == needed else { throw FormulaError.invalid("\(name) needs \(needed) value\(needed == 1 ? "" : "s")") }
+            return .function(name, args)
+        default: throw FormulaError.invalid("Unknown name \(name.isEmpty ? "at \(index + 1)" : name)")
+        }
+    }
+
+    private mutating func number() throws -> LYWaveFormulaNode {
+        let start = index
+        while let c = peek(), c.isNumber || c == "." { index += 1 }
+        guard let value = Double(String(characters[start..<index])) else { throw FormulaError.invalid("Invalid number") }
+        return .number(value)
+    }
+
+    private mutating func identifier() -> String {
+        let start = index
+        while let c = peek(), c.isLetter { index += 1 }
+        return String(characters[start..<index])
+    }
+
+    private mutating func consume(_ token: Character) throws {
+        guard peek() == token else { throw FormulaError.invalid("Expected \(token) at \(index + 1)") }
+        index += 1
+    }
+
+    private func peek() -> Character? { index < characters.count ? characters[index] : nil }
 }
 
 private struct LYFrameThumbnail: View {

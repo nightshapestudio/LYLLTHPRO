@@ -23,6 +23,8 @@ struct ArrangementView: View {
     var openNotes: (UUID, UUID) -> Void = { _, _ in }
     /// Opens an audio event (track id, clip id) in SIREN.
     var openVocal: (UUID, UUID) -> Void = { _, _ in }
+    /// Opens an audio event's take folder and comp lanes.
+    var openTakeComp: (UUID, UUID) -> Void = { _, _ in }
     /// Opens the automation target menu: (track id, lane id or nil to add one).
     var openAutomationMenu: (UUID, UUID?) -> Void = { _, _ in }
     /// Opens a song FX move's editor.
@@ -542,6 +544,12 @@ struct ArrangementView: View {
 
                 Spacer(minLength: 8)
 
+                if (clip.takes?.count ?? 0) > 1 {
+                    eventActionButton("COMP  \(clip.takes?.count ?? 0)", help: "Open the take folder and swipe across lanes to build the best composite") {
+                        guard let location = selectedAudioLocation else { return }
+                        openTakeComp(session.tracks[location.track].id, clip.id)
+                    }
+                }
                 eventActionButton(clip.activeVocalEdit == nil ? "SIREN" : "SIREN  ●", help: "Tune, time and align this event note by note (or double-click it)") {
                     guard let location = selectedAudioLocation else { return }
                     openVocal(session.tracks[location.track].id, clip.id)
@@ -2552,6 +2560,7 @@ extension ArrangementView {
                 .submenu("FADES", icon: "chart.line.uptrend.xyaxis", fades),
                 .submenu("STRETCH", icon: "metronome", stretch),
                 .section("OPEN"),
+                .action("TAKE FOLDER  ·  COMP", icon: "square.stack.3d.up", enabled: (clip.takes?.count ?? 0) > 1) { openTakeComp(track.id, clipID) },
                 .action(clip.activeVocalEdit == nil ? "SIREN" : "SIREN  ·  EDITED", icon: "waveform.path.ecg") { openVocal(track.id, clipID) },
                 .action("PREVIEW", icon: "play") { previewAudioEvent(clip) },
                 .action("BOUNCE IN PLACE", icon: "square.and.arrow.down.on.square") { consolidateAudio(track.id, clipID) }

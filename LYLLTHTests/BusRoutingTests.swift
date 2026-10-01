@@ -75,6 +75,40 @@ final class BusRoutingTests: XCTestCase {
         let decoded = try JSONDecoder().decode(LYLLTHSession.self, from: JSONSerialization.data(withJSONObject: json))
         XCTAssertTrue(decoded.tracks.allSatisfy { $0.sends == nil && $0.outputBusID == nil })
     }
+
+    func testRemovingTrackCleansEveryDependentReference() throws {
+        var session = session()
+        let removed = try XCTUnwrap(session.tracks.first { $0.kind == .auxiliary })
+        let survivor = try XCTUnwrap(session.tracks.indices.first { session.tracks[$0].id != removed.id })
+
+        session.tracks[survivor].sends = [LYBusSend(busID: removed.id, level: 0.5)]
+        session.tracks[survivor].outputBusID = removed.id
+        session.tracks[survivor].automation = [
+            LYAutomationLane(target: .send(removed.id), points: [LYAutomationPoint(beat: 0, value: 0.5)])
+        ]
+        var rack = LYFXRack()
+        var compressor = CompressorState.neutral
+        compressor.sidechainSourceID = removed.id
+        rack.compressor = compressor
+        session.mainFX = rack
+        var reverb = ReverbState.neutral
+        reverb.duckSourceID = removed.id
+        session.reverb = reverb
+        session.songFX = [LYSongFXBlock(move: .open, trackID: removed.id, startBeat: 0, lengthBeats: 4)]
+        _ = session.createFolder(name: "RETURN", trackIDs: [removed.id])
+        _ = session.createMixGroup(name: "RETURN", trackIDs: [removed.id])
+
+        XCTAssertEqual(session.removeTrack(id: removed.id), removed)
+        XCTAssertFalse(session.tracks.contains { $0.id == removed.id })
+        XCTAssertNil(session.tracks[survivor].sends)
+        XCTAssertNil(session.tracks[survivor].outputBusID)
+        XCTAssertNil(session.tracks[survivor].automation)
+        XCTAssertNil(session.mainFX?.compressor?.sidechainSourceID)
+        XCTAssertNil(session.reverb?.duckSourceID)
+        XCTAssertNil(session.songFX)
+        XCTAssertFalse((session.trackFolders ?? []).contains { $0.trackIDs.contains(removed.id) })
+        XCTAssertFalse((session.mixGroups ?? []).contains { $0.trackIDs.contains(removed.id) })
+    }
 }
 
 @MainActor

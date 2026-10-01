@@ -86,7 +86,7 @@ final class FKitTests: XCTestCase {
             target: .volume,
             points: [LYAutomationPoint(beat: 0, value: -9)]
         )]
-        _ = session.createFolder(name: "RHYTHM", trackIDs: Array(session.tracks.prefix(3).map(\.id)))
+        let rhythmFolderID = session.createFolder(name: "RHYTHM", trackIDs: Array(session.tracks.prefix(3).map(\.id)))
         let asset = Data([0, 1, 2, 3, 4, 5])
 
         let data = try LYFKit.exportProject(session, assets: ["vocal.wav": asset]).data
@@ -94,6 +94,6 @@ final class FKitTests: XCTestCase {
         XCTAssertEqual(reopened.assets["vocal.wav"], asset)
         XCTAssertEqual(reopened.session.tracks.first(where: { $0.kind == .audio })?.clips.first?.name, "VOCAL")
         XCTAssertEqual(reopened.session.tracks[0].automation, session.tracks[0].automation)
-        XCTAssertEqual(reopened.session.trackFolders?.first?.name, "RHYTHM")
+        XCTAssertEqual(reopened.session.trackFolders?.first(where: { $0.id == rhythmFolderID })?.name, "RHYTHM")
     }
 }

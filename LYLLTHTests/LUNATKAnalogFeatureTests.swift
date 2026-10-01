@@ -1,4 +1,5 @@
 import XCTest
+import Accelerate
 @testable import LYLLTH
 
 /// VINTAGE, the MORPH filter, ladder poles and bass loss, and mono key priority.
@@ -15,7 +16,7 @@ final class LUNATKAnalogFeatureTests: XCTestCase {
         return s
     }
 
-    /// In host-sized blocks: smoothed knobs move once per render call.
+    /// Render in the 64-frame blocks used by the live-engine tests.
     private func render(_ s: LYSynthInstrument, seconds: Double) -> [Float] {
         let frames = Int(seconds * rate)
         var left = [Float](repeating: 0, count: frames), right = left
@@ -50,6 +51,44 @@ final class LUNATKAnalogFeatureTests: XCTestCase {
             if l > best.1 { best = (f, l) }
         }
         return best.0
+    }
+
+    private func dominantFrequency(_ samples: [Float], near target: Double) -> Double {
+        let count = 1 << Int(floor(log2(Double(samples.count))))
+        var input = Array(samples.suffix(count))
+        var window = [Float](repeating: 0, count: count)
+        vDSP_hann_window(&window, vDSP_Length(count), Int32(vDSP_HANN_NORM))
+        vDSP_vmul(input, 1, window, 1, &input, 1, vDSP_Length(count))
+        let half = count / 2
+        var real = [Float](repeating: 0, count: half)
+        var imaginary = [Float](repeating: 0, count: half)
+        let log2n = vDSP_Length(log2(Float(count)))
+        let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2))!
+        defer { vDSP_destroy_fftsetup(setup) }
+        real.withUnsafeMutableBufferPointer { real in
+            imaginary.withUnsafeMutableBufferPointer { imaginary in
+                var split = DSPSplitComplex(realp: real.baseAddress!, imagp: imaginary.baseAddress!)
+                input.withUnsafeBufferPointer { source in
+                    source.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: half) {
+                        vDSP_ctoz($0, 2, &split, 1, vDSP_Length(half))
+                    }
+                }
+                vDSP_fft_zrip(setup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
+            }
+        }
+        let binHz = rate / Double(count)
+        let first = max(1, Int(target * 0.6 / binHz))
+        let last = min(half - 1, Int(target * 1.4 / binHz))
+        var peakBin = first
+        var peakEnergy: Float = 0
+        for bin in first...last {
+            let energy = real[bin] * real[bin] + imaginary[bin] * imaginary[bin]
+            if energy > peakEnergy {
+                peakEnergy = energy
+                peakBin = bin
+            }
+        }
+        return Double(peakBin) * binHz
     }
 
     // MARK: VINTAGE
@@ -118,6 +157,47 @@ final class LUNATKAnalogFeatureTests: XCTestCase {
         XCTAssertLessThan(response(ladder(0, 0.1, 0), note: 105), response(ladder(1, 0.1, 0), note: 105) * 0.35)
         // High resonance with BASS LOSS: the lows fall away.
         XCTAssertLessThan(response(ladder(0, 0.8, 1), note: 45), response(ladder(0, 0.8, 0), note: 45) * 0.8)
+    }
+
+    func testZDFLadderTracksCutoffAndStaysStableAtTheTopOfItsRange() {
+        func resonantNoise(_ target: Double) -> (frequency: Double, samples: [Float]) {
+            let cutoff = Float(log(target / 20) / log(1_000.0))
+            let s = synth { p in
+                p.set(LYSynthParameters.oscillator(0, LY_OSC_ON), 0)
+                p.set(LYSynthParameters.oscillator(1, LY_OSC_ON), 0)
+                p.set(LY_SUB_ON, 0)
+                p.set(LY_NOISE_ON, 1)
+                p.set(LY_NOISE_TYPE, Float(LY_NOISE_WHITE))
+                // Keep the excitation in the ladder's linear region so the
+                // measured peak represents tuning, not saturation pitch pull.
+                p.set(LY_NOISE_LEVEL, 0.01)
+                p.set(LY_FILTER_ROUTE_NOISE, 1)
+                p.set(LY_FILTER_ON, 1)
+                p.set(LY_FILTER_TYPE, Float(LY_FILTER_LADDER))
+                p.set(LY_FILTER_CUTOFF, cutoff)
+                p.set(LY_FILTER_KEYTRACK, 0)
+                p.set(LY_FILTER_ENVAMT, 0)
+                p.set(LY_FILTER_RES, 1)
+                p.set(LY_FILTER_DRIVE, 0)
+                p.set(LY_FILTER_MIX, 1)
+                p.set(LY_F2_ON, 0)
+            }
+            s.noteOn(60, velocity: 127, atHostTime: 0, cutoff: 1, resonance: 0)
+            let output = render(s, seconds: 1.6)
+            return (dominantFrequency(Array(output.suffix(32_768)), near: target), output)
+        }
+
+        let low = resonantNoise(440)
+        let high = resonantNoise(1_760)
+        print("ZDF LADDER: 440 -> \(low.frequency) Hz, 1760 -> \(high.frequency) Hz")
+        let lowError = abs(1_200 * log2(low.frequency / 440))
+        let highError = abs(1_200 * log2(high.frequency / 1_760))
+        XCTAssertLessThan(lowError, 120, "440 Hz cutoff resonance was \(low.frequency) Hz")
+        XCTAssertLessThan(highError, 120, "1760 Hz cutoff resonance was \(high.frequency) Hz")
+        for output in [low.samples, high.samples] {
+            XCTAssertTrue(output.allSatisfy(\.isFinite), "high-resonance ladder produced NaN/inf")
+            XCTAssertLessThan(output.map(abs).max() ?? 0, 1.2, "high-resonance ladder escaped the synth ceiling")
+        }
     }
 
     // MARK: Key priority

@@ -465,60 +465,215 @@ struct ChannelStripInspector: View {
     }
 }
 
-private struct LYTakeLanePanel: View {
+struct LYTakeLanePanel: View {
     @Binding var clip: LYClip
     let close: () -> Void
-    private let slices = 8
+    var showsHeader = true
+    @State private var drag: DragSelection?
+
+    private struct DragSelection: Equatable {
+        var takeID: UUID
+        var anchorBeat: Double
+        var currentBeat: Double
+
+        var startBeat: Double { min(anchorBeat, currentBeat) }
+        var endBeat: Double { max(anchorBeat, currentBeat) }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            LYNightshapeMenuHeader(eyebrow: clip.name, title: "TAKE LANES · COMP", accent: LYLLTHTheme.purple, close: close)
-            LYNightshapeMenuDivider()
-            VStack(spacing: 6) {
-                ForEach(clip.takes ?? []) { take in
-                    HStack(spacing: 5) {
-                        Button {
-                            clip = LYTakeLaneEditor.chooseWholeTake(take.id, in: clip)
-                        } label: {
-                            Text(take.name)
-                                .font(LYLLTHTheme.label(8, weight: .bold))
-                                .tracking(0.8)
-                                .foregroundStyle(clip.activeTakeID == take.id ? LYLLTHTheme.purple : LYLLTHTheme.text)
-                                .frame(width: 70, alignment: .leading)
-                        }
-                        .buttonStyle(.plain)
-                        ForEach(0..<slices, id: \.self) { index in
-                            let start = clip.lengthBeats * Double(index) / Double(slices)
-                            let end = clip.lengthBeats * Double(index + 1) / Double(slices)
-                            let chosen = takeAt((start + end) * 0.5) == take.id
-                            Button {
-                                clip = LYTakeLaneEditor.promote(takeID: take.id, from: start, to: end, in: clip)
-                            } label: {
-                                Rectangle()
-                                    .fill(chosen ? LYLLTHTheme.purple.opacity(0.75) : LYLLTHTheme.panelRaised)
-                                    .overlay(Rectangle().stroke(chosen ? LYLLTHTheme.purple : LYLLTHTheme.lineStrong, lineWidth: 1))
-                                    .frame(height: 22)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Use \(take.name), section \(index + 1)")
-                        }
-                    }
-                }
-                Text("CLICK A TAKE NAME FOR THE WHOLE REGION · CLICK CELLS TO BUILD A COMP")
-                    .font(LYLLTHTheme.label(6.5, weight: .bold))
-                    .tracking(0.9)
-                    .foregroundStyle(LYLLTHTheme.dim)
-                    .padding(.top, 4)
+            if showsHeader {
+                LYNightshapeMenuHeader(eyebrow: clip.name, title: "TAKE FOLDER · COMP", accent: LYLLTHTheme.purple, close: close)
+                LYNightshapeMenuDivider()
             }
-            .padding(12)
+            HStack(spacing: 10) {
+                Text("\(clip.takes?.count ?? 0) TAKES")
+                    .font(LYLLTHTheme.value(11))
+                    .foregroundStyle(LYLLTHTheme.text)
+                Text("DRAG ACROSS ANY LANE TO PROMOTE THAT PERFORMANCE")
+                    .font(LYLLTHTheme.label(7.5, weight: .bold))
+                    .tracking(1.1)
+                    .foregroundStyle(LYLLTHTheme.dim)
+                Spacer()
+                Text("5 MS SEAMS · PRE-FX")
+                    .font(LYLLTHTheme.label(7, weight: .bold))
+                    .tracking(1)
+                    .foregroundStyle(LYLLTHTheme.purple)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 34)
+            .background(LYLLTHTheme.deck)
+            .overlay(alignment: .bottom) { LYHairline() }
+
+            takeRuler
+
+            ScrollView {
+                LazyVStack(spacing: 5) {
+                    ForEach(clip.takes ?? []) { take in takeRow(take) }
+                }
+                .padding(12)
+            }
+            .lyScrollers()
+
+            Text("CLICK A TAKE NAME TO USE IT ALL · DRAG LEFT OR RIGHT FOR WORDS, PHRASES, OR BREATHS · COMMAND-Z TO UNDO")
+                .font(LYLLTHTheme.label(6.5, weight: .bold))
+                .tracking(0.85)
+                .foregroundStyle(LYLLTHTheme.dim)
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(LYLLTHTheme.deck)
+                .overlay(alignment: .top) { LYHairline() }
         }
-        .frame(width: 430)
+        .frame(minWidth: 560, maxWidth: .infinity, minHeight: 300, maxHeight: .infinity)
         .lyNightshapeMenuChrome(accent: LYLLTHTheme.purple)
     }
 
-    private func takeAt(_ beat: Double) -> UUID? {
-        clip.compSegments?.first { beat >= $0.startBeat && beat < $0.startBeat + $0.lengthBeats }?.takeID
-            ?? clip.activeTakeID
+    private var takeRuler: some View {
+        HStack(spacing: 5) {
+            Color.clear.frame(width: 112, height: 22)
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(LYLLTHTheme.deck)
+                    ForEach(0...4, id: \.self) { marker in
+                        let fraction = Double(marker) / 4
+                        Rectangle()
+                            .fill(LYLLTHTheme.lineStrong)
+                            .frame(width: 1, height: marker == 0 || marker == 4 ? 12 : 7)
+                            .position(x: geometry.size.width * fraction, y: geometry.size.height - 6)
+                        Text(beatLabel(clip.lengthBeats * fraction))
+                            .font(LYLLTHTheme.value(8))
+                            .foregroundStyle(LYLLTHTheme.dim)
+                            .position(x: min(max(geometry.size.width * fraction, 15), geometry.size.width - 15), y: 6)
+                    }
+                }
+            }
+            .frame(height: 22)
+        }
+        .padding(.horizontal, 12)
+        .background(LYLLTHTheme.deck)
+    }
+
+    private func takeRow(_ take: LYAudioTake) -> some View {
+        let whole = compSegments.count == 1 && compSegments.first?.takeID == take.id
+        return HStack(spacing: 5) {
+            Button {
+                clip = LYTakeLaneEditor.chooseWholeTake(take.id, in: clip)
+            } label: {
+                HStack(spacing: 6) {
+                    LYLED(color: LYLLTHTheme.purple, isOn: usedBeats(for: take.id) > 0, size: 4)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(take.name)
+                            .font(LYLLTHTheme.label(8.5, weight: .bold))
+                            .tracking(0.8)
+                        Text(whole ? "WHOLE TAKE" : String(format: "%.1f BEATS", usedBeats(for: take.id)))
+                            .font(LYLLTHTheme.value(7.5))
+                            .foregroundStyle(LYLLTHTheme.dim)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(whole ? LYLLTHTheme.purple : LYLLTHTheme.text)
+                .padding(.horizontal, 8)
+                .frame(width: 112, height: 44)
+                .background(whole ? LYLLTHTheme.purple.opacity(0.08) : LYLLTHTheme.panelRaised)
+                .overlay(Rectangle().stroke(whole ? LYLLTHTheme.purple : LYLLTHTheme.lineStrong, lineWidth: 1))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Use all of \(take.name)")
+
+            GeometryReader { geometry in
+                let width = max(geometry.size.width, 1)
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color.black.opacity(0.32))
+                    waveform(take.waveformPeaks ?? [], size: geometry.size)
+                    ForEach(compSegments.filter { $0.takeID == take.id }) { segment in
+                        let start = CGFloat(segment.startBeat / max(clip.lengthBeats, 0.001)) * width
+                        let segmentWidth = CGFloat(segment.lengthBeats / max(clip.lengthBeats, 0.001)) * width
+                        Rectangle()
+                            .fill(LYLLTHTheme.purple.opacity(0.32))
+                            .overlay(Rectangle().stroke(LYLLTHTheme.purple, lineWidth: 1))
+                            .frame(width: max(segmentWidth, 1), height: geometry.size.height)
+                            .offset(x: start)
+                    }
+                    if let drag, drag.takeID == take.id {
+                        let start = CGFloat(drag.startBeat / max(clip.lengthBeats, 0.001)) * width
+                        let selectionWidth = CGFloat((drag.endBeat - drag.startBeat) / max(clip.lengthBeats, 0.001)) * width
+                        Rectangle()
+                            .fill(LYLLTHTheme.teal.opacity(0.24))
+                            .overlay(Rectangle().stroke(LYLLTHTheme.teal, lineWidth: 1))
+                            .frame(width: max(selectionWidth, 1), height: geometry.size.height)
+                            .offset(x: start)
+                    }
+                }
+                .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                        .onChanged { value in
+                            let beat = beat(at: value.location.x, width: width)
+                            if drag?.takeID != take.id {
+                                drag = DragSelection(takeID: take.id, anchorBeat: beat, currentBeat: beat)
+                            } else {
+                                drag?.currentBeat = beat
+                            }
+                        }
+                        .onEnded { value in
+                            let finalBeat = beat(at: value.location.x, width: width)
+                            let selection = drag ?? DragSelection(takeID: take.id, anchorBeat: finalBeat, currentBeat: finalBeat)
+                            let minimum = min(0.125, max(clip.lengthBeats, 0.125))
+                            let start = selection.endBeat - selection.startBeat < 0.000_1
+                                ? max(0, selection.startBeat - minimum / 2)
+                                : selection.startBeat
+                            let end = selection.endBeat - selection.startBeat < 0.000_1
+                                ? min(clip.lengthBeats, start + minimum)
+                                : selection.endBeat
+                            clip = LYTakeLaneEditor.promote(takeID: take.id, from: start, to: end, in: clip)
+                            drag = nil
+                        }
+                )
+                .accessibilityLabel("\(take.name) comp lane")
+                .accessibilityHint("Drag across the part of this take to use it in the composite")
+            }
+            .frame(height: 44)
+        }
+    }
+
+    private var compSegments: [LYCompSegment] {
+        if let segments = clip.compSegments, !segments.isEmpty { return segments }
+        guard let takeID = clip.activeTakeID else { return [] }
+        return [LYCompSegment(startBeat: 0, lengthBeats: clip.lengthBeats, takeID: takeID)]
+    }
+
+    private func usedBeats(for takeID: UUID) -> Double {
+        compSegments.filter { $0.takeID == takeID }.reduce(0) { $0 + $1.lengthBeats }
+    }
+
+    private func beat(at x: CGFloat, width: CGFloat) -> Double {
+        let raw = Double(min(max(x / max(width, 1), 0), 1)) * clip.lengthBeats
+        let snap = min(0.125, max(clip.lengthBeats / 128, 0.001))
+        return min(max((raw / snap).rounded() * snap, 0), clip.lengthBeats)
+    }
+
+    private func beatLabel(_ beat: Double) -> String {
+        abs(beat.rounded() - beat) < 0.001 ? String(Int(beat.rounded()) + 1) : String(format: "%.1f", beat + 1)
+    }
+
+    private func waveform(_ peaks: [Float], size: CGSize) -> some View {
+        Canvas { context, canvas in
+            guard !peaks.isEmpty else { return }
+            let middle = canvas.height / 2
+            let step = canvas.width / CGFloat(max(peaks.count, 1))
+            var path = Path()
+            for (index, peak) in peaks.enumerated() {
+                let x = CGFloat(index) * step
+                let height = max(1, CGFloat(min(max(peak, 0), 1)) * (canvas.height - 6))
+                path.move(to: CGPoint(x: x, y: middle - height / 2))
+                path.addLine(to: CGPoint(x: x, y: middle + height / 2))
+            }
+            context.stroke(path, with: .color(LYLLTHTheme.chromeText.opacity(0.72)), lineWidth: max(1, step * 0.65))
+        }
+        .frame(width: size.width, height: size.height)
     }
 }
 

@@ -50,10 +50,10 @@ final class LYSynthLive: ObservableObject {
     }
 
     func lfo(_ index: Int) -> (value: Float, phase: Float) {
-        let values = [display.lfo.0, display.lfo.1, display.lfo.2, display.lfo.3]
-        let phases = [display.lfoPhase.0, display.lfoPhase.1, display.lfoPhase.2, display.lfoPhase.3]
-        let i = min(max(index, 0), 3)
-        return (values[i], phases[i])
+        let i = min(max(index, 0), Int(LY_LFO_COUNT) - 1)
+        let value = withUnsafeBytes(of: display.lfo) { raw in raw.bindMemory(to: Float.self)[i] }
+        let phase = withUnsafeBytes(of: display.lfoPhase) { raw in raw.bindMemory(to: Float.self)[i] }
+        return (value, phase)
     }
 }
 
@@ -421,6 +421,7 @@ struct LYEnvelopeGraph: View {
 struct LYLFOGraph: View {
     let shape: Int
     let points: [Float]
+    let curves: [Float]
     let smooth: Bool
     var phaseOffset: Float = 0
     var delay: Float = 0
@@ -430,8 +431,9 @@ struct LYLFOGraph: View {
     @ObservedObject var live: LYSynthLive
     let index: Int
     let paint: (Int, Float) -> Void
+    let paintCurve: (Int, Float) -> Void
 
-    static func value(shape: Int, at p: Double, points: [Float], smooth: Bool) -> Double {
+    static func value(shape: Int, at p: Double, points: [Float], curves: [Float], smooth: Bool) -> Double {
         switch shape {
         case LY_LFO_SINE: return sin(p * 2 * .pi)
         case LY_LFO_TRIANGLE: return 1 - 4 * abs(p - 0.5)
@@ -445,7 +447,10 @@ struct LYLFOGraph: View {
             let i = min(Int(position), points.count - 1)
             if !smooth { return Double(points[i]) }
             let t = position - Double(i)
-            let eased = 0.5 - 0.5 * cos(.pi * t)
+            var eased = 0.5 - 0.5 * cos(.pi * t)
+            let curve = Double(curves.indices.contains(i) ? curves[i] : 0)
+            if curve > 0.001 { eased = pow(eased, 1 + curve * 5) }
+            else if curve < -0.001 { eased = 1 - pow(1 - eased, 1 - curve * 5) }
             return Double(points[i]) + Double(points[(i + 1) % points.count] - points[i]) * eased
         default: return sin(p * 2 * .pi * 1.5) * 0.7 + sin(p * 2 * .pi * 0.5) * 0.3
         }
@@ -474,7 +479,7 @@ struct LYLFOGraph: View {
                 for x in 0...steps {
                     var p = Double(x) / Double(steps) + Double(phaseOffset)
                     p -= floor(p)
-                    let point = CGPoint(x: CGFloat(x), y: mid - CGFloat(Self.value(shape: shape, at: min(p, 0.9999), points: points, smooth: smooth)) * (mid - 8))
+                    let point = CGPoint(x: CGFloat(x), y: mid - CGFloat(Self.value(shape: shape, at: min(p, 0.9999), points: points, curves: curves, smooth: smooth)) * (mid - 8))
                     if x == 0 { path.move(to: point) } else { path.addLine(to: point) }
                     fill.addLine(to: point)
                 }
@@ -515,12 +520,17 @@ struct LYLFOGraph: View {
                         p -= floor(p)
                         let i = min(max(Int(p * Double(points.count)), 0), points.count - 1)
                         let mid = geo.size.height / 2
-                        paint(i, Float(min(max((mid - drag.location.y) / (mid - 8), -1), 1)))
+                        if drag.location.y >= geo.size.height - 18 {
+                            let lanePosition = (drag.location.y - (geo.size.height - 18)) / 18
+                            paintCurve(i, Float(min(max(1 - lanePosition * 2, -1), 1)))
+                        } else {
+                            paint(i, Float(min(max((mid - drag.location.y) / (mid - 8), -1), 1)))
+                        }
                     }
             )
             .overlay(alignment: .topLeading) {
                 if shape == LY_LFO_CUSTOM {
-                    Text("DRAW").font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.4).foregroundStyle(color).padding(6)
+                    Text("DRAW · BOTTOM LANE CURVES").font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.4).foregroundStyle(color).padding(6)
                 }
             }
         }

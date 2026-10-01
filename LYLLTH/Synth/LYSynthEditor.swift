@@ -90,6 +90,7 @@ struct LYSynthEditor: View {
     @State private var anchors: [String: CGRect] = [:]
     @State private var menu: LYSynthMenuRequest?
     @State private var choosingTable: Int?
+    @State private var importingTable: Int?
     @State private var choosingPreset = false
     @State private var modTab = 0          // 0…3 envelopes, 4…7 LFOs
     @State private var heldKeys: Set<Int> = []
@@ -120,10 +121,11 @@ struct LYSynthEditor: View {
         .background(Color(hex: 0x06070B))
         .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
         .overlay { wavetableEditorOverlay }
+        .overlay { wavetableImportOverlay }
         .overlay { presetSaveOverlay }
         .background(LYSynthKeyMonitor(octave: $keyboardOctave, press: play, release: stop,
                                       close: { if editingTable != nil { editingTable = nil } else if menu != nil { menu = nil } else { close() } },
-                                      isEnabled: editingTable == nil && !savingPreset))
+                                      isEnabled: editingTable == nil && importingTable == nil && !savingPreset))
         .onAppear {
             live.attach(instrument)
             #if DEBUG
@@ -388,7 +390,7 @@ struct LYSynthEditor: View {
                     user: tableLibrary.names,
                     chooseFactory: { chooseFactoryTable(oscillator, $0); choosingTable = nil },
                     chooseUser: { chooseCustomTable(oscillator, $0); choosingTable = nil },
-                    importTable: { choosingTable = nil; importTable(oscillator) },
+                    importTable: { choosingTable = nil; importingTable = oscillator },
                     editTable: { choosingTable = nil; editingTable = oscillator },
                     close: { choosingTable = nil }
                 )
@@ -422,6 +424,8 @@ struct LYSynthEditor: View {
         let warpNames = o == 0 ? LYSynthNames.warps : LYSynthNames.warpsB
         let name = o == 0 ? "A" : "B"
         let c = context
+        let engineID = LY_OSC_ENGINE_A + o
+        let engine = min(max(Int(c.value(engineID)), 0), Int(LY_OSC_ENGINE_COUNT) - 1)
 
         return LYSynthPanel(title: "OSC \(name)", accent: accent, isOn: c.isOn(p(LY_OSC_ON)), toggle: { c.toggle(p(LY_OSC_ON)) }) {
             HStack(spacing: 4) {
@@ -449,24 +453,37 @@ struct LYSynthEditor: View {
                         }
                 }
                 .buttonStyle(.plain)
-                .help("Choose, import or edit a wavetable")
+                .help("Choose, import, resynthesize or edit oscillator material")
                 .lyMenuAnchor("table\(o)", in: LYSynthContext.space)
                 .frame(height: 120)
 
                 HStack(spacing: 4) {
-                    c.choice(p(LY_OSC_WARPMODE), label: "WARP", names: warpNames, order: LYSynthNames.warpOrder, accent: accent,
-                             columns: 2, width: 240, anchor: "warp\(o)")
-                    c.choice(p(LY_OSC_WARPMODE2), label: "WARP 2", names: warpNames, order: LYSynthNames.warpOrder, accent: accent,
-                             columns: 2, width: 240, anchor: "warp2\(o)")
-                    c.choice(p(LY_OSC_UNIMODE), label: "UNISON", names: LYSynthNames.unisonModes, accent: accent,
-                             columns: 2, width: 200, anchor: "uni\(o)")
-                    c.choice(p(LY_OSC_STACK), label: "STACK", names: LYSynthNames.stacks, accent: accent,
-                             columns: 1, width: 140, anchor: "stack\(o)")
+                    c.choice(engineID, label: "ENGINE", names: LYSynthNames.oscillatorEngines, accent: accent,
+                             columns: 1, width: 170, anchor: "engine\(o)")
+                    if engine == LY_OSC_ENGINE_WAVETABLE {
+                        c.choice(p(LY_OSC_WARPMODE), label: "WARP", names: warpNames, order: LYSynthNames.warpOrder, accent: accent,
+                                 columns: 2, width: 240, anchor: "warp\(o)")
+                        c.choice(p(LY_OSC_WARPMODE2), label: "WARP 2", names: warpNames, order: LYSynthNames.warpOrder, accent: accent,
+                                 columns: 2, width: 240, anchor: "warp2\(o)")
+                    } else if engine == LY_OSC_ENGINE_GRANULAR {
+                        c.knob(LY_GRAIN_SIZE_A + o, accent: accent, diameter: 24, label: "SIZE")
+                        c.knob(LY_GRAIN_DENSITY_A + o, accent: accent, diameter: 24, label: "DENSITY")
+                        c.knob(LY_GRAIN_SPRAY_A + o, accent: accent, diameter: 24, label: "SPRAY")
+                    } else if engine == LY_OSC_ENGINE_SPECTRAL {
+                        c.knob(LY_SPECTRAL_TILT_A + o, accent: accent, diameter: 28, label: "TILT",
+                               format: { String(format: "%+.0f", $0 * 100) })
+                    } else {
+                        LYSynthStepper(label: "ROOT", text: "\(Int(c.value(LY_SAMPLE_ROOT_A + o)))", accent: accent) { step in
+                            c.set(LY_SAMPLE_ROOT_A + o, c.value(LY_SAMPLE_ROOT_A + o) + Float(step))
+                        }
+                        LYSynthToggle(title: "LOOP", isOn: c.isOn(LY_SAMPLE_LOOP_A + o), accent: accent) { c.toggle(LY_SAMPLE_LOOP_A + o) }
+                    }
                 }
 
                 Grid(horizontalSpacing: 0, verticalSpacing: 6) {
                     GridRow {
-                        c.knob(p(LY_OSC_WTPOS), d(LY_DST_A_WTPOS), accent: accent, diameter: 32, label: "WT POS")
+                        c.knob(p(LY_OSC_WTPOS), d(LY_DST_A_WTPOS), accent: accent, diameter: 32,
+                               label: engine == LY_OSC_ENGINE_WAVETABLE ? "WT POS" : engine == LY_OSC_ENGINE_SPECTRAL ? "FRAME" : "START")
                         c.knob(p(LY_OSC_WARPAMT), d(LY_DST_A_WARP), accent: accent, label: "WARP")
                         c.knob(p(LY_OSC_WARPAMT2), d2(LY_DST_A_WARP2), accent: accent, label: "WARP 2")
                         c.knob(p(LY_OSC_LEVEL), d(LY_DST_A_LEVEL), accent: accent)
@@ -640,40 +657,43 @@ struct LYSynthEditor: View {
     // MARK: Modulation
 
     private var modulationPanel: some View {
-        let sources = [LY_SRC_ENV1, LY_SRC_ENV2, LY_SRC_ENV3, LY_SRC_ENV4, LY_SRC_LFO1, LY_SRC_LFO2, LY_SRC_LFO3, LY_SRC_LFO4]
-        let names = ["ENV 1", "ENV 2", "ENV 3", "ENV 4", "LFO 1", "LFO 2", "LFO 3", "LFO 4"]
+        let sources = [LY_SRC_ENV1, LY_SRC_ENV2, LY_SRC_ENV3, LY_SRC_ENV4,
+                       LY_SRC_LFO1, LY_SRC_LFO2, LY_SRC_LFO3, LY_SRC_LFO4,
+                       LY_SRC_LFO5, LY_SRC_LFO6, LY_SRC_LFO7, LY_SRC_LFO8, LY_SRC_LFO9, LY_SRC_LFO10]
+        let names = ["ENV 1", "ENV 2", "ENV 3", "ENV 4"] + (1...Int(LY_LFO_COUNT)).map { "LFO \($0)" }
         return VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(0..<8, id: \.self) { index in
-                    let color = LYSynthSourceColor.color(sources[index])
-                    let isOn = modTab == index
-                    let routes = patch.usedMatrixSlots.filter { Int(patch.value(LYSynthParameters.matrix($0, LY_MX_SOURCE))) == sources[index] }.count
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                            .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(color)
-                            .help("Drag onto any knob to modulate it")
-                        Text(names[index])
-                            .font(LYLLTHTheme.label(8.5, weight: .bold))
-                            .tracking(1.2)
-                            .foregroundStyle(isOn ? color : LYLLTHTheme.dim)
-                        if routes > 0 {
-                            Text("\(routes)").font(LYLLTHTheme.value(7)).foregroundStyle(color)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(sources.indices, id: \.self) { index in
+                        let color = LYSynthSourceColor.color(sources[index])
+                        let isOn = modTab == index
+                        let routes = patch.usedMatrixSlots.filter { Int(patch.value(LYSynthParameters.matrix($0, LY_MX_SOURCE))) == sources[index] }.count
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(color)
+                                .help("Drag onto any knob to modulate it")
+                            Text(names[index])
+                                .font(LYLLTHTheme.label(8.5, weight: .bold))
+                                .tracking(1.2)
+                                .foregroundStyle(isOn ? color : LYLLTHTheme.dim)
+                            if routes > 0 {
+                                Text("\(routes)").font(LYLLTHTheme.value(7)).foregroundStyle(color)
+                            }
                         }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 30)
-                    .background(color.opacity(isOn ? 0.1 : 0))
-                    .overlay(alignment: .bottom) { Rectangle().fill(isOn ? color : .clear).frame(height: 2) }
-                    .contentShape(Rectangle())
-                    .onTapGesture { modTab = index }
-                    .draggable("\(LYSynthSourceColor.dragPrefix)\(sources[index])") {
-                        Text(names[index])
-                            .font(LYLLTHTheme.label(10, weight: .bold))
-                            .foregroundStyle(color)
-                            .padding(6)
-                            .background(Color.black)
-                            .overlay(Rectangle().stroke(color, lineWidth: 1))
+                        .frame(width: 82, height: 30)
+                        .background(color.opacity(isOn ? 0.1 : 0))
+                        .overlay(alignment: .bottom) { Rectangle().fill(isOn ? color : .clear).frame(height: 2) }
+                        .contentShape(Rectangle())
+                        .onTapGesture { modTab = index }
+                        .draggable("\(LYSynthSourceColor.dragPrefix)\(sources[index])") {
+                            Text(names[index])
+                                .font(LYLLTHTheme.label(10, weight: .bold))
+                                .foregroundStyle(color)
+                                .padding(6)
+                                .background(Color.black)
+                                .overlay(Rectangle().stroke(color, lineWidth: 1))
+                        }
                     }
                 }
             }
@@ -743,7 +763,8 @@ struct LYSynthEditor: View {
         let color = LYSynthSourceColor.color(LY_SRC_LFO1 + l)
         let f = { (field: Int) in LYSynthParameters.lfo(l, field) }
         let synced = c.isOn(f(LY_LFO1_SYNC))
-        let pointsBase = LY_LFO_POINTS_BASE + l * Int(LY_LFO_POINTS)
+        let points = (0..<Int(LY_LFO_POINTS)).map { c.value(LYSynthParameters.lfoPoint(l, $0)) }
+        let curves = (0..<Int(LY_LFO_POINTS)).map { c.value(LYSynthParameters.lfoCurve(l, $0)) }
         let shape = Int(c.value(f(LY_LFO1_SHAPE)))
         let rateText = { (value: Float) -> String in
             if synced {
@@ -756,14 +777,16 @@ struct LYSynthEditor: View {
         return VStack(spacing: 8) {
             LYLFOGraph(
                 shape: shape,
-                points: (0..<Int(LY_LFO_POINTS)).map { c.value(pointsBase + $0) },
+                points: points,
+                curves: curves,
                 smooth: c.isOn(f(LY_LFO1_SMOOTH)),
                 phaseOffset: c.value(f(LY_LFO1_PHASE)),
                 delay: c.value(f(LY_LFO1_DELAY)),
                 rise: c.value(f(LY_LFO1_RISE)),
                 oneShot: Int(c.value(f(LY_LFO1_RETRIG))) == LY_LFOMODE_ENV,
                 color: color, live: live, index: l,
-                paint: { i, value in c.set(pointsBase + i, value) }
+                paint: { i, value in c.set(LYSynthParameters.lfoPoint(l, i), value) },
+                paintCurve: { i, value in c.set(LYSynthParameters.lfoCurve(l, i), value) }
             )
             HStack(alignment: .center, spacing: 6) {
                 LYSynthChoiceButton(label: "SHAPE", value: LYSynthNames.lfoShapes[min(max(shape, 0), LYSynthNames.lfoShapes.count - 1)], accent: color) {
@@ -774,7 +797,8 @@ struct LYSynthEditor: View {
                         if new == LY_LFO_CUSTOM && shape != LY_LFO_CUSTOM {
                             for i in 0..<Int(LY_LFO_POINTS) {
                                 let p = Double(i) / Double(LY_LFO_POINTS)
-                                next.set(pointsBase + i, Float(LYLFOGraph.value(shape: shape, at: p, points: [], smooth: true)))
+                                next.set(LYSynthParameters.lfoPoint(l, i), Float(LYLFOGraph.value(shape: shape, at: p, points: [], curves: [], smooth: true)))
+                                next.set(LYSynthParameters.lfoCurve(l, i), 0)
                             }
                         }
                         next.set(f(LY_LFO1_SHAPE), Float(new))
@@ -786,7 +810,8 @@ struct LYSynthEditor: View {
                 c.choice(f(LY_LFO1_RETRIG), label: "MODE", names: LYSynthNames.lfoModes, accent: color, columns: 3, width: 210, anchor: "lfoMode")
                     .frame(width: 76)
                     .help("FREE runs on its own; TRIG restarts with each note; ENV runs once per note, like an envelope")
-                c.knob(f(LY_LFO1_RATE), LY_DST_LFO1_RATE + l, accent: color, label: "RATE", format: rateText)
+                let rateDestination = l < Int(LY_LEGACY_LFO_COUNT) ? LY_DST_LFO1_RATE + l : LY_DST_LFO5_RATE + (l - Int(LY_LEGACY_LFO_COUNT))
+                c.knob(f(LY_LFO1_RATE), rateDestination, accent: color, label: "RATE", format: rateText)
                 LYSynthToggle(title: "SYNC", isOn: synced, accent: color) { c.toggle(f(LY_LFO1_SYNC)) }
                 c.knob(f(LY_LFO1_PHASE), accent: color, label: "PHASE", format: { String(format: "%.0f°", $0 * 360) })
                 c.knob(f(LY_LFO1_DELAY), accent: color, label: "DELAY", format: { String(format: "%.2f S", $0 * 4) })
@@ -892,19 +917,72 @@ struct LYSynthEditor: View {
         patch = next
     }
 
-    private func importTable(_ oscillator: Int) {
+    private func importTable(_ oscillator: Int, mode: LYWavetableImportMode) {
         let panel = NSOpenPanel()
-        panel.title = "IMPORT WAVETABLE"
-        panel.message = "A Serum-format wavetable, a single cycle, or any audio: audio becomes 64 frames."
+        panel.title = "IMPORT WAVETABLE · \(mode.rawValue)"
+        panel.message = mode == .automatic
+            ? "Serum tables stay exact. Other audio is pitch-aligned or spectrally resynthesized."
+            : "Import this audio using \(mode.rawValue.lowercased())."
         panel.allowedContentTypes = [.audio, .wav, .aiff]
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let frames = try LYWavetableLibrary.importFrames(from: url)
+            let frames = try LYWavetableLibrary.importFrames(from: url, mode: mode)
             let name = tableLibrary.store(frames, named: url.deletingPathExtension().lastPathComponent)
             chooseCustomTable(oscillator, name)
         } catch {
             NSSound.beep()
+        }
+    }
+
+    @ViewBuilder
+    private var wavetableImportOverlay: some View {
+        if let oscillator = importingTable {
+            ZStack {
+                Color.black.opacity(0.65).onTapGesture { importingTable = nil }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("IMPORT / RESYNTHESIZE")
+                        .font(LYLLTHTheme.label(11, weight: .bold)).tracking(2)
+                        .foregroundStyle(oscillator == 0 ? LYLLTHTheme.teal : LYLLTHTheme.indigo)
+                    Text("CHOOSE HOW THE AUDIO BECOMES A WAVETABLE")
+                        .font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.1).foregroundStyle(LYLLTHTheme.dim)
+                    ForEach(LYWavetableImportMode.allCases) { mode in
+                        Button {
+                            importingTable = nil
+                            importTable(oscillator, mode: mode)
+                        } label: {
+                            HStack {
+                                Text(mode.rawValue).font(LYLLTHTheme.label(9, weight: .bold)).tracking(1.1)
+                                Spacer()
+                                Text(importDescription(mode)).font(LYLLTHTheme.label(7)).foregroundStyle(LYLLTHTheme.dim)
+                            }
+                            .foregroundStyle(LYLLTHTheme.text)
+                            .padding(.horizontal, 10)
+                            .frame(height: 34)
+                            .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    HStack {
+                        Spacer()
+                        Button("CANCEL") { importingTable = nil }.buttonStyle(LYChromeButtonStyle(compact: true))
+                    }
+                }
+                .padding(16)
+                .frame(width: 520)
+                .background(Color(hex: 0x07080D))
+                .overlay(Rectangle().stroke((oscillator == 0 ? LYLLTHTheme.teal : LYLLTHTheme.indigo).opacity(0.7), lineWidth: 1))
+            }
+        }
+    }
+
+    private func importDescription(_ mode: LYWavetableImportMode) -> String {
+        switch mode {
+        case .automatic: return "DETECT BEST METHOD"
+        case .fixedFrames: return "EVEN AUDIO WINDOWS"
+        case .pitchCycles: return "FUNDAMENTAL-ALIGNED CYCLES"
+        case .spectral: return "PHASE-COHERENT FFT FRAMES"
         }
     }
 
