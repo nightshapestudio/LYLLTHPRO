@@ -24,6 +24,7 @@ struct LYSirenEditor: View {
     @State private var mode: Mode = .tune
     @State private var status: Status = .listening
     @State private var analysis: LYVocalAnalysis?
+    @State private var analysisPeak: Float = 1
     /// The notes being edited. Written to the region when a gesture ends,
     /// so a drag re-renders the audio once, not on every frame.
     @State private var notes: [LYVocalNote] = []
@@ -106,6 +107,7 @@ struct LYSirenEditor: View {
                 return (analysis, LYVocalAnalyzer.notes(in: analysis))
             }.value
             analysis = result.0
+            analysisPeak = max(result.0.level.max() ?? 1, 1e-6)
             notes = edit?.notes ?? result.1
             guideID = edit?.alignment?.guideClipID
             tightness = edit?.alignment?.tightness ?? tightness
@@ -305,6 +307,8 @@ struct LYSirenEditor: View {
         GeometryReader { geo in
             let height = geo.size.height
             let width = max(geo.size.width - labelWidth, x(visibleRange.upperBound) + 40)
+            let tileWidth: CGFloat = 1_024
+            let tileCount = max(1, Int(ceil(width / tileWidth)))
             HStack(spacing: 0) {
             Canvas { graphics, size in drawLabels(in: &graphics, size: size) }
                 .frame(width: labelWidth, height: height)
@@ -312,8 +316,20 @@ struct LYSirenEditor: View {
                 .overlay(alignment: .trailing) { Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1) }
             ScrollView(.horizontal) {
                 ZStack(alignment: .topLeading) {
-                    Canvas { graphics, size in draw(in: &graphics, size: size) }
-                        .frame(width: width, height: height)
+                    // A whole-song Canvas becomes a tens-of-thousands-pixel
+                    // backing surface for an ordinary vocal. Tiled lazy
+                    // canvases keep drawing bounded to the visible viewport.
+                    LazyHStack(spacing: 0) {
+                        ForEach(0..<tileCount, id: \.self) { tile in
+                            let origin = CGFloat(tile) * tileWidth
+                            let localWidth = min(tileWidth, width - origin)
+                            Canvas(rendersAsynchronously: true) { graphics, size in
+                                draw(in: &graphics, size: size, originX: origin)
+                            }
+                            .frame(width: localWidth, height: height)
+                        }
+                    }
+                    .frame(width: width, height: height, alignment: .leading)
                     if let marquee {
                         Rectangle()
                             .fill(LYLLTHTheme.purple.opacity(0.08))
@@ -372,7 +388,7 @@ struct LYSirenEditor: View {
         }
     }
 
-    private func draw(in graphics: inout GraphicsContext, size: CGSize) {
+    private func draw(in graphics: inout GraphicsContext, size: CGSize, originX: CGFloat) {
         let height = size.height
         let key = context.session.songKey ?? .default
         // Rows: one per semitone, darker on notes outside the key.
@@ -382,17 +398,19 @@ struct LYSirenEditor: View {
             let rowHeight = y(Double(pitch) - 0.5, height: height) - top
             let inKey = key.scale.contains(((pitch - key.root) % 12 + 12) % 12)
             if !inKey {
-                graphics.fill(Path(CGRect(x: gutter, y: top, width: size.width - gutter, height: rowHeight)),
+                graphics.fill(Path(CGRect(x: 0, y: top, width: size.width, height: rowHeight)),
                              with: .color(Color.black.opacity(0.22)))
             }
             let isC = pitch % 12 == 0
-            graphics.stroke(Path { $0.move(to: CGPoint(x: gutter, y: top)); $0.addLine(to: CGPoint(x: size.width, y: top)) },
+            graphics.stroke(Path { $0.move(to: CGPoint(x: 0, y: top)); $0.addLine(to: CGPoint(x: size.width, y: top)) },
                            with: .color(isC ? LYLLTHTheme.lineStrong : LYLLTHTheme.line), lineWidth: isC ? 1 : 0.5)
         }
         // Seconds along the top.
-        var second = ceil(visibleRange.lowerBound)
-        while second <= visibleRange.upperBound {
-            let px = x(second)
+        let tileStartTime = visibleRange.lowerBound + Double(originX / pixelsPerSecond)
+        let tileEndTime = visibleRange.lowerBound + Double((originX + size.width) / pixelsPerSecond)
+        var second = ceil(tileStartTime)
+        while second <= min(visibleRange.upperBound, tileEndTime) {
+            let px = x(second) - originX
             graphics.stroke(Path { $0.move(to: CGPoint(x: px, y: 0)); $0.addLine(to: CGPoint(x: px, y: height)) },
                            with: .color(LYLLTHTheme.line), lineWidth: 0.5)
             graphics.draw(Text("\(Int(second))s").font(LYLLTHTheme.value(8)).foregroundColor(LYLLTHTheme.dim),
@@ -400,17 +418,20 @@ struct LYSirenEditor: View {
             second += 1
         }
         guard let analysis else { return }
-        let peak = max(analysis.level.max() ?? 1, 1e-6)
+        let peak = analysisPeak
+        let tileRange = originX...(originX + size.width)
 
         for note in notes {
             let selected = selection.contains(note.id)
-            let rect = frame(of: note, height: height)
-            guard rect.maxX >= gutter, rect.minX <= size.width else { continue }
+            let globalRect = frame(of: note, height: height)
+            guard globalRect.maxX >= tileRange.lowerBound, globalRect.minX <= tileRange.upperBound else { continue }
+            let rect = globalRect.offsetBy(dx: -originX, dy: 0)
             let color = selected ? LYLLTHTheme.purple : accent
 
             // Ghost where the note was sung, when it has moved.
             if abs(note.pitchOffset) > 0.02 || abs(note.timeOffset) > 0.002 {
-                let ghostStart = x(outputTime(note.start)), ghostEnd = x(outputTime(note.end))
+                let ghostStart = x(outputTime(note.start)) - originX
+                let ghostEnd = x(outputTime(note.end)) - originX
                 let ghostY = y(note.detectedPitch, height: height)
                 graphics.stroke(Path { $0.move(to: CGPoint(x: ghostStart, y: ghostY)); $0.addLine(to: CGPoint(x: ghostEnd, y: ghostY)) },
                                with: .color(color.opacity(0.45)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))

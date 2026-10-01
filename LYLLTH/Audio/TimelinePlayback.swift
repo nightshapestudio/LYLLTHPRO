@@ -151,6 +151,10 @@ enum LYSongCompiler {
 struct LYEventSegment {
     var clipID: UUID
     var renderKey: String
+    /// The same event without its SIREN edit. While a new vocal render is
+    /// prepared, playback may keep using the last completed version of this
+    /// exact source/trim/stretch configuration instead of dropping silent.
+    var fallbackRenderKey: String?
     /// Beats from the start of the window pass.
     var windowOffsetBeats: Double
     var lengthBeats: Double
@@ -174,6 +178,7 @@ final class LYTimelineAudioPlayer {
     private let engine: NightshapeAudioEngine
     private var nodes: [UUID: AVAudioPlayerNode] = [:]
     private var cycles: [String: AVAudioPCMBuffer] = [:]
+    private var fallbackCycles: [String: AVAudioPCMBuffer] = [:]
     private var rendering: Set<String> = []
     private var failed: Set<String> = []
 
@@ -299,7 +304,9 @@ final class LYTimelineAudioPlayer {
         anchor: NightshapeAudioEngine.TransportAnchor,
         secondsPerBeat: Double
     ) {
-        guard let cycle = cycles[segment.renderKey], let node = node(for: segment.clipID) else { return }
+        let cycle = cycles[segment.renderKey]
+            ?? segment.fallbackRenderKey.flatMap { fallbackCycles[$0] }
+        guard let cycle, let node = node(for: segment.clipID) else { return }
         let rate = cycle.format.sampleRate
         let startFrame = Int(((segment.cycleOffsetBeats + skipBeats) * secondsPerBeat * rate).rounded())
         let frameCount = Int(((segment.lengthBeats - skipBeats) * secondsPerBeat * rate).rounded())
@@ -373,6 +380,7 @@ final class LYTimelineAudioPlayer {
                         LYEventSegment(
                             clipID: clip.id,
                             renderKey: renderKey(for: clip, bpm: session.bpm),
+                            fallbackRenderKey: clip.activeVocalEdit == nil ? nil : fallbackRenderKey(for: clip, bpm: session.bpm),
                             windowOffsetBeats: cursor - window.startBeat,
                             lengthBeats: length,
                             cycleOffsetBeats: intoCycle,
@@ -433,6 +441,7 @@ final class LYTimelineAudioPlayer {
                 let key = Self.renderKey(for: clip, bpm: session.bpm)
                 guard cycles[key] == nil, !rendering.contains(key), !failed.contains(key) else { continue }
                 rendering.insert(key)
+                let fallbackKey = Self.fallbackRenderKey(for: clip, bpm: session.bpm)
                 var cycleClip = clip
                 cycleClip.eventGainDB = 0
                 cycleClip.fadeInSeconds = 0
@@ -450,6 +459,7 @@ final class LYTimelineAudioPlayer {
                         let converted = try await LYAudioEventRenderer.convert(rendered, to: Self.programFormat)
                         self.rendering.remove(key)
                         self.cycles[key] = converted
+                        self.fallbackCycles[fallbackKey] = converted
                         self.trimCache()
                         self.needsResync = true
                     } catch {
@@ -469,6 +479,10 @@ final class LYTimelineAudioPlayer {
             Self.renderKey(for: $0, bpm: session.bpm)
         })
         for key in cycles.keys where !live.contains(key) { cycles[key] = nil }
+        let liveFallbacks = Set(session.tracks.flatMap(\.clips).filter { $0.kind == .audio }.map {
+            Self.fallbackRenderKey(for: $0, bpm: session.bpm)
+        })
+        for key in fallbackCycles.keys where !liveFallbacks.contains(key) { fallbackCycles[key] = nil }
     }
 
     static func renderKey(for clip: LYClip, bpm: Double) -> String {
@@ -484,6 +498,15 @@ final class LYTimelineAudioPlayer {
             String(clip.beatMap?.markers.count ?? 0),
             clip.activeVocalEdit?.renderKey ?? ""
         ].joined(separator: "|")
+    }
+
+    /// Stable across SIREN note edits, but changes for the source range,
+    /// transpose or stretch. That makes a previous vocal render a safe
+    /// temporary playback fallback and never reuses audio from another take.
+    static func fallbackRenderKey(for clip: LYClip, bpm: Double) -> String {
+        var original = clip
+        original.vocal = nil
+        return renderKey(for: original, bpm: bpm)
     }
 
     /// Only the parts of the session that move audio in time. Gain and mute

@@ -1583,8 +1583,10 @@ struct WorkspaceView: View {
                             session: document.session,
                             trackID: ref.track,
                             sourceURL: { [document] path in
-                                guard let data = document.audioData(for: path) else { return nil }
-                                return try? LYAudioSourceFileCache.url(for: data, fileExtension: URL(fileURLWithPath: path).pathExtension)
+                                // Project media is already a real file. Passing that URL
+                                // directly keeps large-vocal reads, hashing and duplicate
+                                // temporary-file writes off the main thread when SIREN opens.
+                                document.audioURL(for: path)
                             },
                             songBeat: { [audio] in audio.isPlaying && audio.transportMode == .song ? audio.currentSongBeat() : nil }
                         ),

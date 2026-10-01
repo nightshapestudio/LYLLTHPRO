@@ -218,6 +218,26 @@ final class SirenTests: XCTestCase {
         XCTAssertNil(clip.activeVocalEdit)
     }
 
+    @MainActor
+    func testPlaybackFallbackFollowsTheSourceButNotEachSirenRevision() {
+        var note = LYVocalNote(start: 0.1, end: 0.5, detectedPitch: 60)
+        note.pitchOffset = 1
+        var clip = LYClip(name: "VOX", kind: .audio, startBeat: 0, lengthBeats: 8,
+                          sourceRelativePath: "take1.wav", sourceStartSeconds: 0.25,
+                          sourceDurationSeconds: 2)
+        clip.vocal = LYVocalEdit(sourceRelativePath: "take1.wav", notes: [note])
+
+        let firstRender = LYTimelineAudioPlayer.renderKey(for: clip, bpm: 120)
+        let firstFallback = LYTimelineAudioPlayer.fallbackRenderKey(for: clip, bpm: 120)
+        clip.vocal?.notes[0].pitchOffset = 2
+        XCTAssertNotEqual(LYTimelineAudioPlayer.renderKey(for: clip, bpm: 120), firstRender)
+        XCTAssertEqual(LYTimelineAudioPlayer.fallbackRenderKey(for: clip, bpm: 120), firstFallback)
+
+        clip.sourceRelativePath = "take2.wav"
+        XCTAssertNotEqual(LYTimelineAudioPlayer.fallbackRenderKey(for: clip, bpm: 120), firstFallback,
+                          "a previous take must never be used as the temporary playback fallback")
+    }
+
     func testWarpRoundTrips() {
         let points = [LYWarpPoint(output: 0, source: 0), LYWarpPoint(output: 1, source: 1.2), LYWarpPoint(output: 2, source: 2)]
         for time in stride(from: 0.0, through: 2.0, by: 0.25) {
