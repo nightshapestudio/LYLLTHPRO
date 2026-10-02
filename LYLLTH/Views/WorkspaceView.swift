@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVFoundation
+import UniformTypeIdentifiers
 import NightshapeAudioEngine
 
 @MainActor
@@ -60,6 +61,17 @@ final class LYDocumentHistory: ObservableObject {
         pendingUndo = nil
         current = session
         ignoreNextChange = true
+        LYRecoveryJournal.write(session)
+    }
+
+    /// SIREN owns its own fine-grained undo stack while its editor is open.
+    /// Keep the project snapshot and recovery journal current without adding
+    /// duplicate entries to the workspace UndoManager.
+    func acceptWithoutUndo(_ session: LYLLTHSession) {
+        pendingWork?.cancel()
+        pendingWork = nil
+        pendingUndo = nil
+        current = session
         LYRecoveryJournal.write(session)
     }
 
@@ -588,8 +600,12 @@ struct WorkspaceView: View {
             audio.setTransportMode(transportMode, session: document.session, media: document.audioMediaStore)
         }
         .onChange(of: document.session) { _, _ in
-            history.record(document.session, undoManager: undoManager) { recovered in
-                document.session = recovered
+            if sirenClip != nil {
+                history.acceptWithoutUndo(document.session)
+            } else {
+                history.record(document.session, undoManager: undoManager) { recovered in
+                    document.session = recovered
+                }
             }
             // Arrangement edits have to reach the song frames and the audio
             // players. Deferred to just after this frame and coalesced, so a
@@ -757,8 +773,9 @@ struct WorkspaceView: View {
                 replacement.slipOffsetSeconds = 0
                 replacement.eventGainDB = 0
                 replacement.pitchSemitones = 0
-                replacement.fadeInSeconds = 0
-                replacement.fadeOutSeconds = 0
+                replacement.isReversed = false
+                replacement.fadeInSeconds = LYClip.defaultAudioEdgeFadeSeconds
+                replacement.fadeOutSeconds = LYClip.defaultAudioEdgeFadeSeconds
                 replacement.stretchMode = .off
                 replacement.sourceBPM = nil
                 replacement.beatMap = nil
@@ -1588,6 +1605,7 @@ struct WorkspaceView: View {
                                 // temporary-file writes off the main thread when SIREN opens.
                                 document.audioURL(for: path)
                             },
+                            isTransportRunning: { [audio] in audio.isPlaying },
                             songBeat: { [audio] in audio.isPlaying && audio.transportMode == .song ? audio.currentSongBeat() : nil }
                         ),
                         accent: accent
@@ -1880,12 +1898,17 @@ struct WorkspaceView: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.treatsFilePackagesAsDirectories = false
-        // macOS 26 can expose valid WAV files with dynamic UTTypes that do not
-        // conform to `.audio`. Explicit enablement keeps those rows selectable;
-        // the importer still performs the authoritative decode validation.
+        // macOS 26 can expose valid audio files with dynamic UTTypes that do
+        // not conform to `.audio`. Declare every supported extension directly,
+        // then let the delegate's extension check and LYAudioImporter perform
+        // the strict validation. An empty allowedContentTypes list disables the
+        // IMPORT button on affected systems even when the delegate enables it.
         let panelDelegate = LYAudioOpenPanelDelegate()
         panel.delegate = panelDelegate
-        panel.allowedContentTypes = []
+        panel.allowedContentTypes = [
+            "wav", "wave", "aif", "aiff", "mp3", "m4a", "mp4", "caf", "flac"
+        ].compactMap { UTType(filenameExtension: $0) }
+        panel.allowsOtherFileTypes = true
 
         let target = LYAudioImportTarget(trackID: trackID, beat: beat)
         let projectWindow = NSApp.keyWindow

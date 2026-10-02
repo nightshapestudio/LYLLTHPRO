@@ -726,40 +726,82 @@ enum LYAudioEventRenderer {
         clip: LYClip,
         projectBPM: Double
     ) async throws -> AVAudioPCMBuffer {
-        try await Task.detached(priority: .userInitiated) {
-            var url = try LYAudioSourceFileCache.url(for: data, fileExtension: fileExtension)
-            // A SIREN edit plays from its own render of the whole recording;
-            // trims, fades, stretch and transpose then apply as usual.
-            if let edit = clip.activeVocalEdit { url = try LYVocalRenderCache.url(forSource: url, edit: edit) }
-            let file = try AVAudioFile(forReading: url)
-            let sourceDuration = Double(file.length) / file.processingFormat.sampleRate
-            let start = min(max(0, clip.sourceStartSeconds + clip.slipOffsetSeconds), sourceDuration)
-            let requestedDuration = clip.sourceDurationSeconds ?? (sourceDuration - start)
-            let duration = min(max(0, requestedDuration), max(0, sourceDuration - start))
-            guard duration > 0.000_1 else { throw LYAudioEventRenderError.missingFrames }
+        let task = Task.detached(priority: .userInitiated) {
+            let url = try LYAudioSourceFileCache.url(for: data, fileExtension: fileExtension)
+            return try renderFile(sourceURL: url, clip: clip, projectBPM: projectBPM)
+        }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
 
-            let spans = renderSpans(
-                clip: clip,
-                sourceStart: start,
-                sourceDuration: duration,
-                projectBPM: projectBPM
-            )
-            let rendered = try spans.map { span in
-                try renderSpan(
-                    fileURL: url,
-                    sourceStart: span.sourceStart,
-                    sourceDuration: span.sourceDuration,
-                    targetDuration: span.targetDuration,
-                    pitchSemitones: clip.pitchSemitones
-                )
-            }
-            return try stitch(
-                rendered,
-                gainDB: clip.isMuted ? -60 : clip.eventGainDB,
-                fadeInSeconds: clip.fadeInSeconds,
-                fadeOutSeconds: clip.fadeOutSeconds
-            )
-        }.value
+    /// Normal project playback already owns a durable media file. Rendering
+    /// that URL directly avoids mapping the whole take as Data, hashing it,
+    /// writing a duplicate, and giving SIREN a second analysis-cache key.
+    static func render(
+        sourceURL: URL,
+        clip: LYClip,
+        projectBPM: Double
+    ) async throws -> AVAudioPCMBuffer {
+        // Timeline SIREN work can use the last completed vocal render while
+        // this runs, so favor transport/UI responsiveness over render latency.
+        let task = Task.detached(priority: .utility) {
+            try renderFile(sourceURL: sourceURL, clip: clip, projectBPM: projectBPM)
+        }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private static func renderFile(
+        sourceURL: URL,
+        clip: LYClip,
+        projectBPM: Double
+    ) throws -> AVAudioPCMBuffer {
+        try Task.checkCancellation()
+        var url = sourceURL
+        // A SIREN edit plays from its own render of the whole recording;
+        // trims, fades, stretch and transpose then apply as usual.
+        if let edit = clip.activeVocalEdit { url = try LYVocalRenderCache.url(forSource: url, edit: edit) }
+        try Task.checkCancellation()
+        let file = try AVAudioFile(forReading: url)
+        let sourceDuration = Double(file.length) / file.processingFormat.sampleRate
+        let start = min(max(0, clip.sourceStartSeconds + clip.slipOffsetSeconds), sourceDuration)
+        let requestedDuration = clip.sourceDurationSeconds ?? (sourceDuration - start)
+        let duration = min(max(0, requestedDuration), max(0, sourceDuration - start))
+        guard duration > 0.000_1 else { throw LYAudioEventRenderError.missingFrames }
+
+        let spans = renderSpans(
+            clip: clip,
+            sourceStart: start,
+            sourceDuration: duration,
+            projectBPM: projectBPM
+        )
+        var rendered: [AVAudioPCMBuffer] = []
+        rendered.reserveCapacity(spans.count)
+        for span in spans {
+            try Task.checkCancellation()
+            rendered.append(try renderSpan(
+                fileURL: url,
+                sourceStart: span.sourceStart,
+                sourceDuration: span.sourceDuration,
+                targetDuration: span.targetDuration,
+                pitchSemitones: clip.pitchSemitones
+            ))
+        }
+        try Task.checkCancellation()
+        return try stitch(
+            rendered,
+            gainDB: clip.isMuted ? -60 : clip.eventGainDB,
+            fadeInSeconds: clip.fadeInSeconds,
+            fadeOutSeconds: clip.fadeOutSeconds,
+            fadeCurve: clip.fadeCurve,
+            isReversed: clip.isReversed
+        )
     }
 
     /// Resamples a rendered event to the graph's fixed program format so every
@@ -884,6 +926,35 @@ enum LYAudioEventRenderer {
     ) throws -> AVAudioPCMBuffer {
         let file = try AVAudioFile(forReading: fileURL)
         let sourceFormat = file.processingFormat
+        let startFrame = AVAudioFramePosition(sourceStart * sourceFormat.sampleRate)
+        let sourceFrameCount = AVAudioFrameCount(
+            min(
+                Double(AVAudioFrameCount.max),
+                max(1, sourceDuration * sourceFormat.sampleRate)
+            )
+        )
+
+        // Do not put neutral audio through AVAudioUnitTimePitch. Even at
+        // pitch 0 / rate 1 it has processing latency, and the old offline
+        // path captured that latency at the front while truncating the tail.
+        // A SIREN render was therefore being shifted and smeared a second
+        // time on its way to the arrangement. Reading the span directly is
+        // sample-aligned and leaves the completed vocal render untouched.
+        let oneFrame = 1 / sourceFormat.sampleRate
+        if abs(pitchSemitones) < 0.000_5,
+           abs(targetDuration - sourceDuration) <= oneFrame {
+            let available = max(0, file.length - startFrame)
+            let count = AVAudioFrameCount(min(AVAudioFramePosition(sourceFrameCount), available))
+            guard count > 0,
+                  let direct = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: count) else {
+                throw LYAudioEventRenderError.missingFrames
+            }
+            file.framePosition = max(0, startFrame)
+            try file.read(into: direct, frameCount: count)
+            guard direct.frameLength > 0 else { throw LYAudioEventRenderError.missingFrames }
+            return direct
+        }
+
         // Apple's time/pitch Audio Unit is consistently available as stereo in
         // offline manual rendering. Mono sources are upmixed by AVAudioEngine.
         let channelCount: AVAudioChannelCount = 2
@@ -904,13 +975,6 @@ enum LYAudioEventRenderer {
 
         let maximumFrames: AVAudioFrameCount = 4_096
         try engine.enableManualRenderingMode(.offline, format: outputFormat, maximumFrameCount: maximumFrames)
-        let startFrame = AVAudioFramePosition(sourceStart * sourceFormat.sampleRate)
-        let sourceFrameCount = AVAudioFrameCount(
-            min(
-                Double(AVAudioFrameCount.max),
-                max(1, sourceDuration * sourceFormat.sampleRate)
-            )
-        )
         let targetFrameCount = AVAudioFrameCount(
             min(
                 Double(AVAudioFrameCount.max),
@@ -944,6 +1008,7 @@ enum LYAudioEventRenderer {
 
         var written: AVAudioFrameCount = 0
         while written < targetFrameCount {
+            try Task.checkCancellation()
             let request = min(maximumFrames, targetFrameCount - written)
             let status = try engine.renderOffline(request, to: scratch)
             switch status {
@@ -972,7 +1037,9 @@ enum LYAudioEventRenderer {
         _ buffers: [AVAudioPCMBuffer],
         gainDB: Double,
         fadeInSeconds: Double,
-        fadeOutSeconds: Double
+        fadeOutSeconds: Double,
+        fadeCurve: LYAudioFadeCurve,
+        isReversed: Bool
     ) throws -> AVAudioPCMBuffer {
         guard let format = buffers.first?.format, !buffers.isEmpty else {
             throw LYAudioEventRenderError.missingFrames
@@ -1013,6 +1080,8 @@ enum LYAudioEventRenderer {
             cursor += Int(buffer.frameLength)
         }
 
+        if isReversed { reverseFrames(output) }
+
         let eventGain = gainDB <= -59.95 ? 0 : Float(pow(10, gainDB / 20))
         let fadeInFrames = min(Int(total), Int(fadeInSeconds * format.sampleRate))
         let fadeOutFrames = min(Int(total), Int(fadeOutSeconds * format.sampleRate))
@@ -1020,15 +1089,31 @@ enum LYAudioEventRenderer {
             for frame in 0..<Int(total) {
                 var gain = eventGain
                 if fadeInFrames > 0, frame < fadeInFrames {
-                    gain *= Float(frame) / Float(fadeInFrames)
+                    gain *= LYTimelineAudioPlayer.fadeGain(Double(frame) / Double(fadeInFrames), curve: fadeCurve)
                 }
                 if fadeOutFrames > 0, Int(total) - frame <= fadeOutFrames {
-                    gain *= Float(Int(total) - frame) / Float(fadeOutFrames)
+                    gain *= LYTimelineAudioPlayer.fadeGain(Double(Int(total) - frame) / Double(fadeOutFrames), curve: fadeCurve)
                 }
                 destination[channel][frame] *= gain
             }
         }
         return output
+    }
+
+    static func reverseFrames(_ buffer: AVAudioPCMBuffer) {
+        guard let channels = buffer.floatChannelData else { return }
+        let frames = Int(buffer.frameLength)
+        guard frames > 1 else { return }
+        for channel in 0..<Int(buffer.format.channelCount) {
+            var left = 0, right = frames - 1
+            while left < right {
+                let value = channels[channel][left]
+                channels[channel][left] = channels[channel][right]
+                channels[channel][right] = value
+                left += 1
+                right -= 1
+            }
+        }
     }
 }
 

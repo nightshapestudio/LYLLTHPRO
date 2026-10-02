@@ -940,6 +940,9 @@ enum LYBeatMapAnalyzer {
 }
 
 struct LYClip: Codable, Identifiable, Equatable {
+    /// Five milliseconds prevents clicks without reading as an audible fade.
+    static let defaultAudioEdgeFadeSeconds = 0.005
+
     enum Kind: String, Codable {
         case pattern
         case audio
@@ -967,8 +970,9 @@ struct LYClip: Codable, Identifiable, Equatable {
     var slipOffsetSeconds: Double = 0
     var eventGainDB: Double = 0
     var pitchSemitones: Double = 0
-    var fadeInSeconds: Double = 0
-    var fadeOutSeconds: Double = 0
+    var isReversed = false
+    var fadeInSeconds: Double = defaultAudioEdgeFadeSeconds
+    var fadeOutSeconds: Double = defaultAudioEdgeFadeSeconds
     var fadeCurve: LYAudioFadeCurve = .equalPower
     var stretchMode: LYAudioStretchMode = .off
     var sourceBPM: Double?
@@ -1071,7 +1075,7 @@ extension LYClip {
         case id, name, kind, startBeat, lengthBeats, steps, stepParameters, sourceRelativePath
         case sourceStartSeconds, sourceDurationSeconds, waveformPeaks, sourceSampleRate, sourceChannelCount
         case slipOffsetSeconds, eventGainDB
-        case pitchSemitones, fadeInSeconds, fadeOutSeconds, fadeCurve, stretchMode
+        case pitchSemitones, isReversed, fadeInSeconds, fadeOutSeconds, fadeCurve, stretchMode
         case sourceBPM, preservePitch, beatMap, isMuted, isLocked, isLooped, loopOffsetBeats, sourceFileDurationSeconds
         case patternSourceID, isOffTimeline, notes, noteLoopBeats, takes, activeTakeID, compSegments, vocal
         case printedDrum
@@ -1095,8 +1099,10 @@ extension LYClip {
         slipOffsetSeconds = try values.decodeIfPresent(Double.self, forKey: .slipOffsetSeconds) ?? 0
         eventGainDB = try values.decodeIfPresent(Double.self, forKey: .eventGainDB) ?? 0
         pitchSemitones = try values.decodeIfPresent(Double.self, forKey: .pitchSemitones) ?? 0
-        fadeInSeconds = try values.decodeIfPresent(Double.self, forKey: .fadeInSeconds) ?? 0
-        fadeOutSeconds = try values.decodeIfPresent(Double.self, forKey: .fadeOutSeconds) ?? 0
+        isReversed = try values.decodeIfPresent(Bool.self, forKey: .isReversed) ?? false
+        let defaultFade = kind == .audio ? Self.defaultAudioEdgeFadeSeconds : 0
+        fadeInSeconds = try values.decodeIfPresent(Double.self, forKey: .fadeInSeconds) ?? defaultFade
+        fadeOutSeconds = try values.decodeIfPresent(Double.self, forKey: .fadeOutSeconds) ?? defaultFade
         fadeCurve = try values.decodeIfPresent(LYAudioFadeCurve.self, forKey: .fadeCurve) ?? .equalPower
         stretchMode = try values.decodeIfPresent(LYAudioStretchMode.self, forKey: .stretchMode) ?? .off
         sourceBPM = try values.decodeIfPresent(Double.self, forKey: .sourceBPM)
@@ -1143,8 +1149,8 @@ enum LYAudioEventEditor {
         right.startBeat = beat
         right.lengthBeats = end - beat
         right.loopOffsetBeats = clip.loopOffsetBeats + (beat - clip.startBeat)
-        left.fadeOutSeconds = 0
-        right.fadeInSeconds = 0
+        left.fadeOutSeconds = LYClip.defaultAudioEdgeFadeSeconds
+        right.fadeInSeconds = LYClip.defaultAudioEdgeFadeSeconds
         left.normalizeAudioEvent()
         right.normalizeAudioEvent()
         return (left, right)
@@ -1319,7 +1325,7 @@ struct LYLoopRange: Codable, Equatable {
 }
 
 struct LYLLTHSession: Codable, Equatable {
-    static let currentSchemaVersion = 7
+    static let currentSchemaVersion = 8
 
     var schemaVersion = currentSchemaVersion
     var id = UUID()
@@ -1573,6 +1579,23 @@ struct LYLLTHSession: Codable, Equatable {
 
         if schemaVersion < 6, migrated.recordingSettings == nil {
             migrated.recordingSettings = LYRecordingSettings(preRollBars: migrated.countIn == false ? 0 : 1)
+        }
+
+        // Version 8: every audio edge gets Logic-style click protection. It
+        // is deliberately tiny and can still be cleared or lengthened by the
+        // user. Once saved as v8, an intentional zero remains zero.
+        if schemaVersion < 8 {
+            for trackIndex in migrated.tracks.indices where migrated.tracks[trackIndex].kind == .audio {
+                for clipIndex in migrated.tracks[trackIndex].clips.indices
+                    where migrated.tracks[trackIndex].clips[clipIndex].kind == .audio {
+                    if migrated.tracks[trackIndex].clips[clipIndex].fadeInSeconds == 0 {
+                        migrated.tracks[trackIndex].clips[clipIndex].fadeInSeconds = LYClip.defaultAudioEdgeFadeSeconds
+                    }
+                    if migrated.tracks[trackIndex].clips[clipIndex].fadeOutSeconds == 0 {
+                        migrated.tracks[trackIndex].clips[clipIndex].fadeOutSeconds = LYClip.defaultAudioEdgeFadeSeconds
+                    }
+                }
+            }
         }
 
         // Version 7: expression/routing and large-session organization. Keep

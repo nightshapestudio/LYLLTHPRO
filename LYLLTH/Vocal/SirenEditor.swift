@@ -8,8 +8,42 @@ struct LYSirenContext {
     var trackID: UUID
     /// The original recording for a project audio path, on disk.
     var sourceURL: (String) -> URL?
+    /// True from the moment transport starts, including the short interval
+    /// before an audio scheduling anchor exists.
+    var isTransportRunning: () -> Bool
     /// The song beat being heard, or nil when stopped.
     var songBeat: () -> Double?
+}
+
+/// A SIREN-only history. Snapshots wrap the optional edit so "no SIREN edit"
+/// is itself an undoable state rather than being confused with an empty stack.
+struct LYSirenEditHistory {
+    struct Snapshot: Equatable { var edit: LYVocalEdit? }
+    private(set) var undo: [Snapshot] = []
+    private(set) var redo: [Snapshot] = []
+
+    var canUndo: Bool { !undo.isEmpty }
+    var canRedo: Bool { !redo.isEmpty }
+
+    mutating func record(_ edit: LYVocalEdit?) {
+        undo.append(Snapshot(edit: edit))
+        if undo.count > 64 { undo.removeFirst(undo.count - 64) }
+        redo = []
+    }
+
+    mutating func undo(current: LYVocalEdit?) -> Snapshot? {
+        guard let previous = undo.popLast() else { return nil }
+        redo.append(Snapshot(edit: current))
+        return previous
+    }
+
+    mutating func redo(current: LYVocalEdit?) -> Snapshot? {
+        guard let next = redo.popLast() else { return nil }
+        undo.append(Snapshot(edit: current))
+        return next
+    }
+
+    mutating func reset() { undo = []; redo = [] }
 }
 
 /// SIREN: tune, flatten, nudge and align a sung part, note by note.
@@ -19,7 +53,13 @@ struct LYSirenEditor: View {
     let accent: Color
 
     private enum Mode: String, CaseIterable { case tune = "TUNE", align = "ALIGN" }
-    private enum Status: Equatable { case listening, ready, aligning, failed(String) }
+    private enum EditTool: String, CaseIterable {
+        case pitch = "PITCH"
+        case transition = "TRANSITION"
+        case vibrato = "VIBRATO"
+        case formant = "FORMANT"
+    }
+    private enum Status: Equatable { case waitingForTransport, listening, ready, aligning, failed(String) }
 
     @State private var mode: Mode = .tune
     @State private var status: Status = .listening
@@ -28,8 +68,11 @@ struct LYSirenEditor: View {
     /// The notes being edited. Written to the region when a gesture ends,
     /// so a drag re-renders the audio once, not on every frame.
     @State private var notes: [LYVocalNote] = []
+    @State private var detectedNotes: [LYVocalNote] = []
     @State private var selection: Set<UUID> = []
     @State private var pixelsPerSecond: CGFloat = 220
+    @State private var pixelsPerSemitone: CGFloat = 24
+    @State private var editTool: EditTool = .pitch
 
     // CORRECT
     @State private var centerAmount = 1.0
@@ -45,18 +88,36 @@ struct LYSirenEditor: View {
     // Gestures
     @State private var drag: DragState?
     @State private var marquee: CGRect?
+    @State private var zoomDrag: ZoomDragState?
+    @State private var magnificationOrigin: (horizontal: CGFloat, vertical: CGFloat)?
+    @State private var localHistory = LYSirenEditHistory()
+    @State private var isApplyingLocalHistory = false
+
+    private struct NoteOrigin {
+        var pitch: Double
+        var time: Double
+        var vibrato: Double
+        var formant: Double
+        var pitchTransition: Double
+        var formantTransition: Double
+    }
 
     private struct DragState {
         var noteIDs: Set<UUID>
-        var origins: [UUID: (pitch: Double, time: Double)]
+        var origins: [UUID: NoteOrigin]
         var axis: Axis?
+        var connector: Bool
         enum Axis { case pitch, time }
+    }
+
+    private struct ZoomDragState {
+        var horizontal: CGFloat
+        var vertical: CGFloat
     }
 
     /// Note names sit in a fixed column; the canvas scrolls beside it.
     private let labelWidth: CGFloat = 46
     private let gutter: CGFloat = 0
-    private let rowHeight: CGFloat = 15
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,6 +126,8 @@ struct LYSirenEditor: View {
             ZStack {
                 LYLLTHTheme.background
                 switch status {
+                case .waitingForTransport:
+                    message("READY WHEN PLAYBACK STOPS", detail: "SIREN is keeping playback clean. Stop transport once to analyze this take.")
                 case .listening:
                     message("LISTENING TO THE TAKE", detail: "Finding the pitch and the notes. Long takes need a few seconds.")
                 case .failed(let reason):
@@ -83,10 +146,12 @@ struct LYSirenEditor: View {
         .background(LYLLTHTheme.panel)
         .task(id: clip.sourceRelativePath) { await load() }
         // Undo and redo change the region under the editor.
-        .onChange(of: clip.vocal?.notes) { _, stored in
-            guard drag == nil, let stored, stored != notes else { return }
-            notes = stored
-            selection = selection.filter { id in stored.contains { $0.id == id } }
+        .onChange(of: clip.vocal) { _, stored in
+            guard drag == nil, !isApplyingLocalHistory else { return }
+            let restored = stored?.sourceRelativePath == clip.sourceRelativePath ? stored?.notes ?? detectedNotes : detectedNotes
+            guard restored != notes else { return }
+            notes = restored
+            selection = selection.filter { id in restored.contains { $0.id == id } }
         }
         .overlay { guideMenu }
     }
@@ -100,22 +165,50 @@ struct LYSirenEditor: View {
             status = .failed("The audio file for this event is missing. Relink it in LIBRARY ▸ PROJECT.")
             return
         }
-        status = .listening
         do {
-            let result = try await Task.detached(priority: .userInitiated) {
-                let analysis = try LYVocalAnalysisCache.shared.analysis(for: url)
-                return (analysis, LYVocalAnalyzer.notes(in: analysis))
-            }.value
-            analysis = result.0
-            analysisPeak = max(result.0.level.max() ?? 1, 1e-6)
-            notes = edit?.notes ?? result.1
-            guideID = edit?.alignment?.guideClipID
-            tightness = edit?.alignment?.tightness ?? tightness
-            alignsPitch = edit?.alignment?.alignsPitch ?? alignsPitch
-            status = .ready
+            let cache = LYVocalAnalysisCache.shared
+            let result: (LYVocalAnalysis, [LYVocalNote])
+            if let cached = cache.cachedAnalysis(for: url) {
+                result = (cached, LYVocalAnalyzer.notes(in: cached))
+            } else {
+                // Pitch detection is deliberately held off while the song is
+                // running. The analyzer is a sustained CPU/Accelerate job;
+                // starting it when this panel opens can starve the realtime
+                // audio thread and sounds like distortion or added latency.
+                status = .waitingForTransport
+                while context.isTransportRunning() {
+                    try Task.checkCancellation()
+                    try await Task.sleep(for: .milliseconds(120))
+                    if let cached = cache.cachedAnalysis(for: url) {
+                        finishLoading((cached, LYVocalAnalyzer.notes(in: cached)))
+                        return
+                    }
+                }
+                try Task.checkCancellation()
+                status = .listening
+                result = try await Task.detached(priority: .background) {
+                    let analysis = try cache.analysis(for: url)
+                    return (analysis, LYVocalAnalyzer.notes(in: analysis))
+                }.value
+            }
+            finishLoading(result)
+        } catch is CancellationError {
+            return
         } catch {
             status = .failed(error.localizedDescription)
         }
+    }
+
+    private func finishLoading(_ result: (LYVocalAnalysis, [LYVocalNote])) {
+        analysis = result.0
+        analysisPeak = max(result.0.level.max() ?? 1, 1e-6)
+        detectedNotes = result.1
+        notes = edit?.notes ?? detectedNotes
+        localHistory.reset()
+        guideID = edit?.alignment?.guideClipID
+        tightness = edit?.alignment?.tightness ?? tightness
+        alignsPitch = edit?.alignment?.alignsPitch ?? alignsPitch
+        status = .ready
     }
 
     /// Writes the notes back to the region, which re-renders its audio.
@@ -123,45 +216,108 @@ struct LYSirenEditor: View {
         guard let path = clip.sourceRelativePath else { return }
         var next = edit ?? LYVocalEdit(sourceRelativePath: path, notes: notes)
         next.notes = notes
+        applyLocalEdit(next)
+    }
+
+    private func applyLocalEdit(_ next: LYVocalEdit?, recordingHistory: Bool = true) {
+        guard next != clip.vocal else { return }
+        if recordingHistory {
+            localHistory.record(clip.vocal)
+        }
+        isApplyingLocalHistory = true
         clip.vocal = next
+        notes = next?.sourceRelativePath == clip.sourceRelativePath ? next?.notes ?? detectedNotes : detectedNotes
+        selection = selection.filter { id in notes.contains { $0.id == id } }
+        DispatchQueue.main.async { isApplyingLocalHistory = false }
+    }
+
+    private func undoSiren() {
+        guard let previous = localHistory.undo(current: clip.vocal) else { return }
+        applyLocalEdit(previous.edit, recordingHistory: false)
+    }
+
+    private func redoSiren() {
+        guard let next = localHistory.redo(current: clip.vocal) else { return }
+        applyLocalEdit(next.edit, recordingHistory: false)
+    }
+
+    private func removeSiren() {
+        guard clip.vocal != nil else { return }
+        applyLocalEdit(nil)
+        guideID = nil
     }
 
     // MARK: Toolbar
 
     private var toolbar: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 3) {
-                ForEach(Mode.allCases, id: \.self) { item in
-                    Button(item.rawValue) { mode = item }
-                        .buttonStyle(LYChromeButtonStyle(active: mode == item, tint: accent, compact: true))
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                HStack(spacing: 3) {
+                    ForEach(Mode.allCases, id: \.self) { item in
+                        Button(item.rawValue) { mode = item }
+                            .buttonStyle(LYChromeButtonStyle(active: mode == item, tint: accent, compact: true))
+                    }
                 }
+                if mode == .tune {
+                    Rectangle().fill(LYLLTHTheme.line).frame(width: 1, height: 22)
+                    editToolControls
+                }
+                Spacer(minLength: 8)
+                zoomControls
+                Button("UNDO") { undoSiren() }
+                    .buttonStyle(LYChromeButtonStyle(compact: true))
+                    .disabled(!localHistory.canUndo)
+                    .help("Undo the last SIREN edit (Command-Z)")
+                Button("REDO") { redoSiren() }
+                    .buttonStyle(LYChromeButtonStyle(compact: true))
+                    .disabled(!localHistory.canRedo)
+                    .help("Redo the last SIREN edit (Shift-Command-Z)")
+                let bypassed = clip.vocal?.isBypassed == true
+                Button(bypassed ? "BYPASSED" : "A / B") {
+                    guard var next = clip.vocal else { return }
+                    next.isBypassed.toggle()
+                    applyLocalEdit(next)
+                }
+                .buttonStyle(LYChromeButtonStyle(active: bypassed, tint: LYLLTHTheme.purple, compact: true))
+                .disabled(clip.vocal == nil)
+                .help("Hear the original take while keeping every edit")
+                Button("REMOVE SIREN") { removeSiren() }
+                    .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.purple, compact: true))
+                    .disabled(clip.vocal == nil)
+                    .help("Remove every SIREN edit from this event and play its original recording")
             }
-            Rectangle().fill(LYLLTHTheme.line).frame(width: 1, height: 22)
-            if mode == .tune { tuneControls } else { alignControls }
-            Spacer(minLength: 8)
-            let bypassed = clip.vocal?.isBypassed == true
-            Button(bypassed ? "BYPASSED" : "A / B") {
-                guard var next = clip.vocal else { return }
-                next.isBypassed.toggle()
-                clip.vocal = next
+            .padding(.horizontal, 12)
+            .frame(height: 42)
+            LYHairline()
+            HStack(spacing: 10) {
+                if mode == .tune { tuneControls } else { alignControls }
+                Spacer(minLength: 0)
             }
-            .buttonStyle(LYChromeButtonStyle(active: bypassed, tint: LYLLTHTheme.purple, compact: true))
-            .disabled(clip.vocal == nil)
-            .help("Hear the original take while keeping every edit")
+            .padding(.horizontal, 12)
+            .frame(height: 40)
         }
-        .padding(.horizontal, 12)
-        .frame(height: 46)
         .background(LYLLTHTheme.panel)
+    }
+
+    private var editToolControls: some View {
+        HStack(spacing: 3) {
+            ForEach(EditTool.allCases, id: \.self) { tool in
+                Button { editTool = tool } label: {
+                    Text(tool.rawValue)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .buttonStyle(LYChromeButtonStyle(active: editTool == tool, tint: accent, compact: true))
+                .help(toolHelp(tool))
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var tuneControls: some View {
         HStack(spacing: 10) {
-            Text("CORRECT")
-                .font(LYLLTHTheme.label(8, weight: .bold))
-                .tracking(1.5)
-                .foregroundStyle(LYLLTHTheme.secondary)
             percentSlider("PITCH", $centerAmount, help: "How far each note's center moves onto the nearest pitch")
-            percentSlider("DRIFT", $driftAmount, help: "How much of the wobble inside each note is smoothed out. Vibrato lives here too.")
+            percentSlider("DRIFT", $driftAmount, help: "How much of the slow rise or fall across each note is removed")
             Button(snapsToKey ? keyName : "CHROMATIC") { snapsToKey.toggle() }
                 .buttonStyle(LYChromeButtonStyle(active: snapsToKey, tint: accent, compact: true))
                 .help(snapsToKey ? "Notes move to the song's key. Click for every semitone." : "Notes move to the nearest semitone. Click to use the song's key.")
@@ -175,6 +331,29 @@ struct LYSirenEditor: View {
             Button(selection.isEmpty ? "RESET ALL" : "RESET") { reset() }
                 .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.purple, compact: true))
                 .help("Put notes back exactly as sung")
+        }
+    }
+
+    private var zoomControls: some View {
+        HStack(spacing: 4) {
+            Text("H").font(LYLLTHTheme.label(7, weight: .bold)).foregroundStyle(LYLLTHTheme.dim)
+            Button { zoom(horizontal: 1 / 1.35, vertical: 1) } label: { Image(systemName: "minus") }
+            Button { zoom(horizontal: 1.35, vertical: 1) } label: { Image(systemName: "plus") }
+            Text("V").font(LYLLTHTheme.label(7, weight: .bold)).foregroundStyle(LYLLTHTheme.dim)
+            Button { zoom(horizontal: 1, vertical: 1 / 1.25) } label: { Image(systemName: "minus") }
+            Button { zoom(horizontal: 1, vertical: 1.25) } label: { Image(systemName: "plus") }
+        }
+        .buttonStyle(LYChromeButtonStyle(compact: true))
+        .fixedSize(horizontal: true, vertical: false)
+        .help("Horizontal and vertical zoom. You can also Command-Option-drag in the editor or pinch.")
+    }
+
+    private func toolHelp(_ tool: EditTool) -> String {
+        switch tool {
+        case .pitch: return "Drag notes vertically to tune and horizontally to move them"
+        case .transition: return "Drag a note-to-note connector vertically to move the pitch transition earlier or later"
+        case .vibrato: return "Drag notes vertically to reduce or exaggerate their vibrato"
+        case .formant: return "Drag notes vertically to shift vocal color without changing pitch; drag connectors for formant transitions"
         }
     }
 
@@ -205,7 +384,7 @@ struct LYSirenEditor: View {
             Button("CLEAR") {
                 guard var next = clip.vocal else { return }
                 next.alignment = nil
-                clip.vocal = next
+                applyLocalEdit(next)
             }
             .buttonStyle(LYChromeButtonStyle(tint: LYLLTHTheme.purple, compact: true))
             .disabled(clip.vocal?.alignment == nil)
@@ -228,9 +407,7 @@ struct LYSirenEditor: View {
 
     private var footer: some View {
         HStack(spacing: 14) {
-            Text(mode == .tune
-                 ? "DRAG A NOTE UP OR DOWN TO RETUNE  ·  ⌥ FOR CENTS  ·  SIDEWAYS TO MOVE IT  ·  DOUBLE-CLICK TO SPLIT  ·  ↑ ↓ NUDGE"
-                 : "PICK THE GUIDE, SET HOW TIGHT, PRESS ALIGN  ·  THE NOTES STAY EDITABLE AFTERWARDS")
+            Text(footerHelp)
                 .font(LYLLTHTheme.label(7.5, weight: .bold))
                 .tracking(1.1)
                 .foregroundStyle(LYLLTHTheme.dim)
@@ -241,15 +418,21 @@ struct LYSirenEditor: View {
                                   labelFont: LYLLTHTheme.label(7.5, weight: .bold), numberFont: LYLLTHTheme.value(9))
                     .tracking(1.1)
                     .foregroundStyle(LYLLTHTheme.secondary)
+                    .fixedSize(horizontal: true, vertical: false)
             }
-            HStack(spacing: 4) {
-                Button { zoom(by: 1 / 1.4) } label: { Image(systemName: "minus.magnifyingglass") }
-                Button { zoom(by: 1.4) } label: { Image(systemName: "plus.magnifyingglass") }
-            }
-            .buttonStyle(LYChromeButtonStyle(compact: true))
         }
         .padding(.horizontal, 12)
         .frame(height: 32)
+    }
+
+    private var footerHelp: String {
+        guard mode == .tune else { return "PICK THE GUIDE, SET HOW TIGHT, PRESS ALIGN  ·  THE NOTES STAY EDITABLE AFTERWARDS" }
+        switch editTool {
+        case .pitch: return "DRAG UP/DOWN TO RETUNE  ·  ⌥ FOR CENTS  ·  SIDEWAYS TO MOVE  ·  DOUBLE-CLICK TO SPLIT"
+        case .transition: return "DRAG THE / \\ CONNECTOR UP OR DOWN TO MOVE THE PITCH TRANSITION EARLIER OR LATER"
+        case .vibrato: return "DRAG UP TO ADD VIBRATO, DOWN TO REDUCE IT  ·  100% IS THE ORIGINAL PERFORMANCE"
+        case .formant: return "DRAG UP/DOWN TO SHIFT FORMANTS  ·  DRAG A CONNECTOR TO SHAPE THE FORMANT TRANSITION"
+        }
     }
 
     private func message(_ title: String, detail: String) -> some View {
@@ -289,33 +472,40 @@ struct LYSirenEditor: View {
     private func x(_ time: Double) -> CGFloat { gutter + CGFloat(time - visibleRange.lowerBound) * pixelsPerSecond }
     private func time(_ x: CGFloat) -> Double { visibleRange.lowerBound + Double((x - gutter) / pixelsPerSecond) }
     private func y(_ pitch: Double, height: CGFloat) -> CGFloat {
-        // Inset so the top and bottom rows' names are never cut off.
         let inset: CGFloat = 12
-        return inset + CGFloat(pitchRange.upperBound - pitch) / CGFloat(pitchRange.upperBound - pitchRange.lowerBound) * (height - inset * 2)
+        return inset + CGFloat(pitchRange.upperBound - pitch) * pixelsPerSemitone
     }
+
+
+    private func canvasHeight(viewport: CGFloat) -> CGFloat {
+        max(viewport, CGFloat(pitchRange.upperBound - pitchRange.lowerBound) * pixelsPerSemitone + 24)
+    }
+
+    private var noteHalfHeight: CGFloat { max(5, pixelsPerSemitone * 0.44) }
 
     private func frame(of note: LYVocalNote, height: CGFloat) -> CGRect {
         let start = outputTime(note.start) + note.timeOffset
         let end = outputTime(note.end) + note.timeOffset
         let center = y(note.pitch, height: height)
-        return CGRect(x: x(start), y: center - rowHeight, width: max(4, x(end) - x(start)), height: rowHeight * 2)
+        return CGRect(x: x(start), y: center - noteHalfHeight, width: max(4, x(end) - x(start)), height: noteHalfHeight * 2)
     }
 
     // MARK: Canvas
 
     private var noteCanvas: some View {
         GeometryReader { geo in
-            let height = geo.size.height
+            let height = canvasHeight(viewport: geo.size.height)
             let width = max(geo.size.width - labelWidth, x(visibleRange.upperBound) + 40)
             let tileWidth: CGFloat = 1_024
             let tileCount = max(1, Int(ceil(width / tileWidth)))
-            HStack(spacing: 0) {
-            Canvas { graphics, size in drawLabels(in: &graphics, size: size) }
-                .frame(width: labelWidth, height: height)
-                .background(LYLLTHTheme.panel)
-                .overlay(alignment: .trailing) { Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1) }
-            ScrollView(.horizontal) {
-                ZStack(alignment: .topLeading) {
+            ScrollView(.vertical) {
+                HStack(alignment: .top, spacing: 0) {
+                    Canvas { graphics, size in drawLabels(in: &graphics, size: size) }
+                        .frame(width: labelWidth, height: height)
+                        .background(LYLLTHTheme.panel)
+                        .overlay(alignment: .trailing) { Rectangle().fill(LYLLTHTheme.lineStrong).frame(width: 1) }
+                    ScrollView(.horizontal) {
+                        ZStack(alignment: .topLeading) {
                     // A whole-song Canvas becomes a tens-of-thousands-pixel
                     // backing surface for an ordinary vocal. Tiled lazy
                     // canvases keep drawing bounded to the visible viewport.
@@ -344,15 +534,19 @@ struct LYSirenEditor: View {
                         height: height
                     )
                     .allowsHitTesting(false)
+                        }
+                        .frame(width: width, height: height)
+                        .contentShape(Rectangle())
+                        .gesture(canvasGesture(height: height))
+                        .simultaneousGesture(magnificationGesture)
+                        .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { split(at: $0.location, height: height) })
+                        .simultaneousGesture(SpatialTapGesture().onEnded { tap(at: $0.location, height: height) })
+                    }
+                    .scrollIndicators(.visible)
                 }
-                .frame(width: width, height: height)
-                .contentShape(Rectangle())
-                .gesture(canvasGesture(height: height))
-                .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { split(at: $0.location, height: height) })
-                .simultaneousGesture(SpatialTapGesture().onEnded { tap(at: $0.location, height: height) })
+                .frame(height: height, alignment: .top)
             }
             .scrollIndicators(.visible)
-            }
         }
         .focusable()
         .focusEffectDisabled()
@@ -361,6 +555,11 @@ struct LYSirenEditor: View {
         .onKeyPress(characters: .init(charactersIn: "a"), phases: .down) { press in
             guard press.modifiers.contains(.command) else { return .ignored }
             selection = Set(notes.map(\.id)); return .handled
+        }
+        .onKeyPress(characters: .init(charactersIn: "z"), phases: .down) { press in
+            guard press.modifiers.contains(.command) else { return .ignored }
+            if press.modifiers.contains(.shift) { redoSiren() } else { undoSiren() }
+            return .handled
         }
     }
 
@@ -421,6 +620,8 @@ struct LYSirenEditor: View {
         let peak = analysisPeak
         let tileRange = originX...(originX + size.width)
 
+        drawConnections(in: &graphics, height: height, originX: originX, tileRange: tileRange)
+
         for note in notes {
             let selected = selection.contains(note.id)
             let globalRect = frame(of: note, height: height)
@@ -444,7 +645,7 @@ struct LYSirenEditor: View {
                 let fraction = Double(step) / Double(steps)
                 let sourceTime = note.start + note.duration * fraction
                 let level = CGFloat(min(1, analysis.level(at: sourceTime) / peak))
-                let thickness = rowHeight * (0.22 + 0.78 * sqrt(level))
+                let thickness = noteHalfHeight * (0.22 + 0.78 * sqrt(level))
                 let px = rect.minX + rect.width * CGFloat(fraction)
                 let taper = CGFloat(min(1, min(fraction, 1 - fraction) * 8 + 0.15))
                 top.append(CGPoint(x: px, y: rect.midY - thickness * taper))
@@ -476,6 +677,15 @@ struct LYSirenEditor: View {
             }
             graphics.stroke(line, with: .color(LYLLTHTheme.text.opacity(0.85)), lineWidth: 1.2)
 
+            if editTool == .formant || abs(note.formantShift) > 0.001 {
+                let beamY = rect.midY - noteHalfHeight * 0.64 - CGFloat(note.formantShift) * 1.8
+                let beam = Path { path in
+                    path.move(to: CGPoint(x: rect.minX + min(8, rect.width * 0.2), y: beamY))
+                    path.addLine(to: CGPoint(x: rect.maxX - min(8, rect.width * 0.2), y: beamY))
+                }
+                graphics.stroke(beam, with: .color(LYLLTHTheme.teal.opacity(selected ? 1 : 0.8)), lineWidth: 2.2)
+            }
+
             // How far off pitch the center sits, in cents. Off by more than
             // ten reads in the record pink, with its glow so a thin figure
             // keeps the pink instead of thinning toward red.
@@ -493,6 +703,67 @@ struct LYSirenEditor: View {
                 }
                 graphics.draw(label, at: at, anchor: .bottomLeading)
             }
+
+            if selected, rect.width > 48 {
+                let value: String?
+                switch editTool {
+                case .pitch: value = nil
+                case .transition: value = String(format: "T %d%%", Int(note.pitchTransition * 100))
+                case .vibrato: value = String(format: "V %d%%", Int(note.vibrato * 100))
+                case .formant: value = String(format: "F %+.1f", note.formantShift)
+                }
+                if let value {
+                    graphics.draw(Text(value).font(LYLLTHTheme.value(8.5)).foregroundColor(LYLLTHTheme.text),
+                                  at: CGPoint(x: rect.midX, y: rect.maxY + 2), anchor: .top)
+                }
+            }
+        }
+    }
+
+    private func connectedPairs(height: CGFloat) -> [(left: LYVocalNote, right: LYVocalNote, start: CGPoint, end: CGPoint)] {
+        guard notes.count > 1 else { return [] }
+        return zip(notes, notes.dropFirst()).compactMap { left, right in
+            guard right.start - left.end < 0.08 else { return nil }
+            let leftRect = frame(of: left, height: height)
+            let rightRect = frame(of: right, height: height)
+            let start = CGPoint(x: max(leftRect.midX, leftRect.maxX - max(12, leftRect.width * 0.28)), y: leftRect.midY)
+            let end = CGPoint(x: min(rightRect.midX, rightRect.minX + max(12, rightRect.width * 0.28)), y: rightRect.midY)
+            return (left, right, start, end)
+        }
+    }
+
+    private func connectionPath(start: CGPoint, end: CGPoint, position: Double, originX: CGFloat) -> Path {
+        let a = CGPoint(x: start.x - originX, y: start.y)
+        let b = CGPoint(x: end.x - originX, y: end.y)
+        let center = a.x + (b.x - a.x) * CGFloat(min(max(position, 0.05), 0.95))
+        return Path { path in
+            path.move(to: a)
+            path.addCurve(to: b, control1: CGPoint(x: center, y: a.y), control2: CGPoint(x: center, y: b.y))
+        }
+    }
+
+    private func drawConnections(
+        in graphics: inout GraphicsContext,
+        height: CGFloat,
+        originX: CGFloat,
+        tileRange: ClosedRange<CGFloat>
+    ) {
+        for pair in connectedPairs(height: height) where pair.end.x >= tileRange.lowerBound && pair.start.x <= tileRange.upperBound {
+            let selected = selection.contains(pair.left.id) || selection.contains(pair.right.id)
+            let pitchPath = connectionPath(start: pair.start, end: pair.end,
+                                           position: pair.left.pitchTransition, originX: originX)
+            graphics.stroke(pitchPath,
+                            with: .color((editTool == .transition ? LYLLTHTheme.purple : LYLLTHTheme.text).opacity(selected ? 0.95 : 0.55)),
+                            style: StrokeStyle(lineWidth: editTool == .transition ? 2.4 : 1.5, lineCap: .round))
+
+            if editTool == .formant || abs(pair.left.formantShift) > 0.001 || abs(pair.right.formantShift) > 0.001 {
+                let formantStart = CGPoint(x: pair.start.x, y: pair.start.y - noteHalfHeight * 0.64 - CGFloat(pair.left.formantShift) * 1.8)
+                let formantEnd = CGPoint(x: pair.end.x, y: pair.end.y - noteHalfHeight * 0.64 - CGFloat(pair.right.formantShift) * 1.8)
+                let formantPath = connectionPath(start: formantStart, end: formantEnd,
+                                                 position: pair.left.formantTransition, originX: originX)
+                graphics.stroke(formantPath, with: .color(LYLLTHTheme.teal.opacity(selected ? 1 : 0.75)),
+                                style: StrokeStyle(lineWidth: editTool == .formant ? 2.4 : 1.6, lineCap: .round))
+            }
         }
     }
 
@@ -500,6 +771,14 @@ struct LYSirenEditor: View {
 
     private func note(at point: CGPoint, height: CGFloat) -> LYVocalNote? {
         notes.last { frame(of: $0, height: height).insetBy(dx: -2, dy: -3).contains(point) }
+    }
+
+    private func connectorNote(at point: CGPoint, height: CGFloat) -> LYVocalNote? {
+        connectedPairs(height: height).first { pair in
+            let top = min(pair.start.y, pair.end.y) - 12
+            let bottom = max(pair.start.y, pair.end.y) + 12
+            return point.x >= pair.start.x - 6 && point.x <= pair.end.x + 6 && point.y >= top && point.y <= bottom
+        }?.left
     }
 
     private func tap(at point: CGPoint, height: CGFloat) {
@@ -518,13 +797,29 @@ struct LYSirenEditor: View {
     private func canvasGesture(height: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 3)
             .onChanged { value in
+                let modifiers = NSEvent.modifierFlags
+                if zoomDrag != nil || (modifiers.contains(.command) && modifiers.contains(.option)) {
+                    let origin = zoomDrag ?? ZoomDragState(horizontal: pixelsPerSecond, vertical: pixelsPerSemitone)
+                    if zoomDrag == nil { zoomDrag = origin; drag = nil; marquee = nil }
+                    pixelsPerSecond = min(max(origin.horizontal * pow(2, value.translation.width / 180), 40), 1_600)
+                    pixelsPerSemitone = min(max(origin.vertical * pow(2, -value.translation.height / 160), 10), 72)
+                    return
+                }
                 if drag == nil && marquee == nil {
-                    if let hit = note(at: value.startLocation, height: height) {
+                    let connector = editTool == .transition || editTool == .formant
+                        ? connectorNote(at: value.startLocation, height: height) : nil
+                    if let hit = connector ?? note(at: value.startLocation, height: height) {
                         if !selection.contains(hit.id) { selection = [hit.id] }
                         let ids = selection
                         drag = DragState(
                             noteIDs: ids,
-                            origins: Dictionary(uniqueKeysWithValues: notes.filter { ids.contains($0.id) }.map { ($0.id, ($0.pitchOffset, $0.timeOffset)) })
+                            origins: Dictionary(uniqueKeysWithValues: notes.filter { ids.contains($0.id) }.map {
+                                ($0.id, NoteOrigin(pitch: $0.pitchOffset, time: $0.timeOffset,
+                                                   vibrato: $0.vibrato, formant: $0.formantShift,
+                                                   pitchTransition: $0.pitchTransition,
+                                                   formantTransition: $0.formantTransition))
+                            }),
+                            connector: connector != nil
                         )
                     } else {
                         marquee = CGRect(origin: value.startLocation, size: .zero)
@@ -538,20 +833,33 @@ struct LYSirenEditor: View {
                     let semitonesPerPixel = Double(pitchRange.upperBound - pitchRange.lowerBound) / Double(height)
                     for index in notes.indices where state.noteIDs.contains(notes[index].id) {
                         guard let origin = state.origins[notes[index].id] else { continue }
-                        switch state.axis {
+                        switch editTool {
                         case .pitch:
-                            let raw = origin.pitch - Double(dy) * semitonesPerPixel
-                            if fine {
-                                notes[index].pitchOffset = (raw * 100).rounded() / 100
-                            } else {
-                                // Whole semitones for the note's center.
-                                let target = (notes[index].detectedPitch + raw).rounded()
-                                notes[index].pitchOffset = target - notes[index].detectedPitch
+                            switch state.axis {
+                            case .pitch:
+                                let raw = origin.pitch - Double(dy) * semitonesPerPixel
+                                if fine {
+                                    notes[index].pitchOffset = (raw * 100).rounded() / 100
+                                } else {
+                                    let target = (notes[index].detectedPitch + raw).rounded()
+                                    notes[index].pitchOffset = target - notes[index].detectedPitch
+                                }
+                            case .time:
+                                notes[index].timeOffset = origin.time + Double(dx / pixelsPerSecond)
+                            case nil:
+                                break
                             }
-                        case .time:
-                            notes[index].timeOffset = origin.time + Double(dx / pixelsPerSecond)
-                        case nil:
-                            break
+                        case .transition:
+                            notes[index].pitchTransition = min(max(origin.pitchTransition - Double(dy) / 120, 0.05), 0.95)
+                        case .vibrato:
+                            notes[index].vibrato = min(max(origin.vibrato - Double(dy) / 80, 0), 2)
+                        case .formant:
+                            if state.connector {
+                                notes[index].formantTransition = min(max(origin.formantTransition - Double(dy) / 120, 0.05), 0.95)
+                            } else {
+                                let sensitivity = fine ? 0.02 : 0.08
+                                notes[index].formantShift = min(max(origin.formant - Double(dy) * sensitivity, -12), 12)
+                            }
                         }
                     }
                 } else if let start = marquee?.origin {
@@ -569,7 +877,20 @@ struct LYSirenEditor: View {
                 if drag != nil { commit() }
                 drag = nil
                 marquee = nil
+                zoomDrag = nil
             }
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                let origin = magnificationOrigin ?? (pixelsPerSecond, pixelsPerSemitone)
+                if magnificationOrigin == nil { magnificationOrigin = origin }
+                let factor = CGFloat(value)
+                pixelsPerSecond = min(max(origin.horizontal * factor, 40), 1_600)
+                pixelsPerSemitone = min(max(origin.vertical * factor, 10), 72)
+            }
+            .onEnded { _ in magnificationOrigin = nil }
     }
 
     private func split(at point: CGPoint, height: CGFloat) {
@@ -629,6 +950,10 @@ struct LYSirenEditor: View {
         for index in targets {
             notes[index].pitchOffset = 0
             notes[index].drift = 1
+            notes[index].vibrato = 1
+            notes[index].formantShift = 0
+            notes[index].pitchTransition = 0.5
+            notes[index].formantTransition = 0.5
             notes[index].gainDB = 0
             notes[index].timeOffset = 0
         }
@@ -662,8 +987,9 @@ struct LYSirenEditor: View {
         commit()
     }
 
-    private func zoom(by factor: CGFloat) {
-        pixelsPerSecond = min(max(pixelsPerSecond * factor, 40), 1_600)
+    private func zoom(horizontal: CGFloat, vertical: CGFloat) {
+        pixelsPerSecond = min(max(pixelsPerSecond * horizontal, 40), 1_600)
+        pixelsPerSemitone = min(max(pixelsPerSemitone * vertical, 10), 72)
     }
 
     // MARK: Align
@@ -773,7 +1099,7 @@ struct LYSirenEditor: View {
             var next = edit ?? LYVocalEdit(sourceRelativePath: path, notes: notes)
             next.notes = notes
             next.alignment = LYVocalAlignment(guideClipID: guideID, tightness: tightness, alignsPitch: alignsPitch, points: points)
-            clip.vocal = next
+            applyLocalEdit(next)
             status = .ready
         } catch {
             status = .failed(error.localizedDescription)

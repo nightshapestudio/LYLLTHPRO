@@ -520,88 +520,99 @@ struct ArrangementView: View {
     }
 
     private var audioEditStrip: some View {
-        HStack(spacing: 8) {
-            Rectangle().fill(LYLLTHTheme.purple).frame(width: 14, height: 2)
-                .lyBloom(LYLLTHTheme.purple)
-            if let clip = selectedAudioClip {
-                Text("EVENT")
-                    .font(LYLLTHTheme.label(8, weight: .bold))
-                    .tracking(1.5)
-                    .foregroundStyle(LYLLTHTheme.dim)
-                Text(clip.name)
-                    .font(LYLLTHTheme.label(9.5, weight: .bold))
-                    .tracking(0.6)
-                    .foregroundStyle(LYLLTHTheme.text)
-                    .lineLimit(1)
-                    .frame(maxWidth: 170, alignment: .leading)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Rectangle().fill(LYLLTHTheme.purple).frame(width: 14, height: 2)
+                    .lyBloom(LYLLTHTheme.purple)
+                if let clip = selectedAudioClip {
+                    Text("EVENT")
+                        .font(LYLLTHTheme.label(8, weight: .bold))
+                        .tracking(1.5)
+                        .foregroundStyle(LYLLTHTheme.dim)
+                    Text(clip.name)
+                        .font(LYLLTHTheme.label(9.5, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(LYLLTHTheme.text)
+                        .lineLimit(1)
+                        .frame(maxWidth: 170, alignment: .leading)
 
-                eventReadout("GAIN", gainText(clip.eventGainDB))
-                eventReadout("PITCH", pitchText(clip.pitchSemitones))
-                stretchButton(clip)
-                if let cycle = LYAudioEventTiming.cycleBeats(for: clip, projectBPM: session.bpm), cycle > 0 {
-                    eventReadout("LOOPS", String(format: "×%.1f", clip.lengthBeats / cycle))
-                }
-
-                Spacer(minLength: 8)
-
-                if (clip.takes?.count ?? 0) > 1 {
-                    eventActionButton("COMP  \(clip.takes?.count ?? 0)", help: "Open the take folder and swipe across lanes to build the best composite") {
-                        guard let location = selectedAudioLocation else { return }
-                        openTakeComp(session.tracks[location.track].id, clip.id)
+                    eventReadout("GAIN", gainText(clip.eventGainDB))
+                    eventReadout("PITCH", pitchText(clip.pitchSemitones))
+                    stretchButton(clip)
+                    if let cycle = LYAudioEventTiming.cycleBeats(for: clip, projectBPM: session.bpm), cycle > 0 {
+                        eventReadout("LOOPS", String(format: "×%.1f", clip.lengthBeats / cycle))
                     }
+
+                    Spacer(minLength: 8)
+
+                    if (clip.takes?.count ?? 0) > 1 {
+                        eventActionButton("COMP  \(clip.takes?.count ?? 0)", help: "Open the take folder and swipe across lanes to build the best composite") {
+                            guard let location = selectedAudioLocation else { return }
+                            openTakeComp(session.tracks[location.track].id, clip.id)
+                        }
+                    }
+                    eventActionButton(clip.activeVocalEdit == nil ? "SIREN" : "SIREN  ●", help: "Tune, time and align this event note by note (or double-click it)") {
+                        guard let location = selectedAudioLocation else { return }
+                        openVocal(session.tracks[location.track].id, clip.id)
+                    }
+                    if clip.vocal != nil {
+                        eventActionButton("REMOVE SIREN", help: "Remove SIREN edits and return this event to its original recording") {
+                            LYRegionCommands.removeSiren(clip.id, in: &session)
+                        }
+                    }
+                    eventActionButton(clip.isReversed ? "REVERSED  ●" : "REVERSE", help: "Play this audio event backwards without changing its source") {
+                        LYRegionCommands.toggleReverse(clip.id, in: &session)
+                    }
+                    eventActionButton("PREVIEW", help: "Hear this event alone") { previewAudioEvent(clip) }
+                    eventActionButton("XFADE", help: "Crossfade with the overlapping event beside it", enabled: selectedCrossfadePartner != nil, action: crossfadeSelectedAudioEvent)
+                    eventActionButton("CONSOLIDATE", help: "Print gain, fades, pitch and stretch into a new source") {
+                        guard let location = selectedAudioLocation else { return }
+                        consolidateAudio(session.tracks[location.track].id, clip.id)
+                    }
+                    eventActionButton("SPLIT  S", help: "Split at the purple edit cursor", enabled: canSplitSelectedAudioEvent, action: splitSelectedAudioEvent)
+                    eventActionButton("DUP  ⌘D", help: "Duplicate right after this event", action: duplicateSelectedAudioEvent)
+                    eventActionButton("DELETE", help: "Remove this event (delete key)", action: deleteSelectedAudioEvent)
+                    eventActionButton("−", help: "Down a semitone (−). Shift: 4, ⌘: octave") { transposeSelectedAudioEvent(by: -1) }
+                    eventActionButton("+", help: "Up a semitone (=). Shift: 4, ⌘: octave") { transposeSelectedAudioEvent(by: 1) }
+                } else if let location = selectedPatternLocation {
+                    let track = session.tracks[location.track]
+                    let region = track.clips[location.clip]
+                    Text(region.isPlacement ? "PLACEMENT" : "PATTERN")
+                        .font(LYLLTHTheme.label(8, weight: .bold))
+                        .tracking(1.5)
+                        .foregroundStyle(LYLLTHTheme.dim)
+                    Text(track.patternContent(of: region).name)
+                        .font(LYLLTHTheme.label(9.5, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(LYLLTHTheme.text)
+                        .lineLimit(1)
+                        .frame(maxWidth: 170, alignment: .leading)
+                    Spacer(minLength: 8)
+                    eventActionButton("EDIT IN SEQUENCER  ↩", help: "Open this pattern in the sequencer (or double-click the region)", action: editSelectedPattern)
+                    eventActionButton("PLACE AGAIN  ⌘D", help: "Play this pattern again right after. Editing the pattern changes every place it plays.", action: placeSelectedPatternAgain)
+                    eventActionButton("REMOVE", help: "Take it out of the song (delete key). The pattern stays in the sequencer.", action: removeSelectedPatternFromSong)
+                } else {
+                    Text(selectedTrackKind == .audio
+                         ? "DROP AUDIO ON A LANE  ·  DRAG AN EVENT'S RIGHT EDGE TO LOOP IT  ·  DRAG ITS TOP LINE FOR VOLUME"
+                         : "DOUBLE-CLICK A PATTERN TO EDIT IT  ·  CLICK AN AUDIO EVENT TO EDIT IT  ·  DROP FILES FROM FINDER ONTO ANY LANE")
+                        .font(LYLLTHTheme.label(8, weight: .bold))
+                        .tracking(1.1)
+                        .foregroundStyle(LYLLTHTheme.dim)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    if copiedAudioEvent != nil {
+                        eventActionButton("PASTE  ⌘V", help: "Paste at the edit cursor", action: pasteAudioEvent)
+                    }
+                    Button("IMPORT AUDIO") {
+                        requestAudioImport(selectedTrackKind == .audio ? selectedTrackID : nil, editCursorBeat)
+                    }
+                    .buttonStyle(LYChromeButtonStyle(active: true, tint: LYLLTHTheme.purple, compact: true))
+                    .help("Copy an audio file into the project at the edit cursor")
                 }
-                eventActionButton(clip.activeVocalEdit == nil ? "SIREN" : "SIREN  ●", help: "Tune, time and align this event note by note (or double-click it)") {
-                    guard let location = selectedAudioLocation else { return }
-                    openVocal(session.tracks[location.track].id, clip.id)
-                }
-                eventActionButton("PREVIEW", help: "Hear this event alone") { previewAudioEvent(clip) }
-                eventActionButton("XFADE", help: "Crossfade with the overlapping event beside it", enabled: selectedCrossfadePartner != nil, action: crossfadeSelectedAudioEvent)
-                eventActionButton("CONSOLIDATE", help: "Print gain, fades, pitch and stretch into a new source") {
-                    guard let location = selectedAudioLocation else { return }
-                    consolidateAudio(session.tracks[location.track].id, clip.id)
-                }
-                eventActionButton("SPLIT  S", help: "Split at the purple edit cursor", enabled: canSplitSelectedAudioEvent, action: splitSelectedAudioEvent)
-                eventActionButton("DUP  ⌘D", help: "Duplicate right after this event", action: duplicateSelectedAudioEvent)
-                eventActionButton("DELETE", help: "Remove this event (delete key)", action: deleteSelectedAudioEvent)
-                eventActionButton("−", help: "Down a semitone (−). Shift: 4, ⌘: octave") { transposeSelectedAudioEvent(by: -1) }
-                eventActionButton("+", help: "Up a semitone (=). Shift: 4, ⌘: octave") { transposeSelectedAudioEvent(by: 1) }
-            } else if let location = selectedPatternLocation {
-                let track = session.tracks[location.track]
-                let region = track.clips[location.clip]
-                Text(region.isPlacement ? "PLACEMENT" : "PATTERN")
-                    .font(LYLLTHTheme.label(8, weight: .bold))
-                    .tracking(1.5)
-                    .foregroundStyle(LYLLTHTheme.dim)
-                Text(track.patternContent(of: region).name)
-                    .font(LYLLTHTheme.label(9.5, weight: .bold))
-                    .tracking(0.6)
-                    .foregroundStyle(LYLLTHTheme.text)
-                    .lineLimit(1)
-                    .frame(maxWidth: 170, alignment: .leading)
-                Spacer(minLength: 8)
-                eventActionButton("EDIT IN SEQUENCER  ↩", help: "Open this pattern in the sequencer (or double-click the region)", action: editSelectedPattern)
-                eventActionButton("PLACE AGAIN  ⌘D", help: "Play this pattern again right after. Editing the pattern changes every place it plays.", action: placeSelectedPatternAgain)
-                eventActionButton("REMOVE", help: "Take it out of the song (delete key). The pattern stays in the sequencer.", action: removeSelectedPatternFromSong)
-            } else {
-                Text(selectedTrackKind == .audio
-                     ? "DROP AUDIO ON A LANE  ·  DRAG AN EVENT'S RIGHT EDGE TO LOOP IT  ·  DRAG ITS TOP LINE FOR VOLUME"
-                     : "DOUBLE-CLICK A PATTERN TO EDIT IT  ·  CLICK AN AUDIO EVENT TO EDIT IT  ·  DROP FILES FROM FINDER ONTO ANY LANE")
-                    .font(LYLLTHTheme.label(8, weight: .bold))
-                    .tracking(1.1)
-                    .foregroundStyle(LYLLTHTheme.dim)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                if copiedAudioEvent != nil {
-                    eventActionButton("PASTE  ⌘V", help: "Paste at the edit cursor", action: pasteAudioEvent)
-                }
-                Button("IMPORT AUDIO") {
-                    requestAudioImport(selectedTrackKind == .audio ? selectedTrackID : nil, editCursorBeat)
-                }
-                .buttonStyle(LYChromeButtonStyle(active: true, tint: LYLLTHTheme.purple, compact: true))
-                .help("Copy an audio file into the project at the edit cursor")
             }
+            .padding(.horizontal, 16)
+            .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, 16)
         .frame(height: 42)
         .background(LYLLTHTheme.deck)
         .overlay(alignment: .bottom) { LYHairline() }
@@ -1977,6 +1988,8 @@ private struct ArrangementClip: View {
     @State private var slipOriginSeconds: Double?
     @State private var slipPreviewSeconds: Double?
     @State private var gainOriginDB: Double?
+    @State private var fadeInOriginSeconds: Double?
+    @State private var fadeOutOriginSeconds: Double?
     @State private var isHovering = false
 
     private static let body0 = Color(hex: 0x0B0C10)
@@ -2021,6 +2034,7 @@ private struct ArrangementClip: View {
 
             if clip.kind == .audio && clip.sourceRelativePath != nil {
                 gainOverlay
+                fadeOverlay
             }
         }
         .clipped()
@@ -2057,6 +2071,11 @@ private struct ArrangementClip: View {
             }
             Spacer(minLength: 0)
             if clip.kind == .audio {
+                if clip.isReversed {
+                    Text("REV")
+                        .font(LYLLTHTheme.label(7, weight: .bold))
+                        .foregroundStyle(LYLLTHTheme.teal)
+                }
                 if abs(clip.pitchSemitones) >= 0.05 {
                     Text(String(format: "%+.0f ST", clip.pitchSemitones))
                         .font(LYLLTHTheme.value(8))
@@ -2094,7 +2113,8 @@ private struct ArrangementClip: View {
                     loopOffsetBeats: clip.loopOffsetBeats,
                     sourceStart: max(0, clip.sourceStartSeconds + clip.slipOffsetSeconds + (slipPreviewSeconds.map { $0 - clip.slipOffsetSeconds } ?? 0)),
                     sourceDuration: clip.sourceDurationSeconds ?? 0,
-                    fileDuration: clip.sourceFileDurationSeconds ?? (clip.sourceStartSeconds + (clip.sourceDurationSeconds ?? 0))
+                    fileDuration: clip.sourceFileDurationSeconds ?? (clip.sourceStartSeconds + (clip.sourceDurationSeconds ?? 0)),
+                    isReversed: clip.isReversed
                 )
             }
         } else if clip.isNoteClip {
@@ -2135,6 +2155,10 @@ private struct ArrangementClip: View {
             readout(String(format: "SLIP %+.3f S", slipPreviewSeconds), color: LYLLTHTheme.indigo)
         } else if rightTrimOrigin != nil, let cycle = cycleBeats, cycle > 0 {
             readout(String(format: "×%.2f", clip.lengthBeats / cycle), color: accent)
+        } else if fadeInOriginSeconds != nil {
+            readout(String(format: "FADE IN  %.0f MS", clip.fadeInSeconds * 1_000), color: LYLLTHTheme.teal)
+        } else if fadeOutOriginSeconds != nil {
+            readout(String(format: "FADE OUT  %.0f MS", clip.fadeOutSeconds * 1_000), color: LYLLTHTheme.teal)
         }
     }
 
@@ -2202,6 +2226,79 @@ private struct ArrangementClip: View {
                 clip.eventGainDB = min(max(origin + delta, -60), 12)
             }
             .onEnded { _ in gainOriginDB = nil }
+    }
+
+    // MARK: Fades
+
+    /// Logic-style handles live at the top corners of every audio event. The
+    /// five-millisecond default is audible only as click protection, but its
+    /// handle remains large enough to grab and pull into a musical fade.
+    private var fadeOverlay: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let bottom = geometry.size.height
+            let fadeInWidth = fadePixels(clip.fadeInSeconds, width: width)
+            let fadeOutWidth = fadePixels(clip.fadeOutSeconds, width: width)
+            ZStack(alignment: .topLeading) {
+                Canvas { context, _ in
+                    var fadeIn = Path()
+                    fadeIn.move(to: CGPoint(x: 0, y: bottom))
+                    fadeIn.addLine(to: CGPoint(x: max(1, fadeInWidth), y: titleHeight))
+                    context.stroke(fadeIn, with: .color(accent.opacity(isSelected || isHovering ? 0.85 : 0.42)), lineWidth: 1)
+
+                    var fadeOut = Path()
+                    fadeOut.move(to: CGPoint(x: min(width - 1, width - fadeOutWidth), y: titleHeight))
+                    fadeOut.addLine(to: CGPoint(x: width, y: bottom))
+                    context.stroke(fadeOut, with: .color(accent.opacity(isSelected || isHovering ? 0.85 : 0.42)), lineWidth: 1)
+                }
+                .allowsHitTesting(false)
+
+                fadeHandle(isLeading: true, width: width, fadeWidth: fadeInWidth)
+                fadeHandle(isLeading: false, width: width, fadeWidth: fadeOutWidth)
+            }
+        }
+    }
+
+    private func fadePixels(_ seconds: Double, width: CGFloat) -> CGFloat {
+        let beats = seconds * max(projectBPM, 1) / 60
+        return min(max(0, CGFloat(beats) * beatWidth), max(0, width))
+    }
+
+    private func fadeHandle(isLeading: Bool, width: CGFloat, fadeWidth: CGFloat) -> some View {
+        let visual = min(max(fadeWidth, 6), max(6, width - 6))
+        let x = isLeading ? visual : width - visual
+        return Rectangle()
+            .fill(isSelected || isHovering ? accent : Color.clear)
+            .frame(width: 7, height: 7)
+            .overlay { Rectangle().stroke(LYLLTHTheme.background.opacity(0.8), lineWidth: 1) }
+            .offset(x: min(max(0, x - 3.5), max(0, width - 7)), y: titleHeight - 3.5)
+            .contentShape(Rectangle().inset(by: -5))
+            .highPriorityGesture(fadeGesture(isLeading: isLeading))
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.set() } else { NSCursor.arrow.set() }
+            }
+            .help(isLeading ? "Drag to set fade-in" : "Drag to set fade-out")
+    }
+
+    private func fadeGesture(isLeading: Bool) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let secondsPerPoint = 60 / max(projectBPM, 1) / Double(max(beatWidth, 1))
+                let eventSeconds = clip.lengthBeats * 60 / max(projectBPM, 1)
+                if isLeading {
+                    let origin = fadeInOriginSeconds ?? clip.fadeInSeconds
+                    if fadeInOriginSeconds == nil { fadeInOriginSeconds = origin }
+                    clip.fadeInSeconds = min(max(0, origin + Double(value.translation.width) * secondsPerPoint), eventSeconds)
+                } else {
+                    let origin = fadeOutOriginSeconds ?? clip.fadeOutSeconds
+                    if fadeOutOriginSeconds == nil { fadeOutOriginSeconds = origin }
+                    clip.fadeOutSeconds = min(max(0, origin - Double(value.translation.width) * secondsPerPoint), eventSeconds)
+                }
+            }
+            .onEnded { _ in
+                fadeInOriginSeconds = nil
+                fadeOutOriginSeconds = nil
+            }
     }
 
     // MARK: Move and trim
@@ -2368,6 +2465,7 @@ private struct LYEventWaveform: View {
     let sourceStart: Double
     let sourceDuration: Double
     let fileDuration: Double
+    let isReversed: Bool
 
     var body: some View {
         Canvas { context, size in
@@ -2382,9 +2480,13 @@ private struct LYEventWaveform: View {
             while x < size.width {
                 let beat = Double(x / beatWidth) + loopOffsetBeats
                 let intoCycle = beat.truncatingRemainder(dividingBy: cycleBeats)
-                let time = sourceStart + intoCycle / cycleBeats * sourceDuration
-                let bucket = Int(time / fileDuration * Double(peaks.count))
-                let peak = peaks.indices.contains(bucket) ? CGFloat(peaks[bucket]) : 0
+                let fraction = intoCycle / cycleBeats
+                let time = sourceStart + (isReversed ? 1 - fraction : fraction) * sourceDuration
+                let bucket = min(
+                    peaks.count - 1,
+                    max(0, Int(time / fileDuration * Double(peaks.count)))
+                )
+                let peak = CGFloat(peaks[bucket])
                 let h = min(mid - 1, max(0.5, peak * CGFloat(scale) * (mid - 2)))
                 fill.addRect(CGRect(x: x, y: mid - h, width: column - 0.5, height: h * 2))
                 x += column
@@ -2550,6 +2652,7 @@ extension ArrangementView {
             ] + common + [
                 .action("CROSSFADE", icon: "arrow.left.and.right.righttriangle.left.righttriangle.right", enabled: selectedCrossfadePartner != nil) { crossfadeSelectedAudioEvent() },
                 .section("EVENT"),
+                .action("REVERSE", icon: "backward.end", on: clip.isReversed) { edit { LYRegionCommands.toggleReverse(clipID, in: &$0); return nil } },
                 .action("MUTE", icon: "speaker.slash", on: clip.isMuted) { edit { LYRegionCommands.toggleMute(clipID, in: &$0); return nil } },
                 .action("LOOP", icon: "repeat", on: clip.isLooped) { edit { LYRegionCommands.toggleLoop(clipID, in: &$0); return nil } },
                 .action("LOCK POSITION", icon: "lock", on: clip.isLocked) { edit { LYRegionCommands.toggleLock(clipID, in: &$0); return nil } },
@@ -2562,6 +2665,9 @@ extension ArrangementView {
                 .section("OPEN"),
                 .action("TAKE FOLDER  ·  COMP", icon: "square.stack.3d.up", enabled: (clip.takes?.count ?? 0) > 1) { openTakeComp(track.id, clipID) },
                 .action(clip.activeVocalEdit == nil ? "SIREN" : "SIREN  ·  EDITED", icon: "waveform.path.ecg") { openVocal(track.id, clipID) },
+            ] + (clip.vocal == nil ? [] : [
+                .action("REMOVE SIREN", icon: "xmark.circle") { edit { LYRegionCommands.removeSiren(clipID, in: &$0); return nil } }
+            ]) + [
                 .action("PREVIEW", icon: "play") { previewAudioEvent(clip) },
                 .action("BOUNCE IN PLACE", icon: "square.and.arrow.down.on.square") { consolidateAudio(track.id, clipID) }
             ] + (clip.printedDrum == nil ? [] : [

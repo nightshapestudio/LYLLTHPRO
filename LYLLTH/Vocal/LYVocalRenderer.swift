@@ -57,8 +57,6 @@ enum LYVocalRenderer {
         return Plan(analysis: analysis, notes: notes, warp: warp)
     }
 
-    /// The target pitch shift at a source time, in semitones, and whether
-    /// that moment is edited at all.
     /// The note sounding at a source time. Notes are sorted and never overlap.
     static func note(at time: Double, in notes: [LYVocalNote]) -> LYVocalNote? {
         var low = 0, high = notes.count - 1
@@ -71,14 +69,79 @@ enum LYVocalRenderer {
         return nil
     }
 
+    /// A locally averaged pitch separates slow drift from the faster vibrato
+    /// around it, so the two can be edited independently.
+    private static func trendPitch(at time: Double, note: LYVocalNote, analysis: LYVocalAnalysis) -> Double? {
+        let radius = 0.055
+        let first = analysis.frame(at: max(note.start, time - radius))
+        let last = analysis.frame(at: min(note.end, time + radius))
+        guard last >= first else { return analysis.pitch(at: time) }
+        var total = 0.0, count = 0
+        for index in first...last where analysis.pitch[index] > 0 {
+            total += Double(analysis.pitch[index])
+            count += 1
+        }
+        return count > 0 ? total / Double(count) : analysis.pitch(at: time)
+    }
+
+    private static func rawShift(at time: Double, note: LYVocalNote, analysis: LYVocalAnalysis) -> Double {
+        guard let sung = analysis.pitch(at: time) else { return note.pitchOffset }
+        let trend = trendPitch(at: time, note: note, analysis: analysis) ?? sung
+        let slow = (trend - note.detectedPitch) * note.drift
+        let modulation = (sung - trend) * note.vibrato
+        return note.detectedPitch + slow + modulation + note.pitchOffset - sung
+    }
+
+    /// A soft connection spans the end of one note and the beginning of the
+    /// next. Its stored position moves the steep part earlier or later.
+    private static func transition(at time: Double, notes: [LYVocalNote]) -> (left: LYVocalNote, right: LYVocalNote, start: Double, end: Double)? {
+        guard notes.count > 1 else { return nil }
+        for index in 0..<(notes.count - 1) {
+            let left = notes[index], right = notes[index + 1]
+            guard right.start - left.end < 0.08 else { continue }
+            let edge = min(0.07, max(0.015, min(left.duration, right.duration) * 0.22))
+            let start = left.end - edge
+            let end = right.start + edge
+            guard time >= start, time <= end, end > start else { continue }
+            return (left, right, start, end)
+        }
+        return nil
+    }
+
+    private static func transitionAmount(time: Double, start: Double, end: Double, position: Double) -> Double {
+        let center = start + (end - start) * min(max(position, 0.05), 0.95)
+        let width = min(max((end - start) * 0.34, 0.012), 0.05)
+        let linear = min(max((time - (center - width / 2)) / width, 0), 1)
+        return linear * linear * (3 - 2 * linear)
+    }
+
+    /// The target pitch shift at a source time, in semitones, and whether
+    /// that moment is edited at all.
     static func shift(at time: Double, plan: Plan) -> (semitones: Double, touched: Bool) {
+        if let connection = transition(at: time, notes: plan.notes) {
+            let a = rawShift(at: time, note: connection.left, analysis: plan.analysis)
+            let b = rawShift(at: time, note: connection.right, analysis: plan.analysis)
+            let amount = transitionAmount(time: time, start: connection.start, end: connection.end,
+                                          position: connection.left.pitchTransition)
+            let edited = connection.left.isEdited || connection.right.isEdited
+            return (a + (b - a) * amount, edited)
+        }
         guard let note = note(at: time, in: plan.notes) else { return (0, false) }
-        let gain = abs(note.gainDB) > 0.01
-        guard abs(note.pitchOffset) > 0.000_5 || abs(note.drift - 1) > 0.000_5 else { return (0, gain) }
-        guard let sung = plan.analysis.pitch(at: time) else { return (note.pitchOffset, true) }
-        // Drift pulls the curve toward the note's center; the offset moves it.
-        let target = note.detectedPitch + (sung - note.detectedPitch) * note.drift + note.pitchOffset
-        return (target - sung, true)
+        let touched = abs(note.pitchOffset) > 0.000_5 || abs(note.drift - 1) > 0.000_5
+            || abs(note.vibrato - 1) > 0.000_5 || abs(note.gainDB) > 0.01
+        return (rawShift(at: time, note: note, analysis: plan.analysis), touched)
+    }
+
+    static func formant(at time: Double, plan: Plan) -> (semitones: Double, touched: Bool) {
+        if let connection = transition(at: time, notes: plan.notes) {
+            let shaped = transitionAmount(time: time, start: connection.start, end: connection.end,
+                                          position: connection.left.formantTransition)
+            let value = connection.left.formantShift
+                + (connection.right.formantShift - connection.left.formantShift) * shaped
+            return (value, abs(value) > 0.000_5 || connection.left.isEdited || connection.right.isEdited)
+        }
+        guard let note = note(at: time, in: plan.notes) else { return (0, false) }
+        return (note.formantShift, abs(note.formantShift) > 0.000_5)
     }
 
     static func gain(at time: Double, plan: Plan) -> Float {
@@ -115,17 +178,20 @@ enum LYVocalRenderer {
         let controlCount = frames / controlStep + 2
         var controlSource = [Double](repeating: 0, count: controlCount)
         var controlSemitones = [Float](repeating: 0, count: controlCount)
+        var controlFormants = [Float](repeating: 0, count: controlCount)
         var controlGain = [Float](repeating: 1, count: controlCount)
         var controlMix = [Float](repeating: 0, count: controlCount)
         for index in 0..<controlCount {
             let outputTime = Double(index * controlStep) / rate
             let sourceTime = warp.isEmpty ? outputTime : LYWarp.source(atOutput: outputTime, warp)
             let (semitones, pitched) = shift(at: sourceTime, plan: plan)
+            let (formants, formanted) = formant(at: sourceTime, plan: plan)
             let moved = !warp.isEmpty && abs(sourceTime - outputTime) > 0.000_2
             controlSource[index] = sourceTime
             controlSemitones[index] = Float(semitones)
+            controlFormants[index] = Float(formants)
             controlGain[index] = gain(at: sourceTime, plan: plan)
-            controlMix[index] = pitched || moved ? 1 : 0
+            controlMix[index] = pitched || formanted || moved ? 1 : 0
         }
         smooth(&controlMix, width: max(2, Int(blendSeconds * 1_000)))
 
@@ -137,7 +203,7 @@ enum LYVocalRenderer {
             destinations.withUnsafeBufferPointer { destinationList in
                 lyv_psola(sourceList.baseAddress!, destinationList.baseAddress!, Int32(channels), Int32(frames), rate,
                           positions, periods, voiced, Int32(marks.count),
-                          controlSource, controlSemitones, controlGain, controlMix,
+                          controlSource, controlSemitones, controlFormants, controlGain, controlMix,
                           Int32(controlCount), Int32(controlStep))
             }
         }
@@ -215,11 +281,23 @@ private extension Int {
 /// the edit, so playback, export and every stem pass share one render.
 enum LYVocalRenderCache {
     private static let lock = NSLock()
+    /// SIREN renders are deliberately serialized. Rapid note edits used to
+    /// launch several whole-take PSOLA jobs at once, starving the UI and
+    /// repeatedly forcing the transport to reschedule as stale jobs ended.
+    private static let renderGate = DispatchSemaphore(value: 1)
     private static var rendered: [String: URL] = [:]
     private static var order: [String] = []
 
     static func url(forSource url: URL, edit: LYVocalEdit) throws -> URL {
         let key = url.standardizedFileURL.path + "|" + edit.renderKey
+        lock.lock()
+        if let hit = rendered[key], FileManager.default.fileExists(atPath: hit.path) { lock.unlock(); return hit }
+        lock.unlock()
+
+        renderGate.wait()
+        defer { renderGate.signal() }
+        try Task.checkCancellation()
+        // Another request may have completed this exact edit while we waited.
         lock.lock()
         if let hit = rendered[key], FileManager.default.fileExists(atPath: hit.path) { lock.unlock(); return hit }
         lock.unlock()
@@ -230,8 +308,10 @@ enum LYVocalRenderCache {
         }
         try file.read(into: input)
         let analysis = try LYVocalAnalysisCache.shared.analysis(for: url)
+        try Task.checkCancellation()
         let plan = LYVocalRenderer.plan(edit: edit, analysis: analysis)
         guard let output = LYVocalRenderer.render(input, plan: plan) else { throw LYAudioEventRenderError.renderFailed }
+        try Task.checkCancellation()
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("LYLLTH-SIREN", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

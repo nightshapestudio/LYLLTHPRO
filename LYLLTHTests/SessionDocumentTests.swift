@@ -617,6 +617,61 @@ final class SessionDocumentTests: XCTestCase {
         XCTAssertEqual(result.first.fadeOutSeconds, 0.5, accuracy: 1e-9)
         XCTAssertEqual(result.second.fadeInSeconds, 0.5, accuracy: 1e-9)
         XCTAssertEqual(result.first.fadeCurve, .equalPower)
+        let midpointIn = LYTimelineAudioPlayer.fadeGain(0.5, curve: result.second.fadeCurve)
+        let midpointOut = LYTimelineAudioPlayer.fadeGain(0.5, curve: result.first.fadeCurve)
+        XCTAssertEqual(midpointIn * midpointIn + midpointOut * midpointOut, 1, accuracy: 0.000_1,
+                       "the overlap must remain constant-power, not merely carry an equal-power label")
+    }
+
+    func testAudioEventsStartWithClickSafeEdgeFades() throws {
+        let clip = LYClip(name: "VOICE", kind: .audio, startBeat: 0, lengthBeats: 4,
+                          sourceRelativePath: "voice.wav")
+        XCTAssertEqual(clip.fadeInSeconds, LYClip.defaultAudioEdgeFadeSeconds)
+        XCTAssertEqual(clip.fadeOutSeconds, LYClip.defaultAudioEdgeFadeSeconds)
+
+        let pieces = try XCTUnwrap(LYAudioEventEditor.split(clip, atBeat: 2))
+        XCTAssertEqual(pieces.left.fadeOutSeconds, LYClip.defaultAudioEdgeFadeSeconds)
+        XCTAssertEqual(pieces.right.fadeInSeconds, LYClip.defaultAudioEdgeFadeSeconds)
+    }
+
+    func testAudioEventReverseIsNonDestructiveAndPersists() throws {
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4))
+        buffer.frameLength = 4
+        buffer.floatChannelData![0][0] = 1
+        buffer.floatChannelData![0][1] = 2
+        buffer.floatChannelData![0][2] = 3
+        buffer.floatChannelData![0][3] = 4
+        LYAudioEventRenderer.reverseFrames(buffer)
+        XCTAssertEqual((0..<4).map { buffer.floatChannelData![0][$0] }, [4, 3, 2, 1])
+
+        var clip = LYClip(name: "REV", kind: .audio, startBeat: 0, lengthBeats: 1,
+                          sourceRelativePath: "voice.wav")
+        clip.isReversed = true
+        let decoded = try JSONDecoder().decode(LYClip.self, from: JSONEncoder().encode(clip))
+        XCTAssertTrue(decoded.isReversed)
+        XCTAssertEqual(decoded.sourceRelativePath, clip.sourceRelativePath, "reverse never rewrites the source")
+    }
+
+    func testVersionSevenAudioEventsGainDefaultEdgeFadesOnce() throws {
+        var session = LYLLTHSession.blank()
+        session.schemaVersion = 7
+        let track = try XCTUnwrap(session.tracks.firstIndex { $0.kind == .audio })
+        var clip = LYClip(name: "OLD", kind: .audio, startBeat: 0, lengthBeats: 4,
+                          sourceRelativePath: "old.wav")
+        clip.fadeInSeconds = 0
+        clip.fadeOutSeconds = 0
+        session.tracks[track].clips = [clip]
+
+        let migrated = session.migratedToCurrentSchema()
+        XCTAssertEqual(migrated.tracks[track].clips[0].fadeInSeconds, LYClip.defaultAudioEdgeFadeSeconds)
+        XCTAssertEqual(migrated.tracks[track].clips[0].fadeOutSeconds, LYClip.defaultAudioEdgeFadeSeconds)
+        XCTAssertEqual(migrated.schemaVersion, 8)
+
+        var cleared = migrated
+        cleared.tracks[track].clips[0].fadeInSeconds = 0
+        XCTAssertEqual(cleared.migratedToCurrentSchema().tracks[track].clips[0].fadeInSeconds, 0,
+                       "an intentional zero in a current project stays zero")
     }
 
     func testWarpMarkersCanBeMovedInsertedAndRemoved() throws {
@@ -709,12 +764,68 @@ final class SessionDocumentTests: XCTestCase {
             clip: clip,
             projectBPM: 200
         )
+        let renderedFromProjectFile = try await LYAudioEventRenderer.render(
+            sourceURL: url,
+            clip: clip,
+            projectBPM: 200
+        )
 
         XCTAssertEqual(rendered.format.sampleRate, sampleRate)
         XCTAssertEqual(Double(rendered.frameLength) / sampleRate, 0.5, accuracy: 0.02)
+        XCTAssertEqual(renderedFromProjectFile.frameLength, rendered.frameLength)
         let peak = (0..<Int(rendered.frameLength)).map { abs(rendered.floatChannelData?[0][$0] ?? 0) }.max() ?? 0
+        let directPeak = (0..<Int(renderedFromProjectFile.frameLength)).map {
+            abs(renderedFromProjectFile.floatChannelData?[0][$0] ?? 0)
+        }.max() ?? 0
         XCTAssertGreaterThan(peak, 0.01)
         XCTAssertLessThan(peak, 0.2)
+        XCTAssertEqual(directPeak, peak, accuracy: 0.001)
+    }
+
+    func testNeutralAudioEventRendererIsSampleAlignedAndTransparent() async throws {
+        let sampleRate = 48_000.0
+        let frameCount = 12_000
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1))
+        let source = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount))
+        )
+        source.frameLength = source.frameCapacity
+        for frame in 0..<frameCount {
+            source.floatChannelData?[0][frame] = frame == 731
+                ? 0.75
+                : Float(sin(2 * Double.pi * 173 * Double(frame) / sampleRate) * 0.13)
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lyllth-neutral-render-\(UUID().uuidString).caf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try autoreleasepool {
+            let file = try AVAudioFile(forWriting: url, settings: format.settings,
+                                       commonFormat: .pcmFormatFloat32, interleaved: false)
+            try file.write(from: source)
+        }
+
+        var clip = LYClip(
+            name: "VOCAL",
+            kind: .audio,
+            startBeat: 0,
+            lengthBeats: 1,
+            sourceRelativePath: "vocal.caf",
+            sourceDurationSeconds: Double(frameCount) / sampleRate
+        )
+        clip.fadeInSeconds = 0
+        clip.fadeOutSeconds = 0
+
+        let rendered = try await LYAudioEventRenderer.render(sourceURL: url, clip: clip, projectBPM: 120)
+        XCTAssertEqual(rendered.frameLength, source.frameLength)
+        XCTAssertEqual(rendered.format.channelCount, 1)
+        let actual = try XCTUnwrap(rendered.floatChannelData?[0])
+        let expected = try XCTUnwrap(source.floatChannelData?[0])
+        var largestDifference: Float = 0
+        for frame in 0..<frameCount {
+            largestDifference = max(largestDifference, abs(actual[frame] - expected[frame]))
+        }
+        XCTAssertLessThan(largestDifference, 1e-6, "neutral playback must not add latency or another DSP pass")
     }
 }
 

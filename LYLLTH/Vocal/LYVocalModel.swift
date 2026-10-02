@@ -16,8 +16,19 @@ struct LYVocalNote: Codable, Identifiable, Equatable {
     /// Semitones added to the note. 0.5 is fifty cents.
     var pitchOffset: Double = 0
     /// How much of the singer's own pitch movement is kept: 1 is all of it,
-    /// 0 holds the note dead flat on its center.
+    /// 0 removes the slow rise or fall across the note.
     var drift: Double = 1
+    /// How much of the faster pitch modulation is kept. 1 is the original
+    /// vibrato, 0 removes it, and values above 1 exaggerate it.
+    var vibrato: Double = 1
+    /// Independent spectral-envelope shift in semitones. This changes vocal
+    /// color without moving the fundamental pitch.
+    var formantShift: Double = 0
+    /// Where the pitch transition to the following softly-connected note is
+    /// centered: 0 is early, 0.5 centered, 1 late.
+    var pitchTransition: Double = 0.5
+    /// The equivalent transition position for the formant beam.
+    var formantTransition: Double = 0.5
     var gainDB: Double = 0
     /// Moves the note later (positive) or earlier, in seconds. Its
     /// neighbors stretch or squeeze to make room.
@@ -27,7 +38,50 @@ struct LYVocalNote: Codable, Identifiable, Equatable {
     /// Where the note's center lands after editing.
     var pitch: Double { detectedPitch + pitchOffset }
     var isEdited: Bool {
-        abs(pitchOffset) > 0.000_5 || abs(drift - 1) > 0.000_5 || abs(gainDB) > 0.01 || abs(timeOffset) > 0.000_5
+        abs(pitchOffset) > 0.000_5 || abs(drift - 1) > 0.000_5 || abs(vibrato - 1) > 0.000_5
+            || abs(formantShift) > 0.000_5 || abs(pitchTransition - 0.5) > 0.000_5
+            || abs(formantTransition - 0.5) > 0.000_5 || abs(gainDB) > 0.01 || abs(timeOffset) > 0.000_5
+    }
+}
+
+extension LYVocalNote {
+    private enum CodingKeys: String, CodingKey {
+        case id, start, end, detectedPitch, pitchOffset, drift, vibrato, formantShift
+        case pitchTransition, formantTransition, gainDB, timeOffset
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        start = try values.decode(Double.self, forKey: .start)
+        end = try values.decode(Double.self, forKey: .end)
+        detectedPitch = try values.decode(Double.self, forKey: .detectedPitch)
+        pitchOffset = try values.decodeIfPresent(Double.self, forKey: .pitchOffset) ?? 0
+        drift = try values.decodeIfPresent(Double.self, forKey: .drift) ?? 1
+        // Old projects used `drift` for all pitch movement, including
+        // vibrato. Mirroring it preserves their sound on first open.
+        vibrato = try values.decodeIfPresent(Double.self, forKey: .vibrato) ?? drift
+        formantShift = try values.decodeIfPresent(Double.self, forKey: .formantShift) ?? 0
+        pitchTransition = try values.decodeIfPresent(Double.self, forKey: .pitchTransition) ?? 0.5
+        formantTransition = try values.decodeIfPresent(Double.self, forKey: .formantTransition) ?? 0.5
+        gainDB = try values.decodeIfPresent(Double.self, forKey: .gainDB) ?? 0
+        timeOffset = try values.decodeIfPresent(Double.self, forKey: .timeOffset) ?? 0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(start, forKey: .start)
+        try values.encode(end, forKey: .end)
+        try values.encode(detectedPitch, forKey: .detectedPitch)
+        try values.encode(pitchOffset, forKey: .pitchOffset)
+        try values.encode(drift, forKey: .drift)
+        try values.encode(vibrato, forKey: .vibrato)
+        try values.encode(formantShift, forKey: .formantShift)
+        try values.encode(pitchTransition, forKey: .pitchTransition)
+        try values.encode(formantTransition, forKey: .formantTransition)
+        try values.encode(gainDB, forKey: .gainDB)
+        try values.encode(timeOffset, forKey: .timeOffset)
     }
 }
 
@@ -69,7 +123,9 @@ struct LYVocalEdit: Codable, Equatable {
         var hasher = LYStableHasher()
         for note in notes where note.isEdited {
             hasher.add(note.start); hasher.add(note.end); hasher.add(note.pitchOffset)
-            hasher.add(note.drift); hasher.add(note.gainDB); hasher.add(note.timeOffset)
+            hasher.add(note.drift); hasher.add(note.vibrato); hasher.add(note.formantShift)
+            hasher.add(note.pitchTransition); hasher.add(note.formantTransition)
+            hasher.add(note.gainDB); hasher.add(note.timeOffset)
         }
         for point in alignment?.points ?? [] { hasher.add(point.output); hasher.add(point.source) }
         return hasher.hex

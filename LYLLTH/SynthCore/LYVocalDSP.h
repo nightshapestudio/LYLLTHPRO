@@ -16,13 +16,14 @@ void lyv_yin(const float *signal, int frameCount, int hop, int window,
 
 /// Pitch-synchronous overlap-add. Control arrays hold one value per
 /// `controlStep` output samples: the source time (seconds) each moment
-/// reads from, its pitch shift in semitones, its gain, and how much of the
-/// rebuilt signal replaces the original (0 keeps the original exactly).
+/// reads from, its pitch and formant shifts in semitones, its gain, and how
+/// much of the rebuilt signal replaces the original (0 keeps it unchanged).
 void lyv_psola(const float *const *source, float *const *destination,
                int channels, int frames, double rate,
                const double *markPosition, const double *markPeriod,
                const unsigned char *markVoiced, int markCount,
                const double *controlSource, const float *controlSemitones,
+               const float *controlFormants,
                const float *controlGain, const float *controlMix,
                int controlCount, int controlStep);
 

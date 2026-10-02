@@ -120,6 +120,20 @@ enum LYRegionCommands {
         session.tracks[at.track].clips[at.clip].pitchSemitones = 0
     }
 
+    static func toggleReverse(_ clipID: UUID, in session: inout LYLLTHSession) {
+        guard let at = locate(clipID, in: session), session.tracks[at.track].clips[at.clip].kind == .audio else { return }
+        session.tracks[at.track].clips[at.clip].isReversed.toggle()
+    }
+
+    /// Detaches SIREN's non-destructive edit data and returns the event to
+    /// its original recording. The source file and every other event setting
+    /// remain untouched.
+    static func removeSiren(_ clipID: UUID, in session: inout LYLLTHSession) {
+        guard let at = locate(clipID, in: session),
+              session.tracks[at.track].clips[at.clip].kind == .audio else { return }
+        session.tracks[at.track].clips[at.clip].vocal = nil
+    }
+
     static func adjustGain(_ clipID: UUID, by db: Double, in session: inout LYLLTHSession) {
         guard let at = locate(clipID, in: session) else { return }
         var clip = session.tracks[at.track].clips[at.clip]

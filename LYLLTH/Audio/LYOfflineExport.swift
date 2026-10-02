@@ -516,6 +516,7 @@ struct LYOfflineExport {
             var count: Int
             var fadeIn: Int
             var fadeOut: Int
+            var fadeCurve: LYAudioFadeCurve
             var gain: Float
         }
         var placed: [Placed] = []
@@ -529,6 +530,7 @@ struct LYOfflineExport {
                 count: Int((segment.lengthBeats * secondsPerBeat * rate).rounded()),
                 fadeIn: Int(segment.fadeInBeats * secondsPerBeat * rate),
                 fadeOut: Int(segment.fadeOutBeats * secondsPerBeat * rate),
+                fadeCurve: segment.fadeCurve,
                 gain: clip.eventGainDB <= -59.95 ? 0 : Float(pow(10, clip.eventGainDB / 20))
             ))
         }
@@ -545,7 +547,8 @@ struct LYOfflineExport {
                 guard pieceEnd > start else { sliced[index] = nil; continue }
                 if sliced[index] == nil {
                     sliced[index] = LYTimelineAudioPlayer.slice(piece.cycle, from: piece.cycleStart, count: piece.count,
-                                                                fadeInFrames: piece.fadeIn, fadeOutFrames: piece.fadeOut)
+                                                                fadeInFrames: piece.fadeIn, fadeOutFrames: piece.fadeOut,
+                                                                fadeCurve: piece.fadeCurve)
                 }
                 guard let buffer = sliced[index], let data = buffer.floatChannelData else { continue }
                 let channels = Int(buffer.format.channelCount)

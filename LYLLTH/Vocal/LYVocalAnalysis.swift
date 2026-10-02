@@ -257,11 +257,30 @@ enum LYVocalAnalyzer {
 final class LYVocalAnalysisCache: @unchecked Sendable {
     static let shared = LYVocalAnalysisCache()
     private let lock = NSLock()
+    /// Opening the editor and preparing timeline playback can request the same
+    /// take together. Serialize cache misses so the take is never analyzed
+    /// twice at once, then recheck after waiting.
+    private let analysisGate = DispatchSemaphore(value: 1)
     private var entries: [String: LYVocalAnalysis] = [:]
     private var order: [String] = []
 
+    /// A read-only lookup for latency-sensitive callers. SIREN uses this
+    /// before starting analysis so opening an already-seen take is instant,
+    /// while an uncached take can wait until transport is stopped.
+    func cachedAnalysis(for url: URL) -> LYVocalAnalysis? {
+        let key = url.standardizedFileURL.path
+        lock.lock()
+        defer { lock.unlock() }
+        return entries[key]
+    }
+
     func analysis(for url: URL) throws -> LYVocalAnalysis {
         let key = url.standardizedFileURL.path
+        lock.lock()
+        if let hit = entries[key] { lock.unlock(); return hit }
+        lock.unlock()
+        analysisGate.wait()
+        defer { analysisGate.signal() }
         lock.lock()
         if let hit = entries[key] { lock.unlock(); return hit }
         lock.unlock()

@@ -162,6 +162,7 @@ struct LYEventSegment {
     var cycleOffsetBeats: Double
     var fadeInBeats: Double
     var fadeOutBeats: Double
+    var fadeCurve: LYAudioFadeCurve
 }
 
 /// Plays arranged audio events in time with the NIGHTSHAPE transport.
@@ -181,6 +182,8 @@ final class LYTimelineAudioPlayer {
     private var fallbackCycles: [String: AVAudioPCMBuffer] = [:]
     private var rendering: Set<String> = []
     private var failed: Set<String> = []
+    private var renderTasks: [UUID: Task<Void, Never>] = [:]
+    private var requestedRenderKeys: [UUID: String] = [:]
 
     private var session: LYLLTHSession?
     private var media: LYProjectMediaStore?
@@ -316,7 +319,8 @@ final class LYTimelineAudioPlayer {
                 from: startFrame,
                 count: frameCount,
                 fadeInFrames: skipBeats > 0 ? 0 : Int(segment.fadeInBeats * secondsPerBeat * rate),
-                fadeOutFrames: Int(segment.fadeOutBeats * secondsPerBeat * rate)
+                fadeOutFrames: Int(segment.fadeOutBeats * secondsPerBeat * rate),
+                fadeCurve: segment.fadeCurve
               ) else { return }
         let host = anchor.epochHostTime + AVAudioTime.hostTime(forSeconds: beat * secondsPerBeat)
         node.scheduleBuffer(buffer, at: AVAudioTime(hostTime: host), options: [], completionHandler: nil)
@@ -385,7 +389,8 @@ final class LYTimelineAudioPlayer {
                             lengthBeats: length,
                             cycleOffsetBeats: intoCycle,
                             fadeInBeats: isEventStart ? min(length, clip.fadeInSeconds / secondsPerBeat) : 0,
-                            fadeOutBeats: isEventEnd ? min(length, clip.fadeOutSeconds / secondsPerBeat) : 0
+                            fadeOutBeats: isEventEnd ? min(length, clip.fadeOutSeconds / secondsPerBeat) : 0,
+                            fadeCurve: clip.fadeCurve
                         )
                     )
                     cursor += length
@@ -405,6 +410,10 @@ final class LYTimelineAudioPlayer {
             engine.detachTimelineSource(node)
             nodes[id] = nil
             nodeChannels[id] = nil
+        }
+        let projectClipIDs = Set(session.tracks.flatMap(\.clips).filter { $0.kind == .audio }.map(\.id))
+        for id in Array(renderTasks.keys) where !projectClipIDs.contains(id) {
+            cancelRenderRequest(clipID: id)
         }
     }
 
@@ -437,39 +446,71 @@ final class LYTimelineAudioPlayer {
         guard let session else { return }
         for track in session.tracks where track.kind == .audio {
             for clip in track.clips where clip.kind == .audio {
-                guard let path = clip.sourceRelativePath, let data = media?.data(for: path) else { continue }
+                guard let path = clip.sourceRelativePath, let sourceURL = media?.url(for: path) else { continue }
                 let key = Self.renderKey(for: clip, bpm: session.bpm)
-                guard cycles[key] == nil, !rendering.contains(key), !failed.contains(key) else { continue }
+                // The requested edit may already be cached (for example after
+                // undo). Even then, cancel a stale render for the newer edit.
+                if let requested = requestedRenderKeys[clip.id], requested != key {
+                    cancelRenderRequest(clipID: clip.id)
+                }
+                guard cycles[key] == nil, requestedRenderKeys[clip.id] != key,
+                      !rendering.contains(key), !failed.contains(key) else { continue }
                 rendering.insert(key)
+                requestedRenderKeys[clip.id] = key
                 let fallbackKey = Self.fallbackRenderKey(for: clip, bpm: session.bpm)
+                let clipID = clip.id
                 var cycleClip = clip
                 cycleClip.eventGainDB = 0
                 cycleClip.fadeInSeconds = 0
                 cycleClip.fadeOutSeconds = 0
                 cycleClip.isMuted = false
                 let bpm = session.bpm
-                Task {
+                let task = Task { @MainActor in
                     do {
+                        // Coalesce a quick sequence of SIREN note edits before
+                        // starting a whole-take render.
+                        try await Task.sleep(nanoseconds: 150_000_000)
+                        try Task.checkCancellation()
                         let rendered = try await LYAudioEventRenderer.render(
-                            data: data,
-                            fileExtension: URL(fileURLWithPath: path).pathExtension,
+                            sourceURL: sourceURL,
                             clip: cycleClip,
                             projectBPM: bpm
                         )
+                        try Task.checkCancellation()
                         let converted = try await LYAudioEventRenderer.convert(rendered, to: Self.programFormat)
-                        self.rendering.remove(key)
+                        try Task.checkCancellation()
+                        guard self.requestedRenderKeys[clipID] == key else { return }
                         self.cycles[key] = converted
                         self.fallbackCycles[fallbackKey] = converted
+                        self.finishRenderRequest(clipID: clipID, key: key)
                         self.trimCache()
                         self.needsResync = true
+                    } catch is CancellationError {
+                        self.finishRenderRequest(clipID: clipID, key: key)
                     } catch {
-                        self.rendering.remove(key)
+                        guard self.requestedRenderKeys[clipID] == key else { return }
+                        self.finishRenderRequest(clipID: clipID, key: key)
                         self.failed.insert(key)
                         self.onRenderError?(error.localizedDescription)
                     }
                 }
+                renderTasks[clipID] = task
             }
         }
+    }
+
+    private func finishRenderRequest(clipID: UUID, key: String) {
+        guard requestedRenderKeys[clipID] == key else { return }
+        rendering.remove(key)
+        requestedRenderKeys[clipID] = nil
+        renderTasks[clipID] = nil
+    }
+
+    private func cancelRenderRequest(clipID: UUID) {
+        renderTasks[clipID]?.cancel()
+        if let key = requestedRenderKeys[clipID] { rendering.remove(key) }
+        requestedRenderKeys[clipID] = nil
+        renderTasks[clipID] = nil
     }
 
     /// Keeps only renders the current arrangement still refers to.
@@ -492,6 +533,7 @@ final class LYTimelineAudioPlayer {
             String(format: "%.5f", clip.sourceDurationSeconds ?? -1),
             String(format: "%.5f", clip.slipOffsetSeconds),
             String(format: "%.3f", clip.pitchSemitones),
+            clip.isReversed ? "reverse" : "forward",
             clip.stretchMode.rawValue,
             String(format: "%.4f", clip.sourceBPM ?? 0),
             String(format: "%.4f", clip.stretchMode == .off ? 0 : bpm),
@@ -524,7 +566,8 @@ final class LYTimelineAudioPlayer {
         from start: Int,
         count: Int,
         fadeInFrames: Int,
-        fadeOutFrames: Int
+        fadeOutFrames: Int,
+        fadeCurve: LYAudioFadeCurve = .linear
     ) -> AVAudioPCMBuffer? {
         let available = Int(source.frameLength)
         let first = min(max(0, start), available)
@@ -542,12 +585,23 @@ final class LYTimelineAudioPlayer {
         for channel in 0..<Int(source.format.channelCount) {
             to[channel].update(from: from[channel].advanced(by: first), count: frames)
             for frame in 0..<max(fadeIn, declick) {
-                to[channel][frame] *= Float(frame) / Float(max(fadeIn, declick))
+                let progress = Double(frame) / Double(max(fadeIn, declick))
+                to[channel][frame] *= fadeGain(progress, curve: fadeCurve)
             }
             for frame in 0..<max(fadeOut, declick) {
-                to[channel][frames - 1 - frame] *= Float(frame) / Float(max(fadeOut, declick))
+                let progress = Double(frame) / Double(max(fadeOut, declick))
+                to[channel][frames - 1 - frame] *= fadeGain(progress, curve: fadeCurve)
             }
         }
         return output
+    }
+
+    nonisolated static func fadeGain(_ progress: Double, curve: LYAudioFadeCurve) -> Float {
+        let value = min(max(progress, 0), 1)
+        switch curve {
+        case .linear: return Float(value)
+        case .equalPower: return Float(sin(value * .pi / 2))
+        case .sCurve: return Float(value * value * (3 - 2 * value))
+        }
     }
 }

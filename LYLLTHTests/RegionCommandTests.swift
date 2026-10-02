@@ -95,4 +95,27 @@ final class RegionCommandTests: XCTestCase {
         let gain = session.tracks[t].clips.first { $0.id == clip.id }!.eventGainDB
         XCTAssertEqual(gain, -0.3 - 20 * log10(0.5), accuracy: 0.01)
     }
+
+    func testRemoveSirenPreservesTheOriginalAudioEvent() throws {
+        var session = LYLLTHSession.blank()
+        let track = try XCTUnwrap(session.tracks.firstIndex { $0.kind == .audio })
+        var clip = LYClip(name: "VOX", kind: .audio, startBeat: 8, lengthBeats: 4,
+                          sourceRelativePath: "Audio/vox.wav", sourceStartSeconds: 0.25,
+                          sourceDurationSeconds: 2)
+        var note = LYVocalNote(start: 0.3, end: 0.8, detectedPitch: 60)
+        note.pitchOffset = 1
+        clip.vocal = LYVocalEdit(sourceRelativePath: "Audio/vox.wav", notes: [note])
+        let originalSource = clip.sourceRelativePath
+        let originalStart = clip.startBeat
+        session.tracks[track].clips.append(clip)
+
+        LYRegionCommands.removeSiren(clip.id, in: &session)
+
+        let restored = try XCTUnwrap(session.tracks[track].clips.first { $0.id == clip.id })
+        XCTAssertNil(restored.vocal)
+        XCTAssertEqual(restored.sourceRelativePath, originalSource)
+        XCTAssertEqual(restored.startBeat, originalStart)
+        XCTAssertEqual(restored.sourceStartSeconds, 0.25)
+        XCTAssertEqual(restored.sourceDurationSeconds, 2)
+    }
 }

@@ -49,6 +49,36 @@ final class SirenTests: XCTestCase {
         Array(UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength)))
     }
 
+    private func resonance(_ signal: [Float]) -> Double {
+        // Peak of the smoothed spectrum between 400 Hz and 1.2 kHz.
+        let size = 8_192
+        let start = Int(0.3 * rate)
+        var frame = Array(signal[start..<(start + size)])
+        var window = [Float](repeating: 0, count: size)
+        vDSP_hann_window(&window, vDSP_Length(size), Int32(vDSP_HANN_NORM))
+        vDSP_vmul(frame, 1, window, 1, &frame, 1, vDSP_Length(size))
+        let setup = vDSP_create_fftsetup(13, FFTRadix(kFFTRadix2))!
+        defer { vDSP_destroy_fftsetup(setup) }
+        var real = [Float](repeating: 0, count: size / 2), imaginary = [Float](repeating: 0, count: size / 2)
+        var power = [Float](repeating: 0, count: size / 2)
+        real.withUnsafeMutableBufferPointer { r in
+            imaginary.withUnsafeMutableBufferPointer { i in
+                var split = DSPSplitComplex(realp: r.baseAddress!, imagp: i.baseAddress!)
+                frame.withUnsafeBufferPointer { $0.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: size / 2) { vDSP_ctoz($0, 2, &split, 1, vDSP_Length(size / 2)) } }
+                vDSP_fft_zrip(setup, &split, 1, 13, FFTDirection(FFT_FORWARD))
+                vDSP_zvmags(&split, 1, &power, 1, vDSP_Length(size / 2))
+            }
+        }
+        let hzPerBin = rate / Double(size)
+        let radius = Int(150 / hzPerBin)
+        var best = 0.0, bestHz = 0.0
+        for bin in Int(400 / hzPerBin)...Int(1_200 / hzPerBin) {
+            let sum = (bin - radius...bin + radius).reduce(0.0) { $0 + Double(power[$1]) }
+            if sum > best { best = sum; bestHz = Double(bin) * hzPerBin }
+        }
+        return bestHz
+    }
+
     private let melody = [
         Sung(start: 0.10, end: 0.60, midi: 57),   // A3
         Sung(start: 0.70, end: 1.20, midi: 60),   // C4
@@ -107,7 +137,9 @@ final class SirenTests: XCTestCase {
 
     func testDriftZeroHoldsTheNoteFlat() {
         let input = sing(melody, duration: 2, vibratoCents: 40)
-        let (out, _) = render(input) { notes in for index in notes.indices { notes[index].drift = 0 } }
+        let (out, _) = render(input) { notes in
+            for index in notes.indices { notes[index].drift = 0; notes[index].vibrato = 0 }
+        }
         let analysis = LYVocalAnalyzer.analyze(samples: out, sampleRate: rate)
         // Middle of the C4: the 40 cent vibrato should be gone.
         let values = stride(from: 0.8, to: 1.1, by: 0.005).compactMap { analysis.pitch(at: $0) }
@@ -121,38 +153,32 @@ final class SirenTests: XCTestCase {
         let one = [Sung(start: 0.05, end: 0.95, midi: 55)]
         let input = sing(one, duration: 1, vibratoCents: 0, formant: 800)
         let (out, _) = render(input) { $0[0].pitchOffset = 5 }
-        func resonance(_ signal: [Float]) -> Double {
-            // Peak of the smoothed spectrum between 400 Hz and 1.2 kHz.
-            let size = 8_192
-            let start = Int(0.3 * rate)
-            var frame = Array(signal[start..<(start + size)])
-            var window = [Float](repeating: 0, count: size)
-            vDSP_hann_window(&window, vDSP_Length(size), Int32(vDSP_HANN_NORM))
-            vDSP_vmul(frame, 1, window, 1, &frame, 1, vDSP_Length(size))
-            let setup = vDSP_create_fftsetup(13, FFTRadix(kFFTRadix2))!
-            defer { vDSP_destroy_fftsetup(setup) }
-            var real = [Float](repeating: 0, count: size / 2), imaginary = [Float](repeating: 0, count: size / 2)
-            var power = [Float](repeating: 0, count: size / 2)
-            real.withUnsafeMutableBufferPointer { r in
-                imaginary.withUnsafeMutableBufferPointer { i in
-                    var split = DSPSplitComplex(realp: r.baseAddress!, imagp: i.baseAddress!)
-                    frame.withUnsafeBufferPointer { $0.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: size / 2) { vDSP_ctoz($0, 2, &split, 1, vDSP_Length(size / 2)) } }
-                    vDSP_fft_zrip(setup, &split, 1, 13, FFTDirection(FFT_FORWARD))
-                    vDSP_zvmags(&split, 1, &power, 1, vDSP_Length(size / 2))
-                }
-            }
-            let hzPerBin = rate / Double(size)
-            // Smooth over 300 Hz so harmonics blur into the envelope.
-            let radius = Int(150 / hzPerBin)
-            var best = 0.0, bestHz = 0.0
-            for bin in Int(400 / hzPerBin)...Int(1_200 / hzPerBin) {
-                let sum = (bin - radius...bin + radius).reduce(0.0) { $0 + Double(power[$1]) }
-                if sum > best { best = sum; bestHz = Double(bin) * hzPerBin }
-            }
-            return bestHz
-        }
         let before = resonance(input), after = resonance(out)
         XCTAssertEqual(after, before, accuracy: before * 0.15, "formant \(before) Hz moved to \(after) Hz")
+    }
+
+    func testFormantsMoveWithoutMovingTheFundamental() {
+        let one = [Sung(start: 0.05, end: 0.95, midi: 55)]
+        let input = sing(one, duration: 1, vibratoCents: 0, formant: 700)
+        let (out, _) = render(input) { $0[0].formantShift = 4 }
+        let heard = LYVocalAnalyzer.notes(in: LYVocalAnalyzer.analyze(samples: out, sampleRate: rate))
+        XCTAssertEqual(heard.first?.detectedPitch ?? 0, 55, accuracy: 0.2)
+        XCTAssertGreaterThan(resonance(out), resonance(input) + 80)
+    }
+
+    func testPitchTransitionPositionChangesTheConnection() {
+        let analysis = LYVocalAnalysis(hop: 0.005, pitch: Array(repeating: 60, count: 240),
+                                       level: Array(repeating: 1, count: 240), duration: 1.2)
+        var left = LYVocalNote(start: 0.1, end: 0.6, detectedPitch: 60)
+        var right = LYVocalNote(start: 0.6, end: 1.1, detectedPitch: 60)
+        right.pitchOffset = 4
+        left.pitchTransition = 0.2
+        var plan = LYVocalRenderer.Plan(analysis: analysis, notes: [left, right], warp: [])
+        let early = LYVocalRenderer.shift(at: 0.57, plan: plan).semitones
+        left.pitchTransition = 0.8
+        plan.notes = [left, right]
+        let late = LYVocalRenderer.shift(at: 0.57, plan: plan).semitones
+        XCTAssertGreaterThan(early, late + 1)
     }
 
     func testNudgingANoteMovesItInTime() {
@@ -200,6 +226,22 @@ final class SirenTests: XCTestCase {
 
     // MARK: Model
 
+    func testAnalysisCacheCanBeCheckedWithoutStartingAnalysis() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("siren-cache-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let file = try AVAudioFile(forWriting: url, settings: buffer([Float](repeating: 0, count: 4_800)).format.settings)
+        try file.write(from: buffer([Float](repeating: 0, count: 4_800)))
+
+        let cache = LYVocalAnalysisCache()
+        XCTAssertNil(cache.cachedAnalysis(for: url))
+        let analyzed = try cache.analysis(for: url)
+        let cached = try XCTUnwrap(cache.cachedAnalysis(for: url))
+        XCTAssertEqual(cached.duration, analyzed.duration)
+        XCTAssertEqual(cached.pitch, analyzed.pitch)
+        XCTAssertEqual(cached.level, analyzed.level)
+    }
+
     func testEditSurvivesTheProjectFile() throws {
         var clip = LYClip(name: "VOX", kind: .audio, startBeat: 0, lengthBeats: 8, sourceRelativePath: "vox.wav")
         var note = LYVocalNote(start: 0.1, end: 0.5, detectedPitch: 60.2)
@@ -208,6 +250,30 @@ final class SirenTests: XCTestCase {
         let back = try JSONDecoder().decode(LYClip.self, from: JSONEncoder().encode(clip))
         XCTAssertEqual(back.vocal, clip.vocal)
         XCTAssertNotNil(back.activeVocalEdit)
+    }
+
+    func testOldVocalNotesKeepTheirPreviousDriftSound() throws {
+        let json = #"{"start":0.1,"end":0.5,"detectedPitch":60,"drift":0.25}"#.data(using: .utf8)!
+        let note = try JSONDecoder().decode(LYVocalNote.self, from: json)
+        XCTAssertEqual(note.vibrato, 0.25)
+        XCTAssertEqual(note.formantShift, 0)
+        XCTAssertEqual(note.pitchTransition, 0.5)
+    }
+
+    func testSirenUndoRedoKeepsItsOwnOptionalEditHistory() {
+        let note = LYVocalNote(start: 0.1, end: 0.5, detectedPitch: 60)
+        let first = LYVocalEdit(sourceRelativePath: "voice.wav", notes: [note])
+        var changedNote = note
+        changedNote.formantShift = 2
+        let second = LYVocalEdit(sourceRelativePath: "voice.wav", notes: [changedNote])
+        var history = LYSirenEditHistory()
+
+        history.record(nil)
+        history.record(first)
+        XCTAssertEqual(history.undo(current: second)?.edit, first)
+        XCTAssertNil(history.undo(current: first)?.edit)
+        XCTAssertEqual(history.redo(current: nil)?.edit, first)
+        XCTAssertEqual(history.redo(current: first)?.edit, second)
     }
 
     func testAnEditForAnotherTakeIsIgnored() {

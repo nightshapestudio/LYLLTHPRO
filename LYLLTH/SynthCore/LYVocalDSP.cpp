@@ -80,6 +80,7 @@ void lyv_psola(const float *const *source, float *const *destination,
                const double *markPosition, const double *markPeriod,
                const unsigned char *markVoiced, int markCount,
                const double *controlSource, const float *controlSemitones,
+               const float *controlFormants,
                const float *controlGain, const float *controlMix,
                int controlCount, int controlStep) {
     // Untouched stretches are copied straight through.
@@ -123,17 +124,24 @@ void lyv_psola(const float *const *source, float *const *destination,
 
         const double semitones = control(controlSemitones, controlCount, at);
         const double ratio = markVoiced[cursor] ? std::pow(2.0, semitones / 12.0) : 1.0;
+        const double formantRatio = std::pow(2.0, control(controlFormants, controlCount, at) / 12.0);
         const int halfWidth = (int)std::lround(markPeriod[cursor]);
         const float gain = control(controlGain, controlCount, at);
         const int center = (int)std::lround(position);
         const int grainCenter = (int)std::lround(markPosition[cursor]);
         for (int offset = -halfWidth; offset <= halfWidth; ++offset) {
-            const int target = center + offset, read = grainCenter + offset;
-            if (target < 0 || target >= frames || read < 0 || read >= frames) continue;
+            const int target = center + offset;
+            const double readPosition = grainCenter + offset * formantRatio;
+            const int read = (int)std::floor(readPosition);
+            if (target < 0 || target >= frames || read < 0 || read + 1 >= frames) continue;
             const float w = (float)(0.5 + 0.5 * std::cos(M_PI * offset / (halfWidth + 1)));
             weight[target] += w;
             const float scaled = w * gain;
-            for (int c = 0; c < channels; ++c) accumulated[c][target] += source[c][read] * scaled;
+            const float fraction = (float)(readPosition - read);
+            for (int c = 0; c < channels; ++c) {
+                const float sample = source[c][read] + (source[c][read + 1] - source[c][read]) * fraction;
+                accumulated[c][target] += sample * scaled;
+            }
         }
         position += std::max(1.0, markPeriod[cursor] / ratio);
     }
