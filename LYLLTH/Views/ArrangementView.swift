@@ -1767,7 +1767,9 @@ struct LYTrackSoundButton: View {
             if let step { arrow("chevron.left") { step(-1) }.help("Previous sound (⌘[)") }
             Button(action: action) {
                 HStack(spacing: 3) {
-                    Text(sound)
+                    // The instrument is already in the Inspector's SOURCE; the
+                    // header spends its width on the sound's own name.
+                    Text(sound.replacingOccurrences(of: "LUNATK · ", with: ""))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Image(systemName: "chevron.down")
@@ -1779,7 +1781,8 @@ struct LYTrackSoundButton: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Browse sounds for this track")
+            // The full name, since the header often has to cut it short.
+            .help("\(sound) — browse sounds for this track")
             if let step { arrow("chevron.right") { step(1) }.help("Next sound (⌘])") }
         }
         .onHover { hovering = $0 }
