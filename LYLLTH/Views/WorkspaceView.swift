@@ -2766,33 +2766,61 @@ private struct LYRecordButton: View {
     }
 }
 
-/// DrumKit's PATTERN | SONG switch: the live mode is set large and lit, the
-/// other sits small and quiet beside it.
+/// DrumKit's PATTERN | SONG switch, matched to DrumKit exactly
+/// (`DrumkitRootView.modeSwitcher` / `modeWord`). Change both together.
+///
+/// The two words form one element: they tuck together (negative spacing) and
+/// the ACTIVE word, drawn on top over a matte of the header colour, clips the
+/// near edge of the inactive word behind it. PATTERN active: the S of SONG is
+/// clipped. SONG active: the N of PATTERN is clipped. That overlap is the
+/// hierarchy cue; it is not a tab or segmented control. The swap is instant.
 private struct LYModeSwitch: View {
     @Binding var activeWorkspace: String
 
+    /// DrumKit's `accentHotPurple`.
+    private static let activeColor = Color(hex: 0xA855F7)
+
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            word("PATTERN", key: "PATTERN", color: LYLLTHTheme.purple)
-            word("SONG", key: "SONG", color: LYLLTHTheme.teal)
+        // A fixed slot, left-aligned, like DrumKit's (which places the switch
+        // in a fixed leading frame). The two states are different widths; the
+        // slot is sized by both laid out invisibly, so switching never moves
+        // the tempo, key or anything else in the header.
+        ZStack(alignment: .leading) {
+            pair(patternActive: true).hidden()
+            pair(patternActive: false).hidden()
+            pair(patternActive: activeWorkspace == "PATTERN")
         }
-        .animation(LYLLTHTheme.glide, value: activeWorkspace)
+        .animation(nil, value: activeWorkspace)
+        .transaction { $0.animation = nil }
     }
 
-    private func word(_ title: String, key: String, color: Color) -> some View {
-        let isActive = activeWorkspace == key
-        return Button { activeWorkspace = key } label: {
-            Text(title)
-                .font(isActive ? LYLLTHTheme.label(25, weight: .light) : LYLLTHTheme.label(10, weight: .bold))
-                .tracking(isActive ? 2.2 : 1.8)
-                .foregroundStyle(isActive ? color : LYLLTHTheme.dim)
-                .lyBloom(color, isOn: isActive)
-                .fixedSize()
-                .contentShape(Rectangle())
+    private func pair(patternActive: Bool) -> some View {
+        HStack(alignment: .center, spacing: -6) {
+            word("PATTERN", isActive: patternActive)
+                .zIndex(patternActive ? 2 : 1)
+            word("SONG", isActive: !patternActive)
+                .zIndex(patternActive ? 1 : 2)
+        }
+    }
+
+    private func word(_ key: String, isActive: Bool) -> some View {
+        Button {
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) { activeWorkspace = key }
+        } label: {
+            Text(key)
+                // DrumKit's sizes, not scaled by the text-size preference:
+                // the two sizes and the overlap are fixed geometry.
+                .font(LYLLTHTheme.wordmark(isActive ? 34 : 26))
+                .tracking(1.2)
+                .foregroundStyle(isActive ? Self.activeColor : LYLLTHTheme.off)
+                // DrumKit uses a copy of its wave background here; LYLLTH's
+                // header is a flat deck, so the matte is that colour.
+                .background(LYLLTHTheme.deck)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isActive ? .isSelected : [])
+        .accessibilityLabel(key == "PATTERN" ? "Pattern mode" : "Song mode")
+        .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
         .help(key == "SONG" ? "Play the arrangement" : "Loop and edit one pattern")
     }
 }
@@ -3060,6 +3088,10 @@ private struct TempoReadout: View {
                     HStack(spacing: 3) {
                         Text("\(numerator)/\(denominator)")
                             .font(LYLLTHTheme.value(10))
+                            // Never squeezed: the header used to compress
+                            // this to "4…".
+                            .lineLimit(1)
+                            .fixedSize()
                         Image(systemName: "chevron.down").font(.system(size: 6, weight: .bold))
                     }
                     .foregroundStyle(LYLLTHTheme.chromeText)
