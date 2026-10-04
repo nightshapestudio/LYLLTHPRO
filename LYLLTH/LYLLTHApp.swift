@@ -25,6 +25,7 @@ struct LYLLTHApp: App {
         Window("LYLLTH Help", id: "lyllth-help") {
             LYHelpCenterView()
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1_100, height: 760)
         .windowResizability(.contentMinSize)
 

@@ -86,6 +86,17 @@ enum NightshapeTheme {
     static let accentTeal = Color(hex: 0x33CCCC)
     static let accentIndigo = Color(hex: 0x6666FF)
     static let accentPurple = Color(hex: 0x9933FF)
+    /// The halo around floating windows. In LYLLTH it is a shade, not a
+    /// light: black, so the band around a window sits DARKER than the
+    /// workspace behind it and the window reads as lifted off it. (It was
+    /// accentPurple, then a half-saturated #9966CC; both lit the surround.)
+    /// DrumKit's own theme keeps the full purple.
+    static let windowHalo = Color.black
+    /// A deep, wide black band so a window lifts clearly off the busy
+    /// workspace, plus a tight dark rim right at its edge. (DrumKit: 0.42/22
+    /// and 0.35/3 in purple.)
+    static let windowHaloWide: (opacity: Double, radius: CGFloat) = (0.95, 44)
+    static let windowHaloTight: (opacity: Double, radius: CGFloat) = (0.9, 8)
     static let accentHotTeal = Color(hex: 0x00E5D4)
     static let accentHotPurple = Color(hex: 0xA855F7)
     /// Soft light lavender — a 50/50 blend of indigo/pink-violet lifted with the

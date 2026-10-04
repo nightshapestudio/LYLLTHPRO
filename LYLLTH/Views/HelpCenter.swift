@@ -657,6 +657,10 @@ struct LYHelpCenterView: View {
         }
         .padding(.horizontal, 20)
         .frame(height: 58)
+        // The window has no visible title bar; this strip is where the
+        // window buttons sit, the same arrangement as the main window, so
+        // the header panel runs to the top edge instead of under a grey bar.
+        .padding(.top, 28)
         .background(LYLLTHTheme.panel)
         .overlay(alignment: .bottom) { LYHairline() }
     }
@@ -892,7 +896,7 @@ struct LYHelpCenterView: View {
                         .frame(width: 20, height: 20)
                         .overlay(Rectangle().stroke(LYLLTHTheme.teal.opacity(0.65), lineWidth: 1))
                         .alignmentGuide(.firstTextBaseline) { box in
-                            box.height / 2 + Self.stepSize * Self.interCapHeight / 2
+                            box.height / 2 + Self.stepSize * Self.bodyCapHeight / 2
                         }
                     numbered(step, LYLLTHTheme.body(Self.stepSize), size: Self.stepSize)
                         .foregroundStyle(LYLLTHTheme.secondary)
@@ -911,8 +915,8 @@ struct LYHelpCenterView: View {
     }
 
     private static let stepSize: CGFloat = 13.5
-    /// Inter's capital height as a fraction of its point size.
-    private static let interCapHeight: CGFloat = 0.727
+    /// SF Pro's capital height as a fraction of its point size (1443 / 2048).
+    private static let bodyCapHeight: CGFloat = 0.705
 
     private func callout(_ label: String, _ body: String, color: Color) -> some View {
         HStack(alignment: .top, spacing: 11) {

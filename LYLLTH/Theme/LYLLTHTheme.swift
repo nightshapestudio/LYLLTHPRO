@@ -62,8 +62,38 @@ enum LYLLTHTheme {
         }
     }
 
+    // MARK: Type scale
+    //
+    // Labels: three sizes only. 9 is the floor (S, metadata and sub-labels),
+    // 10 is M (names, parameters), 11 is L (section headers, commands).
+    // Anything asked for at 12 or more is a display size and passes through.
+    // Call sites keep the size they always asked for; it snaps here, so the
+    // hierarchy between them survives while the 6.5-8.5 sizes go away.
+    static let labelS: CGFloat = 9
+    static let labelM: CGFloat = 10
+    static let labelL: CGFloat = 11
+
+    static func scaledLabelSize(_ requested: CGFloat) -> CGFloat {
+        switch requested {
+        case ..<9.25: return labelS
+        case ..<10.25: return labelM
+        case ..<12: return labelL
+        default: return requested
+        }
+    }
+
+    // Values: 10 (S), 12 (M), 13 below display size; 15 and up pass through.
+    static func scaledValueSize(_ requested: CGFloat) -> CGFloat {
+        switch requested {
+        case ..<11: return 10
+        case ..<13: return 12
+        case ..<15: return 13
+        default: return requested
+        }
+    }
+
     static func label(_ size: CGFloat = 10, weight: Font.Weight = .medium) -> Font {
-        let size = size * LYAppPreferences.textScale()
+        let size = scaledLabelSize(size) * LYAppPreferences.textScale()
         switch weight {
         case .ultraLight, .thin, .light:
             return .custom("Adam-Light", size: size)
@@ -77,15 +107,20 @@ enum LYLLTHTheme {
     /// Reading text: sentences in Help and anywhere prose runs longer than a
     /// label. Adam is the display face for short uppercase labels; in long
     /// lowercase lines its rounded letters read as a novelty face.
+    ///
+    /// SF Pro, the system face. It is the same family as `value`, so prose and
+    /// readouts share one supporting face; it ships with macOS, so nothing is
+    /// bundled; and the system applies its own optical sizing and tracking at
+    /// each point size, which a bundled face cannot do.
     static func body(_ size: CGFloat = 12, weight: Font.Weight = .regular) -> Font {
         let size = size * LYAppPreferences.textScale()
         switch weight {
         case .medium:
-            return .custom("Inter-Medium", size: size)
+            return .system(size: size, weight: .medium, design: .default)
         case .semibold, .bold, .heavy, .black:
-            return .custom("Inter-SemiBold", size: size)
+            return .system(size: size, weight: .semibold, design: .default)
         default:
-            return .custom("Inter-Regular", size: size)
+            return .system(size: size, weight: .regular, design: .default)
         }
     }
 
@@ -93,7 +128,11 @@ enum LYLLTHTheme {
     /// Labels stay in Adam; reported values use the quiet, thin SF display cut
     /// with fixed-width figures so changing values never shift laterally.
     static func value(_ size: CGFloat = 12) -> Font {
-        .system(size: size * LYAppPreferences.textScale(), weight: .thin, design: .default).monospacedDigit()
+        let size = scaledValueSize(size)
+        // Thin holds its strokes only at display size; below 18 it breaks up,
+        // so small readouts use the regular cut of the same face.
+        let weight: Font.Weight = size >= 18 ? .thin : .regular
+        return .system(size: size * LYAppPreferences.textScale(), weight: weight, design: .default).monospacedDigit()
     }
 
     static func wordmark(_ size: CGFloat) -> Font {
@@ -339,7 +378,9 @@ struct LYFloatingWindow<Content: View>: View {
         _storedY = AppStorage(wrappedValue: 0, "lyllth.window.\(id).y")
     }
 
-    private static var barHeight: CGFloat { 22 }
+    /// 34 pt: 11 pt clear above and below the 12 pt window buttons and the
+    /// title (was 22, then 28, which still read tight under the frame).
+    private static var barHeight: CGFloat { 34 }
 
     var body: some View {
         GeometryReader { geo in
@@ -371,6 +412,11 @@ struct LYFloatingWindow<Content: View>: View {
                     .scaleEffect(scale)
                     .frame(width: width, height: size.height * scale)
             }
+            // A thin purple frame around the whole window, title bar included.
+            // The black shade outside makes the window's edge the darkest
+            // thing on screen, so without a line of its own the edge blurs
+            // into the shadow; this keeps it crisp.
+            .overlay(Rectangle().strokeBorder(LYLLTHTheme.purple.opacity(0.7), lineWidth: 1))
             // Shadows from plain rectangles behind the window. A shadow on the
             // stack itself gives every control inside its own blurred shadow,
             // redrawn on every frame of a drag. The purple halo keeps the
@@ -388,7 +434,10 @@ struct LYFloatingWindow<Content: View>: View {
     }
 
     private var titleBar: some View {
-        HStack(spacing: 10) {
+        // Window buttons on the left, the same language as the app's own
+        // window: macOS draws them there, so a right-hand X read as Windows.
+        HStack(spacing: 14) {
+            LYWindowControls(close: close, showsUnavailable: true)
             Rectangle().fill(accent).frame(width: 12, height: 2)
             Text(title)
                 .font(LYLLTHTheme.label(8, weight: .bold))
@@ -396,20 +445,26 @@ struct LYFloatingWindow<Content: View>: View {
                 .foregroundStyle(LYLLTHTheme.dim)
                 .lineLimit(1)
             Spacer()
+        }
+        .padding(.leading, 10)
+        // The grip stays centred on the bar whatever the title's length.
+        .overlay {
             HStack(spacing: 3) {
                 ForEach(0..<6, id: \.self) { _ in Circle().fill(LYLLTHTheme.off).frame(width: 2.5, height: 2.5) }
             }
-            Spacer()
-            Button(action: close) {
-                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(LYLLTHTheme.chromeText)
-                    .frame(width: 22, height: 22).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Close")
+            .allowsHitTesting(false)
         }
-        .padding(.leading, 10)
+        // Fill the whole bar BEFORE painting it. Without this the background
+        // and outline wrapped only the 12 pt buttons and the bar height was
+        // invisible padding outside them, which is what looked cramped.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(hex: 0x0B0C10))
-        .overlay(Rectangle().stroke(LYLLTHTheme.lineStrong, lineWidth: 1))
+        // Only a divider under the bar. The window's purple frame is the top
+        // and side edge; a second outline here doubled the top line and made
+        // the space above the buttons read smaller than the space below.
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(LYLLTHTheme.lineStrong).frame(height: 1)
+        }
         .contentShape(Rectangle())
         .onHover { inside in if inside { NSCursor.openHand.set() } else { NSCursor.arrow.set() } }
         .help("Drag to move")
@@ -421,6 +476,59 @@ struct LYFloatingWindow<Content: View>: View {
         let maxY = (area.height - window.height) / 2 + window.height - Self.barHeight
         let minY = -(area.height - window.height) / 2
         return CGSize(width: min(max(offset.width, -maxX), maxX), height: min(max(offset.height, minY), maxY))
+    }
+}
+
+/// Window buttons for LYLLTH's in-app windows, panels and menus, matched to
+/// how the main window's own buttons render in LYLLTH: three flat neutral
+/// grey discs (#8C8C8C), 12 pt, 8 pt apart, on the left. No system red /
+/// yellow / green. A button with an action shows its glyph while the pointer
+/// is over the group; one without an action looks the same at rest and does
+/// nothing. `showsUnavailable: false` shows the close button alone.
+struct LYWindowControls: View {
+    let close: () -> Void
+    var minimize: (() -> Void)? = nil
+    var zoom: (() -> Void)? = nil
+    var showsUnavailable = false
+    @State private var hovering = false
+
+    private static let size: CGFloat = 12
+    private static let disc = Color(hex: 0x8C8C8C)
+
+    var body: some View {
+        HStack(spacing: 8) {
+            button(glyph: "xmark", label: "Close", action: close)
+            if minimize != nil || showsUnavailable {
+                button(glyph: "minus", label: "Minimize", action: minimize)
+            }
+            if zoom != nil || showsUnavailable {
+                button(glyph: "plus", label: "Zoom", action: zoom)
+            }
+        }
+        .onHover { hovering = $0 }
+    }
+
+    private func button(glyph: String, label: String, action: (() -> Void)?) -> some View {
+        let enabled = action != nil
+        return Button { action?() } label: {
+            ZStack {
+                Circle().fill(Self.disc)
+                if enabled && hovering {
+                    Image(systemName: glyph)
+                        .font(.system(size: 7, weight: .black))
+                        .foregroundStyle(Color.black.opacity(0.6))
+                }
+            }
+            .frame(width: Self.size, height: Self.size)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        // Not `.disabled`: that dims the disc, and the main window's buttons
+        // are all one grey. An unavailable button just ignores the click.
+        .allowsHitTesting(enabled)
+        .accessibilityHidden(!enabled)
+        .accessibilityLabel(label)
+        .help(enabled ? label : "")
     }
 }
 
@@ -478,7 +586,7 @@ struct LYNightshapeMenuHeader: View {
     var close: (() -> Void)? = nil
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack(alignment: .topLeading) {
             VStack(spacing: 4) {
                 Text(eyebrow.uppercased())
                     .font(LYLLTHTheme.label(8, weight: .bold))
@@ -495,15 +603,9 @@ struct LYNightshapeMenuHeader: View {
             .padding(.horizontal, 38)
 
             if let close {
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(LYLLTHTheme.metadata)
-                        .frame(width: 26, height: 26)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .offset(x: 3, y: -5)
+                // Top-left, as macOS places a panel's close button.
+                LYWindowControls(close: close)
+                    .offset(x: -6, y: -8)
             }
         }
         .padding(.top, 20)

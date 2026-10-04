@@ -749,14 +749,11 @@ struct LYPresetBrowser: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
+                LYWindowControls(close: close)
                 Text("SOUNDS").font(LYLLTHTheme.label(9, weight: .bold)).tracking(1.8).foregroundStyle(LYLLTHTheme.teal)
                 Text("\(LYSynthFactoryBank.presets.count) FACTORY · \(user.count) USER")
                     .font(LYLLTHTheme.label(7, weight: .bold)).tracking(1.2).foregroundStyle(LYLLTHTheme.dim)
                 Spacer()
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(LYLLTHTheme.chromeText)
-                        .frame(width: 20, height: 20).contentShape(Rectangle())
-                }.buttonStyle(.plain)
             }
             HStack(alignment: .top, spacing: 10) {
                 VStack(spacing: 3) {
@@ -866,14 +863,11 @@ struct LYTableBrowser: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
+                LYWindowControls(close: close)
                 Text("WAVETABLE").font(LYLLTHTheme.label(8.5, weight: .bold)).tracking(1.6).foregroundStyle(accent)
                 Spacer()
                 action("IMPORT…", importTable)
                 action("EDIT…", editTable)
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(LYLLTHTheme.chromeText)
-                        .frame(width: 20, height: 20).contentShape(Rectangle())
-                }.buttonStyle(.plain)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {

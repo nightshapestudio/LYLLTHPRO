@@ -220,16 +220,12 @@ struct LYSynthChoiceList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
+                LYWindowControls(close: close)
                 Text(title)
                     .font(LYLLTHTheme.label(8.5, weight: .bold))
                     .tracking(1.6)
                     .foregroundStyle(accent)
                 Spacer()
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(LYLLTHTheme.chromeText)
-                        .frame(width: 20, height: 20).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
             }
             ScrollView {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columns), spacing: 4) {
@@ -367,16 +363,12 @@ struct LYSynthMenuView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
+                LYWindowControls(close: close)
                 Text(request.title)
                     .font(LYLLTHTheme.label(8.5, weight: .bold))
                     .tracking(1.6)
                     .foregroundStyle(request.accent)
                 Spacer()
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(LYLLTHTheme.chromeText)
-                        .frame(width: 20, height: 20).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
