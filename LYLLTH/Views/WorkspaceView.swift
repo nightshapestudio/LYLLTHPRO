@@ -2811,7 +2811,7 @@ private struct LYModeSwitch: View {
             Text(key)
                 // DrumKit's sizes, not scaled by the text-size preference:
                 // the two sizes and the overlap are fixed geometry.
-                .font(LYLLTHTheme.wordmark(isActive ? 34 : 26))
+                .font(LYLLTHTheme.wordmark(isActive ? 31 : 24))
                 .tracking(1.2)
                 .foregroundStyle(isActive ? Self.activeColor : LYLLTHTheme.off)
                 // DrumKit uses a copy of its wave background here; LYLLTH's
