@@ -122,18 +122,15 @@ struct DrumSynthKnobView: View {
             // Colour only. 0x555566 and 0x444455 measured 2.7:1 and 2.1:1 on
             // this page, so the reading and the name of every synth knob sat
             // below the point where they are legible on a phone. The faces are
-            // left on the page's monospaced cut deliberately: swapping them to
-            // the theme's numeric/meta faces is the right end state but changes
-            // glyph widths inside a four-column grid, which wants a look on a
-            // device first.
+            // now on the theme's faces (numbers: SF Pro, fixed-width digits;
+            // names: Adam at the 9 pt floor), checked on screen in LYLLTH.
             Text(valueText())
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .tracking(0.8)
+                .font(LYLLTHTheme.value(9))
                 .foregroundStyle(NightshapeTheme.textSecondary)
 
             Text(label)
-                .font(.system(size: 8, weight: .medium, design: .monospaced))
-                .tracking(1.2)
+                .font(LYLLTHTheme.label(8, weight: .medium))
+                .tracking(0.6)
                 .foregroundStyle(NightshapeTheme.textFloor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
@@ -169,8 +166,8 @@ private struct DrumSynthKnobReadout: View {
     var body: some View {
         VStack(spacing: 4) {
             Text(label)
-                .font(.system(size: 7.5, weight: .semibold, design: .monospaced))
-                .tracking(2.2)
+                .font(LYLLTHTheme.label(7.5, weight: .bold))
+                .tracking(1.8)
                 .foregroundStyle(NightshapeTheme.textFloor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -258,8 +255,7 @@ struct DrumSynthOptionControlView: View {
                         .background(Circle().fill(Color(hex: 0x0C0C0E)))
 
                     Text(valueText())
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .tracking(0.8)
+                        .font(LYLLTHTheme.value(9))
                         .foregroundStyle(accent.opacity(0.95))
                         .shadow(color: bloom ? accent.opacity(0.55) : .clear, radius: bloom ? 1.5 : 0)
                         .shadow(color: bloom ? accent.opacity(0.2) : .clear, radius: bloom ? 3 : 0)
@@ -285,15 +281,14 @@ struct DrumSynthOptionControlView: View {
             // Matches DrumSynthKnobView above: colour tiers only, faces left
             // as they were.
             Text(valueText())
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .tracking(0.8)
+                .font(LYLLTHTheme.value(9))
                 .foregroundStyle(NightshapeTheme.textSecondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
 
             Text(label)
-                .font(.system(size: 8, weight: .medium, design: .monospaced))
-                .tracking(1.2)
+                .font(LYLLTHTheme.label(8, weight: .medium))
+                .tracking(0.6)
                 .foregroundStyle(NightshapeTheme.textFloor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)

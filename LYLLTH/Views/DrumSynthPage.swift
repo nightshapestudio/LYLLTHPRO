@@ -388,7 +388,12 @@ struct LYDrumSynthPage: View {
     }
 
     private func knobSection(_ section: Section, preset: DrumSynthPreset) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // 12 pt from title to knobs (was 8): a knob turned up draws its lit arc
+        // across the top of its ring, and at 8 pt that arc crowded the title,
+        // so a row read tighter than an identical row of quiet knobs. The
+        // extra top padding keeps the title closer to its own knobs (12) than
+        // to the labels of the row above (22), so it still groups downward.
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Rectangle().fill(section.accent.opacity(0.6)).frame(width: 16, height: 1)
                 Text(section.title)
@@ -401,6 +406,7 @@ struct LYDrumSynthPage: View {
                 if section.sustain { sustainKnob(preset, accent: section.accent) }
             }
         }
+        .padding(.top, 8)
     }
 
     @ViewBuilder
