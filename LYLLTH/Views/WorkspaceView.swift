@@ -2785,7 +2785,11 @@ private struct LYModeSwitch: View {
         // in a fixed leading frame). The two states are different widths; the
         // slot is sized by both laid out invisibly, so switching never moves
         // the tempo, key or anything else in the header.
-        ZStack(alignment: .leading) {
+        // Centred, not leading: in LYLLTH the switch sits between two header
+        // dividers, so whichever state is showing has equal air on both
+        // sides. (Leading left SONG-active ~14 pt heavy on the right.) The
+        // slot itself is still fixed, so nothing else in the header moves.
+        ZStack(alignment: .center) {
             pair(patternActive: true).hidden()
             pair(patternActive: false).hidden()
             pair(patternActive: activeWorkspace == "PATTERN")
