@@ -2809,9 +2809,10 @@ private struct LYModeSwitch: View {
             withTransaction(t) { activeWorkspace = key }
         } label: {
             Text(key)
-                // DrumKit's sizes, not scaled by the text-size preference:
-                // the two sizes and the overlap are fixed geometry.
-                .font(LYLLTHTheme.wordmark(isActive ? 31 : 24))
+                // DrumKit's sizes (34 / 25.5), not scaled by the text-size
+                // preference: the two sizes and the overlap are fixed geometry.
+                // DrumKit is the reference; when it changes, this follows.
+                .font(LYLLTHTheme.wordmark(isActive ? 34 : 25.5))
                 .tracking(1.2)
                 .foregroundStyle(isActive ? Self.activeColor : LYLLTHTheme.off)
                 // DrumKit uses a copy of its wave background here; LYLLTH's
