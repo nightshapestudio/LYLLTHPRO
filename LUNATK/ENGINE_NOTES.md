@@ -146,3 +146,37 @@ density, and spray and spectral tilt are independently saved per oscillator.
 The multisample mode deliberately treats imported table frames as adjacent key
 zones. It is a playable mapped-sample engine, not an SFZ/EXS instrument parser
 or a disk-streaming sampler.
+
+## Oscillator C
+
+A third main oscillator with every field A and B have: two warps, unison
+modes, stacks, its own factory or custom table, and the same five engines.
+Its FM, RM and AM read A (this chunk). It goes through filter 1, on A's path in
+SPLIT, unless its C route is off. Ten matrix destinations, C LEVEL to C WIDTH.
+In the editor it shares the second oscillator slot with B: the B / C button
+switches them and is lit while the hidden one plays.
+
+Its parameters, its route, its engine fields and its destinations are all
+appended, so no existing patch key or plug-in host address moved. It draws its
+random numbers after everything else and only while it is on, so VINTAGE and
+random-phase patches without it hear the numbers they always did. With A's
+settings, C renders sample-for-sample like A, and all 425 factory presets
+render bit-for-bit as before. Each synth instance now reserves about 4 MB
+rather than 2 MB, most of it the doubled voice pool.
+
+## Phase distortion warps
+
+Three warp modes appended after FOLD, after the CZ's phase distortion (PWM is
+already its saw knee). PD SQUARE: each half cycle races to its end and waits,
+so a sine becomes a rounded square with odd harmonics only (2nd and 4th more
+than 120 dB down at 0.7). PD RESO SAW and TRI: a carrier 1–16× faster,
+restarted every cycle and faded to the table's start by a saw or triangle
+window, so the peak sweeps up the harmonics (harmonic 2, 5 and 10 at 0.1, 0.3
+and 0.6) without a click at the restart. The mip level follows the faster
+carrier. At AMOUNT 0 each is exactly the plain table.
+
+## Thirty-two voices
+
+POLYPHONY reaches 32 (it was 16). Voice stealing is unchanged: a free voice,
+then the oldest released, then the oldest. CPU grows with what plays, not with
+the ceiling; an idle voice costs nothing.

@@ -88,7 +88,7 @@ def load_bank():
     if clash:
         raise SystemExit(f"names used by the original presets: {clash}")
     from wavetables import TABLES
-    missing = sorted({t for p in presets for t in (p.custom_a, p.custom_b) if t and t not in TABLES})
+    missing = sorted({t for p in presets for t in (p.custom_a, p.custom_b, p.custom_c) if t and t not in TABLES})
     if missing:
         raise SystemExit(f"unknown factory wavetables: {missing}")
     dupes = {n for n in names if names.count(n) > 1}

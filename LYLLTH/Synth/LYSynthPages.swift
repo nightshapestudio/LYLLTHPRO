@@ -537,13 +537,15 @@ struct LYVoiceLights: View {
         VStack(alignment: .leading, spacing: 5) {
             Text("VOICES  \(live.display.activeVoices) / \(voices == 1 ? "MONO" : "\(voices)")")
                 .font(LYLLTHTheme.label(7, weight: .bold)).tracking(1.3).foregroundStyle(LYLLTHTheme.dim)
+            // Past sixteen voices, thirty-two narrower lights in the same width.
+            let lights = voices > 16 ? 32 : 16
             HStack(spacing: 4) {
-                ForEach(0..<16, id: \.self) { index in
+                ForEach(0..<lights, id: \.self) { index in
                     let allowed = index < voices
                     let sounding = index < Int(live.display.activeVoices)
                     Rectangle()
                         .fill(sounding ? accent : (allowed ? accent.opacity(0.12) : Color.clear))
-                        .frame(width: 16, height: 12)
+                        .frame(width: lights == 32 ? 6 : 16, height: 12)
                         .overlay(Rectangle().stroke(allowed ? accent.opacity(0.6) : LYLLTHTheme.lineStrong, lineWidth: 1))
                         .lyBloom(accent, isOn: sounding, strength: 0.6)
                 }
