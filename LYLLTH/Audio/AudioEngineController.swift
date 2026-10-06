@@ -401,6 +401,7 @@ final class AudioEngineController: ObservableObject {
                 if sentShaping[trackIndex] != nil {
                     engine.setTrackChokeGroup(trackIndex: trackIndex, group: 0)
                     engine.setTrackEnvelope(trackIndex: trackIndex, attack: 0.001, decay: 0, sustain: 1, release: 0.001, bypassed: true)
+                    engine.setTrackHitResponse(trackIndex: trackIndex, velocityTone: 0, variation: 0)
                     sentShaping[trackIndex] = nil
                 }
                 if let id = byChannel[trackIndex], let track = session.tracks.first(where: { $0.id == id }) {
@@ -469,6 +470,8 @@ final class AudioEngineController: ObservableObject {
                 // Another sound may have been chosen while this one rendered.
                 guard appliedDrum[channel] == key else { return }
                 try engine.loadSample(url: url, trackIndex: channel)
+                // Its softer strikes and fresh takes, rendered in the background.
+                engine.setTrackDrumSynthStrikes(trackIndex: channel, preset: preset)
             } catch {
                 audioEventError = "Could not load drum sound \(preset.name): \(error.localizedDescription)"
             }
@@ -504,6 +507,9 @@ final class AudioEngineController: ObservableObject {
             release: envelope.release,
             bypassed: track.envelope == nil || envelope.isBypassed
         )
+        // VEL TONE and VARIATION are how the hits play, not the ADSR: they
+        // stay on with no envelope set, at DrumKit's defaults.
+        engine.setTrackHitResponse(trackIndex: channel, velocityTone: envelope.velocityTone, variation: envelope.variation)
     }
 
     func auditionDrum(_ preset: DrumSynthPreset) {

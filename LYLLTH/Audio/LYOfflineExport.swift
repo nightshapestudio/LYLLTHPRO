@@ -23,6 +23,9 @@ struct LYOfflineExport {
     let channels: [(track: LYTrack, index: Int)]
 
     private var sourceURLs: [Int: URL] = [:]
+    /// The drum synth preset each drum channel's file was rendered from, so
+    /// the export plays the same strikes the live channel does.
+    private var drumPresets: [Int: DrumSynthPreset] = [:]
     private var synthSources: [Int: OfflineSynthSource] = [:]
     private var cycles: [String: AVAudioPCMBuffer] = [:]
     private let segments: [LYEventSegment]
@@ -65,6 +68,7 @@ struct LYOfflineExport {
                 export.sourceURLs[index] = try LYSampleFiles.url(for: data, path: path)
             } else if LYDrumSounds.presetID(for: track) != nil, let drum = LYDrumSounds.preset(for: track) {
                 export.sourceURLs[index] = try await LYDrumSounds.renderedFile(for: drum)
+                export.drumPresets[index] = drum
             } else {
                 let preset = track.synthPresetID.flatMap(SynthPreset.init(rawValue:)) ?? (track.kind == .drumkit ? .deepMono : .junoDream)
                 let root = UInt8(clamping: track.rootNote ?? (track.kind == .drumkit ? 36 : 48))
@@ -297,7 +301,8 @@ struct LYOfflineExport {
             voidGate: OfflineVoidGate(archetype: gate.archetype, hold: gate.hold, rise: gate.rise, floor: gate.floor, size: gate.size,
                                       tilt: gate.tilt, mix: gate.mix, bypassed: gate.isBypassed, keySource: key(gate.keySourceID, own: index)),
             envelope: OfflineTrackEnvelope(attack: envelope.attack, decay: envelope.decay, sustain: envelope.sustain, release: envelope.release,
-                                           isBypassed: track.envelope == nil || envelope.isBypassed),
+                                           isBypassed: track.envelope == nil || envelope.isBypassed,
+                                           velocityTone: envelope.velocityTone, variation: envelope.variation),
             reverbSend: rack.reverbSend ?? 0,
             signalBloom: offlineBloom(rack.signalBloom ?? .neutral),
             pump: OfflinePump(style: pump.style, rateSteps: pump.rateSteps, depth: pump.depth, shape: pump.shape, smooth: pump.smooth,
@@ -307,6 +312,7 @@ struct LYOfflineExport {
             chokesGroup: audible
         )
         offline.synth = synthSources[index]
+        offline.drumSynthPreset = drumPresets[index]
         let filter = rack.filter ?? .neutral
         offline.filter = filter.parameters(atBPM: session.bpm, followSource: key(filter.followSourceID, own: index))
         offline.filterMotion = filter.isBypassed ? nil : filter.motionConfiguration
