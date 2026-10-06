@@ -37,13 +37,16 @@ struct LYFXWindowHost: View {
                     id: request.kind == .decim ? "fx.decimator" : "fx.wide",
                     title: request.kind.title + "  ·  " + targetName,
                     accent: request.kind.accent,
-                    size: size.content,
+                    size: CGSize(width: size.content.width, height: size.content.height + Self.railSpace),
                     scale: size.scale,
                     layer: "fx",
                     close: close
                 ) {
-                    window(request)
-                        .environment(\.fxWindowWide, true)
+                    VStack(spacing: Self.railGap) {
+                        window(request)
+                            .environment(\.fxWindowWide, true)
+                        chainRail(for: request)
+                    }
                 }
                 .transition(.scale(scale: 0.96).combined(with: .opacity))
             }
@@ -51,6 +54,33 @@ struct LYFXWindowHost: View {
             .onAppear { loadDecimator(request) }
             .onChange(of: request) { _, next in loadDecimator(next) }
         }
+    }
+
+    // MARK: Chain rail
+
+    /// DrumKit's chain rail, under every effect window as on the phone: the
+    /// channel's whole chain as flat keys, the open effect underlined in cyan.
+    /// Tap one to switch windows; long-press to switch it in or out.
+    static let railHeight: CGFloat = 40
+    static let railGap: CGFloat = 12
+    static var railSpace: CGFloat { railHeight + railGap }
+
+    private func chainRail(for request: LYFXWindowRequest) -> some View {
+        let chain = rack.chain(isMain: isMain)
+        return FXInspectorChainRail(
+            target: target,
+            selectedKind: request.kind,
+            activeFX: Set(chain.filter { isEngaged($0) }),
+            chainOrder: chain,
+            onSelect: { kind in
+                guard kind != request.kind else { return }
+                self.request = LYFXWindowRequest(kind: kind, target: target)
+            },
+            onToggleBypass: { kind in toggle(kind)() },
+            canToggleBypass: { kind in kind != .eq && !(kind == .reverb && !isMain) },
+            presentation: .panel
+        )
+        .frame(height: Self.railHeight)
     }
 
     /// DrumKit's windows are laid out for a phone. On a desktop they are drawn
@@ -68,7 +98,7 @@ struct LYFXWindowHost: View {
     static func windowSize(for kind: FXKind, in workspace: CGSize) -> (content: CGSize, scale: CGFloat) {
         let target = kind == .decim ? CGSize(width: 900, height: 560) : CGSize(width: 1060, height: 640)
         // Grow type a little on big screens; shrink to fit small ones.
-        let fit = min((workspace.width - 40) / target.width, (workspace.height - 60) / (target.height + 22))
+        let fit = min((workspace.width - 40) / target.width, (workspace.height - 60) / (target.height + 22 + railSpace))
         let scale = min(1.12, max(0.75, fit))
         return (target, scale)
     }

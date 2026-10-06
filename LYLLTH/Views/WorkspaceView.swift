@@ -464,6 +464,17 @@ struct WorkspaceView: View {
                 fxPickerOverlay
                     .zIndex(LYWindowStack.menus)
 
+                // An effect, synth, drum synth or Audio Unit window darkens the
+                // workspace behind it, as DrumKit does, so the window is the
+                // focus. Under every window; clicks still go through.
+                if fxRequest != nil || synthTrackID != nil || drumSynthOpen || audioUnits.editor != nil {
+                    Color.black.opacity(0.55)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                        .zIndex(LYWindowStack.base - 0.5)
+                }
+
                 pianoRollOverlay
                     .zIndex(windowStack.zIndex("pianoroll"))
                 sirenOverlay
