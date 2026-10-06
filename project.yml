@@ -66,6 +66,8 @@ targets:
         group: DrumKitShared
       - path: ../nightshape-drumkit-ios/Views/Components/SonicDecimatorEditorView.swift
         group: DrumKitShared
+      - path: ../nightshape-drumkit-ios/Views/Components/NightshapeFieldShaders.metal
+        group: DrumKitShared
       # DrumKit's .fkit container, for opening and saving DrumKit projects.
       - path: ../nightshape-drumkit-ios/Services/ZipArchiveReader.swift
         group: DrumKitShared

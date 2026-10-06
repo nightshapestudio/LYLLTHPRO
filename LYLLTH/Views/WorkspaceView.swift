@@ -2813,11 +2813,12 @@ private struct LYModeSwitch: View {
             withTransaction(t) { activeWorkspace = key }
         } label: {
             Text(key)
-                // DrumKit's sizes (34 / 25.5), not scaled by the text-size
-                // preference: the two sizes and the overlap are fixed geometry.
-                // DrumKit is the reference; when it changes, this follows.
-                .font(LYLLTHTheme.wordmark(isActive ? 34 : 25.5))
+                // DrumKit's sizes (36 / 22) and optical centering, not scaled
+                // by the text-size preference: the two sizes and the overlap
+                // are fixed geometry. DrumKit is the reference; this follows.
+                .font(LYLLTHTheme.wordmark(isActive ? 36 : 22))
                 .tracking(1.2)
+                .offset(y: LYLLTHTheme.wordmarkOpticalDrop(isActive ? 36 : 22))
                 .foregroundStyle(isActive ? Self.activeColor : LYLLTHTheme.off)
                 // DrumKit uses a copy of its wave background here; LYLLTH's
                 // header is a flat deck, so the matte is that colour.
