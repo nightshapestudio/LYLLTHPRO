@@ -470,6 +470,8 @@ final class AudioEngineController: ObservableObject {
                 // Another sound may have been chosen while this one rendered.
                 guard appliedDrum[channel] == key else { return }
                 try engine.loadSample(url: url, trackIndex: channel)
+                // Its softer strikes and fresh takes, rendered in the background.
+                engine.setTrackDrumSynthStrikes(trackIndex: channel, preset: preset)
             } catch {
                 audioEventError = "Could not load drum sound \(preset.name): \(error.localizedDescription)"
             }
