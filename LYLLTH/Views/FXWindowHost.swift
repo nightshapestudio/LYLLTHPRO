@@ -412,11 +412,11 @@ struct LYFXWindowHost: View {
                     onApply: { commitDecimator(); close() }
                 )
                 .onChange(of: decimatorModel.position) { _, _ in
+                    // Moving the pad is intent to hear it, with MOTION on too:
+                    // a bypassed field stands still.
+                    if decimatorModel.isBypassed { decimatorModel.isBypassed = false }
                     if decimatorModel.motion.isEnabled {
                         decimatorModel.writeSelectedStepFromPosition()
-                    } else if decimatorModel.isBypassed {
-                        // Moving the pad is intent to hear it.
-                        decimatorModel.isBypassed = false
                     }
                     commitDecimator()
                 }
