@@ -103,7 +103,7 @@ MOVING = {"LEAD", "PAD", "ARP", "MOTION", "DRONE", "FX"}
 
 
 class Preset:
-    def __init__(self, name, category, table_a="BASIC", table_b="BASIC"):
+    def __init__(self, name, category, table_a="BASIC", table_b="BASIC", table_c=None):
         assert category in CATEGORIES, category
         self.name = name.upper()
         self.category = category
@@ -113,6 +113,9 @@ class Preset:
         self.custom_b = table_b if table_b.startswith("NS ") else None
         self.table_a = enum("LY_TABLE_" + ("BASIC" if self.custom_a else table_a))
         self.table_b = enum("LY_TABLE_" + ("BASIC" if self.custom_b else table_b))
+        # Oscillator C's table: written only when a preset names one.
+        self.custom_c = table_c if table_c and table_c.startswith("NS ") else None
+        self.table_c = None if table_c is None else enum("LY_TABLE_" + ("BASIC" if self.custom_c else table_c))
         self.values = {}
         self.slots = []
         self.info = {}
@@ -137,7 +140,7 @@ class Preset:
     def osc(self, o, on=True, level=None, pan=None, octave=None, semi=None, fine=None, wt=None, unison=None,
             detune=None, blend=None, width=None, phase=None, rand=None, warp=None, warp_amt=None, warp2=None,
             warp2_amt=None, unimode=None, stack=None):
-        k = "a" if o == 0 else "b"
+        k = "abc"[o]
         self.set(f"{k}.on", 1 if on else 0)
         for field, value in [("level", level), ("pan", pan), ("octave", octave), ("semi", semi), ("fine", fine),
                              ("wtpos", wt), ("unison", unison), ("detune", detune), ("blend", blend),
@@ -434,7 +437,7 @@ class Preset:
         # damaged by design (fold, crush, sync, FM, a scarred pulse).
         if self.get("fsat.type") > 0.5 and self.get("fsat.drive") >= 0.3 and self.get("fsat.mix") >= 0.3:
             items.append("filter saturation")
-        for k, custom in (("a", self.custom_a), ("b", self.custom_b)):
+        for k, custom in (("a", self.custom_a), ("b", self.custom_b), ("c", self.custom_c)):
             if custom in DAMAGED_TABLES and self.get(f"{k}.on") > 0.5 and self.get(f"{k}.level") > 0.1:
                 items.append(f"{k} table")
         if self.get("noise.on") > 0.5 and self.get("noise.level") >= 0.04:
@@ -496,6 +499,10 @@ class Preset:
             patch["customTableA"] = self.custom_a
         if self.custom_b:
             patch["customTableB"] = self.custom_b
+        if self.table_c is not None:
+            patch["tableC"] = self.table_c
+        if self.custom_c:
+            patch["customTableC"] = self.custom_c
         return patch
 
     def entry(self):

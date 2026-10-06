@@ -399,7 +399,7 @@ final class LUNATKAudioUnit: AUAudioUnit {
             var file = LYSynthPresetFile(patch: current)
             file.wavetables = Self.onMain {
                 var tables: [String: Data] = [:]
-                for custom in [current.customTableA, current.customTableB].compactMap({ $0 }) {
+                for custom in current.customTables {
                     if let frames = LYWavetableLibrary.shared.frames(named: custom) {
                         tables[custom] = LYWavetableLibrary.floatData(frames)
                     }

@@ -30,7 +30,8 @@ typedef struct LYSynth LYSynth;
 // ---------------------------------------------------------------------------
 
 enum {
-    // Oscillator A, then B at the same offsets from LY_OSCB_BASE.
+    // Oscillator A, then B at the same offsets from LY_OSCB_BASE (and C, much
+    // later, from LY_OSCC_BASE).
     LY_OSC_ON = 0,
     LY_OSC_LEVEL,       // 0…1
     LY_OSC_PAN,         // -1…1
@@ -54,6 +55,7 @@ enum {
 };
 
 enum { LY_OSCA_BASE = 0, LY_OSCB_BASE = LY_OSC_PARAM_COUNT };
+enum { LY_OSC_COUNT = 3 };   // oscillators A, B and C: 0, 1 and 2 wherever one is chosen by number
 
 enum {
     LY_SUB_ON = 2 * LY_OSC_PARAM_COUNT,
@@ -122,7 +124,7 @@ enum {
     LY_MACRO1 = LY_LFO1_SHAPE + 4 * LY_LFO_STRIDE, LY_MACRO2, LY_MACRO3, LY_MACRO4,
     LY_MODWHEEL,
 
-    LY_VOICES,          // 1…16; 1 is mono
+    LY_VOICES,          // 1…32; 1 is mono
     LY_GLIDE,           // 0…1 s
     LY_LEGATO,          // 0/1
     LY_GLIDE_ALWAYS,    // 0 glides only between held notes, 1 every note
@@ -324,6 +326,14 @@ enum {
     LY_GRAIN_DENSITY_A, LY_GRAIN_DENSITY_B,
     LY_GRAIN_SPRAY_A, LY_GRAIN_SPRAY_B,
     LY_SPECTRAL_TILT_A, LY_SPECTRAL_TILT_B,
+
+    // Oscillator C: the same fields as A and B from LY_OSCC_BASE, its filter
+    // route, then its engine fields in the order A's and B's pairs above run.
+    // Its FM, RM and AM read A. It joins filter 1 (A's path in SPLIT).
+    LY_OSCC_BASE,
+    LY_FILTER_ROUTE_C = LY_OSCC_BASE + LY_OSC_PARAM_COUNT,
+    LY_OSC_ENGINE_C, LY_SAMPLE_ROOT_C, LY_SAMPLE_LOOP_C,
+    LY_GRAIN_SIZE_C, LY_GRAIN_DENSITY_C, LY_GRAIN_SPRAY_C, LY_SPECTRAL_TILT_C,
     LY_PARAM_COUNT
 };
 enum { LY_DEC_STEPS = 16 };
@@ -354,6 +364,10 @@ enum {
     LY_WARP_OFF = 0, LY_WARP_SYNC, LY_WARP_BEND_POS, LY_WARP_BEND_NEG,
     LY_WARP_MIRROR, LY_WARP_PWM, LY_WARP_FM, LY_WARP_RM, LY_WARP_QUANTIZE,
     LY_WARP_ASYM_POS, LY_WARP_ASYM_NEG, LY_WARP_FLIP, LY_WARP_AM, LY_WARP_FOLD,
+    // Phase distortion, after the CZ: a square from two knees, and the
+    // resonant shapes, a carrier up to 16 times faster, restarted every cycle
+    // and faded out by a saw or triangle window so it never clicks.
+    LY_WARP_PD_SQUARE, LY_WARP_PD_RESO_SAW, LY_WARP_PD_RESO_TRI,
     LY_WARP_COUNT
 };
 
@@ -446,6 +460,9 @@ enum {
     LY_DST_MORPH, LY_DST_F2_MORPH,
     LY_DST_DEC_DESTROY, LY_DST_DEC_CRUSH, LY_DST_DEC_MIX,
     LY_DST_LFO5_RATE, LY_DST_LFO6_RATE, LY_DST_LFO7_RATE, LY_DST_LFO8_RATE, LY_DST_LFO9_RATE, LY_DST_LFO10_RATE,
+    // Oscillator C: A's first block of seven, then its second block of three.
+    LY_DST_C_LEVEL, LY_DST_C_PAN, LY_DST_C_PITCH, LY_DST_C_WTPOS, LY_DST_C_DETUNE, LY_DST_C_BLEND, LY_DST_C_WARP,
+    LY_DST_C_WARP2, LY_DST_C_WIDTH, LY_DST_C_FINE,
     LY_DST_COUNT
 };
 
@@ -482,6 +499,7 @@ typedef struct {
     float vocoderBands[LY_VOC_MAX_BANDS]; // each band's level from the input, 0…1
     int decimatorStep;            // the MOTION step playing, -1 when MOTION is off
     float decimatorPosition[2];   // where DESTROY (x) and CRUSH (y) are now, MOTION and modulation included
+    float wavetablePositionC;     // oscillator C's, modulated, of the newest voice
 } LYSynthDisplay;
 
 LYSynth *lysynth_create(double sampleRate);
@@ -517,6 +535,7 @@ void lysynth_render_input(LYSynth *synth, float *left, float *right, const float
                           int frames, uint64_t blockHostTime);
 
 /// Not the audio thread. frameCount × LY_WT_SIZE samples, frame after frame.
+/// `oscillator` is 0…LY_OSC_COUNT - 1.
 void lysynth_set_wavetable(LYSynth *synth, int oscillator, const float *frames, int frameCount);
 /// Not the audio thread. Uses a factory table built once and shared by every
 /// synth instance, so sixteen synth tracks do not hold sixteen copies.

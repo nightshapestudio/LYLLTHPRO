@@ -90,6 +90,8 @@ struct LYSynthEditor: View {
     @State private var anchors: [String: CGRect] = [:]
     @State private var menu: LYSynthMenuRequest?
     @State private var choosingTable: Int?
+    /// The second oscillator slot shows B (1) or C (2).
+    @State private var secondOscillator = 1
     @State private var importingTable: Int?
     @State private var choosingPreset = false
     @State private var modTab = 0          // 0…3 envelopes, 4…7 LFOs
@@ -355,7 +357,7 @@ struct LYSynthEditor: View {
             HStack(alignment: .top, spacing: 8) {
                 AnyView(subNoiseColumn).frame(width: 196)
                 AnyView(oscillatorPanel(0)).frame(width: 342)
-                AnyView(oscillatorPanel(1)).frame(width: 342)
+                AnyView(oscillatorPanel(secondOscillator)).frame(width: 342)
                 AnyView(filterPanel).frame(maxWidth: .infinity)
             }
             .frame(height: 336)
@@ -385,7 +387,7 @@ struct LYSynthEditor: View {
             }
             if let oscillator = choosingTable, let frame = anchors["table\(oscillator)"] {
                 LYTableBrowser(
-                    accent: oscillator == 0 ? LYLLTHTheme.teal : LYLLTHTheme.indigo,
+                    accent: Self.oscillatorAccent(oscillator),
                     current: patch.tableName(oscillator),
                     user: tableLibrary.names,
                     chooseFactory: { chooseFactoryTable(oscillator, $0); choosingTable = nil },
@@ -415,20 +417,37 @@ struct LYSynthEditor: View {
 
     // MARK: Oscillators
 
+    private static func oscillatorAccent(_ o: Int) -> Color {
+        o == 0 ? LYLLTHTheme.teal : o == 1 ? LYLLTHTheme.indigo : LYLLTHTheme.lavender
+    }
+
     private func oscillatorPanel(_ o: Int) -> some View {
-        let accent = o == 0 ? LYLLTHTheme.teal : LYLLTHTheme.indigo
+        let accent = Self.oscillatorAccent(o)
         let p = { (local: Int) in LYSynthParameters.oscillator(o, local) }
-        let d = { (aDestination: Int) in o == 0 ? aDestination : aDestination + (LY_DST_B_LEVEL - LY_DST_A_LEVEL) }
-        let d2 = { (aDestination: Int) in o == 0 ? aDestination : aDestination + (LY_DST_B_WARP2 - LY_DST_A_WARP2) }
-        let table = o == 0 ? patch.tableA : patch.tableB
-        let warpNames = o == 0 ? LYSynthNames.warps : LYSynthNames.warpsB
-        let name = o == 0 ? "A" : "B"
+        let e = { (aField: Int) in LYSynthParameters.oscillatorEngine(o, aField) }
+        let first = o == 0 ? 0 : o == 1 ? LY_DST_B_LEVEL - LY_DST_A_LEVEL : LY_DST_C_LEVEL - LY_DST_A_LEVEL
+        let second = o == 0 ? 0 : o == 1 ? LY_DST_B_WARP2 - LY_DST_A_WARP2 : LY_DST_C_WARP2 - LY_DST_A_WARP2
+        let d = { (aDestination: Int) in aDestination + first }
+        let d2 = { (aDestination: Int) in aDestination + second }
+        let table = patch.factoryTable(o)
+        let warpNames = LYSynthNames.warpNames(for: o)
+        let name = ["A", "B", "C"][o]
         let c = context
-        let engineID = LY_OSC_ENGINE_A + o
+        let engineID = e(LY_OSC_ENGINE_A)
         let engine = min(max(Int(c.value(engineID)), 0), Int(LY_OSC_ENGINE_COUNT) - 1)
 
         return LYSynthPanel(title: "OSC \(name)", accent: accent, isOn: c.isOn(p(LY_OSC_ON)), toggle: { c.toggle(p(LY_OSC_ON)) }) {
             HStack(spacing: 4) {
+                if o > 0 {
+                    // B and C share this slot; the other one's button is lit while it plays.
+                    let other = o == 1 ? 2 : 1
+                    LYSynthToggle(title: other == 2 ? "C" : "B", isOn: c.isOn(LYSynthParameters.oscillator(other, LY_OSC_ON)),
+                                  accent: Self.oscillatorAccent(other)) {
+                        if choosingTable == o { choosingTable = nil }
+                        secondOscillator = other
+                    }
+                    .help("Show oscillator \(other == 2 ? "C" : "B") (lit while it plays)")
+                }
                 LYSynthStepper(label: "OCT", text: String(format: "%+d", Int(c.value(p(LY_OSC_OCTAVE)))), accent: accent) {
                     c.set(p(LY_OSC_OCTAVE), c.value(p(LY_OSC_OCTAVE)) + Float($0))
                 }
@@ -439,7 +458,7 @@ struct LYSynthEditor: View {
         } content: {
             VStack(spacing: 7) {
                 Button { choosingTable = choosingTable == o ? nil : o } label: {
-                    LYWavetableView(table: table, customName: o == 0 ? patch.customTableA : patch.customTableB,
+                    LYWavetableView(table: table, customName: patch.customTable(o),
                                     oscillator: o, basePosition: c.value(p(LY_OSC_WTPOS)),
                                     accent: accent, live: live)
                         .overlay(alignment: .topLeading) {
@@ -466,17 +485,17 @@ struct LYSynthEditor: View {
                         c.choice(p(LY_OSC_WARPMODE2), label: "WARP 2", names: warpNames, order: LYSynthNames.warpOrder, accent: accent,
                                  columns: 2, width: 240, anchor: "warp2\(o)")
                     } else if engine == LY_OSC_ENGINE_GRANULAR {
-                        c.knob(LY_GRAIN_SIZE_A + o, accent: accent, diameter: 24, label: "SIZE")
-                        c.knob(LY_GRAIN_DENSITY_A + o, accent: accent, diameter: 24, label: "DENSITY")
-                        c.knob(LY_GRAIN_SPRAY_A + o, accent: accent, diameter: 24, label: "SPRAY")
+                        c.knob(e(LY_GRAIN_SIZE_A), accent: accent, diameter: 24, label: "SIZE")
+                        c.knob(e(LY_GRAIN_DENSITY_A), accent: accent, diameter: 24, label: "DENSITY")
+                        c.knob(e(LY_GRAIN_SPRAY_A), accent: accent, diameter: 24, label: "SPRAY")
                     } else if engine == LY_OSC_ENGINE_SPECTRAL {
-                        c.knob(LY_SPECTRAL_TILT_A + o, accent: accent, diameter: 28, label: "TILT",
+                        c.knob(e(LY_SPECTRAL_TILT_A), accent: accent, diameter: 28, label: "TILT",
                                format: { String(format: "%+.0f", $0 * 100) })
                     } else {
-                        LYSynthStepper(label: "ROOT", text: "\(Int(c.value(LY_SAMPLE_ROOT_A + o)))", accent: accent) { step in
-                            c.set(LY_SAMPLE_ROOT_A + o, c.value(LY_SAMPLE_ROOT_A + o) + Float(step))
+                        LYSynthStepper(label: "ROOT", text: "\(Int(c.value(e(LY_SAMPLE_ROOT_A))))", accent: accent) { step in
+                            c.set(e(LY_SAMPLE_ROOT_A), c.value(e(LY_SAMPLE_ROOT_A)) + Float(step))
                         }
-                        LYSynthToggle(title: "LOOP", isOn: c.isOn(LY_SAMPLE_LOOP_A + o), accent: accent) { c.toggle(LY_SAMPLE_LOOP_A + o) }
+                        LYSynthToggle(title: "LOOP", isOn: c.isOn(e(LY_SAMPLE_LOOP_A)), accent: accent) { c.toggle(e(LY_SAMPLE_LOOP_A)) }
                     }
                 }
 
@@ -549,7 +568,7 @@ struct LYSynthEditor: View {
         let accent = LYLLTHTheme.teal
         return LYSynthPanel(title: "FILTER", accent: accent) {
             HStack(spacing: 3) {
-                ForEach([("A", LY_FILTER_ROUTE_A), ("B", LY_FILTER_ROUTE_B), ("S", LY_FILTER_ROUTE_SUB), ("N", LY_FILTER_ROUTE_NOISE)], id: \.1) { item in
+                ForEach([("A", LY_FILTER_ROUTE_A), ("B", LY_FILTER_ROUTE_B), ("C", LY_FILTER_ROUTE_C), ("S", LY_FILTER_ROUTE_SUB), ("N", LY_FILTER_ROUTE_NOISE)], id: \.1) { item in
                     LYSynthToggle(title: item.0, isOn: c.isOn(item.1), accent: accent) { c.toggle(item.1) }
                         .help("Send \(item.0 == "S" ? "SUB" : item.0 == "N" ? "NOISE" : "OSC " + item.0) through the filters")
                 }
@@ -906,14 +925,14 @@ struct LYSynthEditor: View {
 
     private func chooseFactoryTable(_ oscillator: Int, _ index: Int) {
         var next = patch
-        if oscillator == 0 { next.tableA = index; next.customTableA = nil } else { next.tableB = index; next.customTableB = nil }
+        next.setFactoryTable(oscillator, index)
         patch = next
     }
 
     private func chooseCustomTable(_ oscillator: Int, _ name: String) {
         if let frames = tableLibrary.frames(named: name) { storeTableInProject(name, frames) }
         var next = patch
-        if oscillator == 0 { next.customTableA = name } else { next.customTableB = name }
+        next.setCustomTable(oscillator, name)
         patch = next
     }
 
@@ -943,7 +962,7 @@ struct LYSynthEditor: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("IMPORT / RESYNTHESIZE")
                         .font(LYLLTHTheme.label(11, weight: .bold)).tracking(2)
-                        .foregroundStyle(oscillator == 0 ? LYLLTHTheme.teal : LYLLTHTheme.indigo)
+                        .foregroundStyle(Self.oscillatorAccent(oscillator))
                     Text("CHOOSE HOW THE AUDIO BECOMES A WAVETABLE")
                         .font(LYLLTHTheme.label(7.5, weight: .bold)).tracking(1.1).foregroundStyle(LYLLTHTheme.dim)
                     ForEach(LYWavetableImportMode.allCases) { mode in
@@ -972,7 +991,7 @@ struct LYSynthEditor: View {
                 .padding(16)
                 .frame(width: 520)
                 .background(Color(hex: 0x07080D))
-                .overlay(Rectangle().stroke((oscillator == 0 ? LYLLTHTheme.teal : LYLLTHTheme.indigo).opacity(0.7), lineWidth: 1))
+                .overlay(Rectangle().stroke(Self.oscillatorAccent(oscillator).opacity(0.7), lineWidth: 1))
             }
         }
     }
@@ -987,9 +1006,9 @@ struct LYSynthEditor: View {
     }
 
     private func frames(for oscillator: Int) -> [Float] {
-        let custom = oscillator == 0 ? patch.customTableA : patch.customTableB
+        let custom = patch.customTable(oscillator)
         if let custom, let frames = tableLibrary.frames(named: custom) { return frames }
-        return LYWavetableLibrary.factoryFrames(oscillator == 0 ? patch.tableA : patch.tableB)
+        return LYWavetableLibrary.factoryFrames(patch.factoryTable(oscillator))
     }
 
     @ViewBuilder
@@ -998,14 +1017,14 @@ struct LYSynthEditor: View {
             ZStack {
                 Color.black.opacity(0.65)
                 LYWavetableEditor(
-                    accent: oscillator == 0 ? LYLLTHTheme.teal : LYLLTHTheme.indigo,
-                    initialName: (oscillator == 0 ? patch.customTableA : patch.customTableB) ?? (patch.tableName(oscillator) + " EDIT"),
+                    accent: Self.oscillatorAccent(oscillator),
+                    initialName: patch.customTable(oscillator) ?? (patch.tableName(oscillator) + " EDIT"),
                     initialFrames: frames(for: oscillator),
                     save: { name, frames in
                         let stored = tableLibrary.store(frames, named: name)
                         storeTableInProject(stored, frames)
                         var next = patch
-                        if oscillator == 0 { next.customTableA = stored } else { next.customTableB = stored }
+                        next.setCustomTable(oscillator, stored)
                         instrument?.forgetTables()
                         patch = next
                         editingTable = nil

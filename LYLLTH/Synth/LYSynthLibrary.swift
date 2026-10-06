@@ -339,7 +339,7 @@ final class LYSynthPresetStore: ObservableObject {
         var stored = patch
         stored.name = name.uppercased()
         var file = LYSynthPresetFile(patch: stored)
-        for custom in [patch.customTableA, patch.customTableB].compactMap({ $0 }) {
+        for custom in patch.customTables {
             if let frames = LYWavetableLibrary.shared.frames(named: custom) {
                 file.wavetables[custom] = LYWavetableLibrary.floatData(frames)
             }
